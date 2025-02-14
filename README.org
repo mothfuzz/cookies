@@ -1,4 +1,4 @@
-#+title: Fresh bakes cookies!
+#+title: Fresh baked cookies!
 
 Simple game engine written in Odin with a focus on ease of use & extensibility.
 
