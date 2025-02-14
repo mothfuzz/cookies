@@ -21,6 +21,8 @@ Current features:
 
 Planned features:
 - WebGPU renderer
+- 3D audio
+- gamepad support
 - exporting engine functionality to shared libraries
 - FFI wrappers for various scripting languages (Python for my wife)
 - dynamic mod loading on desktop platforms
