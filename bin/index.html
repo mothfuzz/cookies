@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title id="title">UwU</title>
+    <style>
+      #canvas:focus {
+          outline: none;
+      }
+      #console {
+          padding: 0.5em 1em;
+          background-color: black;
+          color: white;
+      }
+      #run {
+          width: 96px;
+          height: 32px;
+          background-color: lightgrey;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas" tabindex="1"></canvas>
+    <br/>
+    <button id="run">Run!!!</button>
+    <pre id="console"></pre>
+    <!-- Copy `core:sys/wasm/js/odin.js` into your web server -->
+    <script type="text/javascript" src="odin.js"></script>
+    <script type="text/javascript" src="audio.js"></script>
+    <script type="text/javascript">
+
+      //memory
+      const ram = new WebAssembly.Memory({ initial: 2000, maximum: 65536, shared: false });
+      const memory = new odin.WasmMemoryInterface();
+      memory.setMemory(ram);
+      
+      //fully immersive canvas when clicked on
+      var canvas = document.getElementById("canvas");
+      //canvas.focus();
+      canvas.addEventListener("contextmenu", function(e) {
+          e.preventDefault();
+      });
+      canvas.addEventListener("mousedown", function(e) {
+          e.preventDefault();
+      });
+      canvas.addEventListener("keydown", function(e) {
+          e.preventDefault();
+      });
+      canvas.addEventListener("click", function(e) {
+          canvas.focus();
+      });
+
+      //windowing helpers
+      let window_imports = {
+          set_size: function(width, height) {
+              canvas.width = width;
+              canvas.height = height;
+          },
+      };
+      let audio = new AudioInterface(memory);
+      let js_imports = {
+          "window_imports": window_imports,
+          "audio": audio.getInterface(),
+      };
+
+      document.getElementById("run").addEventListener("click", async function() {
+          canvas.focus();
+          audio.reset();
+          odin.runWasm("audio_example.wasm", document.getElementById("console"), js_imports, memory);
+      });
+      
+    </script>
+  </body>
+</html>
