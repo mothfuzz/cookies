@@ -1,0 +1,28 @@
+#+title: Fresh bakes cookies!
+
+Simple game engine written in Odin with a focus on ease of use & extensibility.
+
+Designed to support desktop and web out of the box, though it will likely run anywhere with some tweaks.
+
+Vendored binaries & build scripts are provided for Windows.
+The web build is using native web technologies and should run on any modern browser.
+To build/run on any other platform, simply make sure you have the following libraries and their dependencies installed:
+- SDL2
+- SDL2_mixer
+- SDL2_image
+
+Special thanks to the SDL team for their commitment to easy cross-platform game libraries!
+
+Current features:
+- window/context creation
+- keyboard & mouse input
+- main loop with fixed timestep for game updates & variable rate for drawing
+- basic audio (sound + music loading, playback, and looping)
+
+Planned features:
+- WebGPU renderer
+- exporting engine functionality to shared libraries
+- FFI wrappers for various scripting languages (Python for my wife)
+- dynamic mod loading on desktop platforms
+- parallel actor system for in-game entities
+- deterministic gamestate, serializability, saving and loading
