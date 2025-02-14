@@ -8,3 +8,5 @@ for %%a in ("examples\*.odin") do (
 )
 
 cp audio/audio.js bin/audio.js
+
+echo start a web server in bin to run it!!

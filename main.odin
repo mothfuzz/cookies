@@ -1,9 +1,13 @@
 package main
 
+//example starter project
+//can be run in one line with:
+//odin run . -out:bin/cookies.exe
+
 import "core:fmt"
-import "../engine"
-import "../window"
-import "../input"
+import "engine"
+import "window"
+import "input"
 
 init :: proc() {
     window.set_tick_rate(30)

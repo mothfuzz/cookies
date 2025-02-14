@@ -8,3 +8,5 @@ for %%a in ("bin\*.wasm") do (
     echo deleting %%a
     del %%a
 )
+
+del bin\audio.js
