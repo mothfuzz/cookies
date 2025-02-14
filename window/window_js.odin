@@ -51,7 +51,7 @@ step :: proc "c" (delta_time: f64) -> bool {
         return false
     }
     accumulator += delta_time
-    for ; accumulator > 0; accumulator -= 1000.0/tick_rate {
+    for ; accumulator > 0; accumulator -= 1.0/f64(tick_rate) {
         for hook in pre_tick_hooks {
             hook()
         }
