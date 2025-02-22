@@ -7,6 +7,6 @@ for %%a in ("examples\*.odin") do (
     odin build %%a -out:bin\%%~na.wasm -file -target:js_wasm32
 )
 
-cp audio/audio.js bin/audio.js
+cp engine/audio/audio.js bin/audio.js
 
 echo start a web server in bin to run it!!

@@ -1,9 +1,9 @@
 package main
 
 import "../engine"
-import "../window"
-import "../input"
-import "../audio"
+import "../engine/window"
+import "../engine/input"
+import "../engine/audio"
 
 import "core:fmt"
 

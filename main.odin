@@ -6,12 +6,28 @@ package main
 
 import "core:fmt"
 import "engine"
-import "window"
-import "input"
+import "engine/window"
+import "engine/input"
+import "engine/scene"
+
+main_scene: scene.Scene
+
+TestActor :: struct {
+    i: i32,
+    f: f32,
+}
+
+test_tick :: proc(a: ^scene.Actor) {
+    self := (^TestActor)(a.data)
+    fmt.println("there's a thing:", self.i, self.f)
+}
 
 init :: proc() {
     window.set_tick_rate(30)
     window.set_size(640, 400)
+
+    a := scene.spawn(&main_scene, TestActor{i=3, f=4}, {tick=test_tick})
+    fmt.println(a)
 }
 
 accumulator: int = 0
@@ -43,9 +59,14 @@ tick :: proc() {
     if input.mouse_pressed(.Middle) {
         fmt.println("middle click!!!", accumulator)
     }
+    scene.tick(&main_scene)
+}
+
+draw :: proc(t: f64) {
+    scene.draw(&main_scene, t)
 }
 
 main :: proc() {
     fmt.println("HEWWO!!!")
-    engine.boot(init, tick, nil, nil)
+    engine.boot(init, tick, draw, nil)
 }
