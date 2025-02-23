@@ -10,7 +10,7 @@ import "engine/window"
 import "engine/input"
 import "engine/scene"
 
-main_scene: scene.Scene
+main_scene: scene.Scene = {name="Eve"}
 
 TestActor :: struct {
     i: i32,
@@ -19,15 +19,29 @@ TestActor :: struct {
 
 test_tick :: proc(a: ^scene.Actor) {
     self := (^TestActor)(a.data)
-    fmt.println("there's a thing:", self.i, self.f)
+    //fmt.println("there's a thing:", self.i, self.f)
+    if input.key_pressed(.Key_K) {
+        scene.kill(a.scene, a.id)
+        return
+    }
+}
+
+test_init :: proc(a: ^scene.Actor) {
+    fmt.println("hi! my name is", a.name, "and I belong to", a.scene.name)
+}
+
+test_kill :: proc(a: ^scene.Actor) {
+    fmt.println("I was killed!!")
 }
 
 init :: proc() {
     window.set_tick_rate(30)
     window.set_size(640, 400)
 
-    a := scene.spawn(&main_scene, TestActor{i=3, f=4}, {tick=test_tick})
-    fmt.println(a)
+    for i := 0; i < 16; i += 1 {
+        a := scene.spawn(&main_scene, TestActor{i=3, f=4}, {init=test_init, tick=test_tick, kill=test_kill}, "Joe")
+        fmt.println(a)
+    }
 }
 
 accumulator: int = 0
@@ -66,7 +80,11 @@ draw :: proc(t: f64) {
     scene.draw(&main_scene, t)
 }
 
+kill :: proc() {
+    scene.destroy(&main_scene)
+}
+
 main :: proc() {
     fmt.println("HEWWO!!!")
-    engine.boot(init, tick, draw, nil)
+    engine.boot(init, tick, draw, kill)
 }
