@@ -49,7 +49,6 @@ get_event_type :: proc($E: typeid) -> (typename: string, ok: bool) {
 when ODIN_OS == .JS {
     subscribe :: proc(po: ^Post_Office, id: ActorId, $E: typeid, handler: Handler) {
         if typename, ok := get_event_type(E); ok {
-            fmt.println("subscribing actor", id, "to", typename)
             append(&po.subscribes, Subscribe{typename, id, handler})
         } else {
             fmt.eprintln("Event must be a named type.")
@@ -57,7 +56,6 @@ when ODIN_OS == .JS {
     }
     unsubscribe :: proc(po: ^Post_Office, id: ActorId, $E: typeid) {
         if typename, ok := get_event_type(E); ok {
-            fmt.println("unsubscribing actor", id, "from", typename)
             append(&po.subscribes, Subscribe{typename, id})
         }
     }
@@ -65,7 +63,6 @@ when ODIN_OS == .JS {
     subscribe :: proc(po: ^Post_Office, id: ActorId, $E: typeid, handler: Handler) {
         if typename, ok := get_event_type(E); ok {
             if sync.mutex_guard(&po.subscribes_mutex) {
-                fmt.println("subscribing actor", id, "to", typename)
                 append(&po.subscribes, Subscribe{typename, id, handler})
             }
         } else {
@@ -75,7 +72,6 @@ when ODIN_OS == .JS {
     unsubscribe :: proc(po: ^Post_Office, id: ActorId, $E: typeid) {
         if typename, ok := get_event_type(E); ok {
             if sync.mutex_guard(&po.unsubscribes_mutex) {
-                fmt.println("unsubscribing actor", id, "from", typename)
                 append(&po.unsubscribes, Unsubscribe{typename, id})
             }
         }
@@ -87,7 +83,6 @@ unsubscribe_all :: proc(po: ^Post_Office, id: ActorId) {
     for event_type, &route in po.routes {
         if mailbox, ok := route[id]; ok {
             //no need for mutex because this happens upon actor death
-            fmt.println("unsubscribing actor", id, "from", event_type)
             append(&po.unsubscribes, Unsubscribe{event_type, id})
         }
     }
