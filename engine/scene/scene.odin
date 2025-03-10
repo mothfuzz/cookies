@@ -22,7 +22,7 @@ Actor :: struct {
     name: string,
 }
 
-Scene :: struct {
+Scene :: struct #no_copy {
     actors: map[ActorId]Actor,
     baseid: ActorId,
     spawns: [dynamic]Actor,
@@ -32,6 +32,8 @@ Scene :: struct {
     pool: ^thread.Pool,
     ids: [dynamic]ActorId,
     name: string,
+
+    using post_office: Post_Office,
 }
 
 destroy :: proc(s: ^Scene) {
@@ -102,6 +104,13 @@ work :: proc(t: thread.Task) {
     }
 }
 
+work_events :: proc(t: thread.Task) {
+    s := (^Scene)(t.data)
+    starting_index := t.user_index
+    ending_index := min(len(s.ids), starting_index + max(1, len(s.ids)/num_workers()))
+    process_events(s, starting_index, ending_index)
+}
+
 tick :: proc(s: ^Scene) {
 
     if s.pool == nil && thread.IS_SUPPORTED {
@@ -122,6 +131,7 @@ tick :: proc(s: ^Scene) {
             if a.kill != nil {
                 a->kill()
             }
+            unsubscribe_all(s, a.id)
             free(a.data)
             delete_key(&s.actors, id)
         }
@@ -130,14 +140,23 @@ tick :: proc(s: ^Scene) {
 
     update_ids(s)
 
+    process_subscriptions(s)
+
     if thread.IS_SUPPORTED {
         //yay parallel!
+
         chunk_size := max(1, len(s.ids)/num_workers())
+        for i := 0; i < len(s.ids); i += chunk_size {
+            thread.pool_add_task(s.pool, context.allocator, work_events, s, i)
+        }
+        thread.pool_finish(s.pool)
+
         for i := 0; i < len(s.ids); i += chunk_size {
             thread.pool_add_task(s.pool, context.allocator, work, s, i)
         }
         thread.pool_finish(s.pool)
     } else {
+        process_events(s, 0, len(s.ids))
         for id, &actor in s.actors {
             if actor.tick != nil {
                 actor->tick()

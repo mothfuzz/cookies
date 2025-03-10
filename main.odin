@@ -17,17 +17,33 @@ TestActor :: struct {
     f: f32,
 }
 
+MyEvent :: struct {
+    f: f32,
+}
+
+my_event_handler :: proc(a: ^scene.Actor, e: ^scene.Event) {
+    self := (^TestActor)(a.data)
+    event := (^MyEvent)(e.data)
+    fmt.println("actor", a.id, "got a float:", event.f)
+}
+
 test_tick :: proc(a: ^scene.Actor) {
     self := (^TestActor)(a.data)
-    //fmt.println("there's a thing:", self.i, self.f)
     if input.key_pressed(.Key_K) {
         scene.kill(a.scene, a.id)
         return
+    }
+    if input.key_pressed(.Key_E) {
+        scene.send(a.scene, 1, MyEvent{3.14})
+    }
+    if input.key_pressed(.Key_P) {
+        scene.publish(a.scene, MyEvent{4.13})
     }
 }
 
 test_init :: proc(a: ^scene.Actor) {
     fmt.println("hi! my name is", a.name, "and I belong to", a.scene.name)
+    scene.subscribe(a.scene, a.id, MyEvent, my_event_handler)
 }
 
 test_kill :: proc(a: ^scene.Actor) {
