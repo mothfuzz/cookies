@@ -18,6 +18,7 @@ Current features:
 - keyboard & mouse input
 - main loop with fixed timestep for game updates & variable rate for drawing
 - basic audio (sound + music loading, playback, and looping)
+- parallel actor system for in-game entities
 
 Planned features:
 - WebGPU renderer
@@ -26,5 +27,4 @@ Planned features:
 - exporting engine functionality to shared libraries
 - FFI wrappers for various scripting languages (Python for my wife)
 - dynamic mod loading on desktop platforms
-- parallel actor system for in-game entities
 - deterministic gamestate, serializability, saving and loading
