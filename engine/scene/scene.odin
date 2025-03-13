@@ -108,7 +108,11 @@ work_events :: proc(t: thread.Task) {
     s := (^Scene)(t.data)
     starting_index := t.user_index
     ending_index := min(len(s.ids), starting_index + max(1, len(s.ids)/num_workers()))
-    process_events(s, starting_index, ending_index)
+    for i := starting_index; i < ending_index; i += 1 {
+        actor := &s.actors[s.ids[i]]
+        //fmt.println("processing actor", actor.id)
+        process_events(s, actor)
+    }
 }
 
 tick :: proc(s: ^Scene) {
@@ -156,7 +160,9 @@ tick :: proc(s: ^Scene) {
         }
         thread.pool_finish(s.pool)
     } else {
-        process_events(s, 0, len(s.ids))
+        for id, &actor in s.actors {
+            process_events(s, &actor)
+        }
         for id, &actor in s.actors {
             if actor.tick != nil {
                 actor->tick()

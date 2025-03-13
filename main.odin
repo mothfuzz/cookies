@@ -36,9 +36,6 @@ test_tick :: proc(a: ^scene.Actor) {
     if input.key_pressed(.Key_E) {
         scene.send(a.scene, 1, MyEvent{3.14})
     }
-    if input.key_pressed(.Key_P) {
-        scene.publish(a.scene, MyEvent{4.13})
-    }
 }
 
 test_init :: proc(a: ^scene.Actor) {
@@ -88,6 +85,9 @@ tick :: proc() {
     }
     if input.mouse_pressed(.Middle) {
         fmt.println("middle click!!!", accumulator)
+    }
+    if input.key_pressed(.Key_P) {
+        scene.publish(&main_scene, MyEvent{4.13})
     }
     scene.tick(&main_scene)
 }

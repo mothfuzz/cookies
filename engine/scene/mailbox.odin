@@ -33,6 +33,7 @@ Unsubscribe :: struct {
 
 Post_Office :: struct {
     routes: map[string]map[ActorId]^Mailbox, //must be pointer because queue_mutex must not change location
+    subscriptions: map[ActorId]map[string]struct{},
     subscribes_mutex: sync.Mutex,
     subscribes: [dynamic]Subscribe,
     unsubscribes_mutex: sync.Mutex,
@@ -102,6 +103,9 @@ process_subscriptions :: proc(po: ^Post_Office) {
         m.handler = subscribe.handler
         route[subscribe.id] = m
         po.routes[subscribe.event_type] = route
+        subs := po.subscriptions[subscribe.id] or_else make(map[string]struct{})
+        subs[subscribe.event_type] = {}
+        po.subscriptions[subscribe.id] = subs
     }
     clear(&po.subscribes)
 
@@ -113,6 +117,9 @@ process_subscriptions :: proc(po: ^Post_Office) {
                 free(mailbox)
             }
             delete_key(route, unsubscribe.id)
+        }
+        if subscription, ok := &po.subscriptions[unsubscribe.id]; ok {
+            delete_key(subscription, unsubscribe.event_type)
         }
     }
     clear(&po.unsubscribes)
@@ -183,14 +190,13 @@ when ODIN_OS == .JS {
 
 //called pre-tick
 @(private)
-process_events :: proc(scene: ^Scene, starting_index, ending_index: int) {
-    for typename, &route in scene.routes {
-        for i := starting_index; i < ending_index; i += 1 {
-            id := scene.ids[i]
-            if mailbox, ok := route[id]; ok {
+process_events :: proc(po: ^Post_Office, actor: ^Actor) {
+    if subs, ok := po.subscriptions[actor.id]; ok {
+        for event_type in subs {
+            if mailbox, ok := po.routes[event_type][actor.id]; ok {
                 buffer_events(mailbox)
                 for &event in mailbox.inbox {
-                    mailbox.handler(&scene.actors[id], &event)
+                    mailbox.handler(actor, &event)
                     free(event.data)
                 }
                 clear(&mailbox.inbox)
