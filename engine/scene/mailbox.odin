@@ -193,14 +193,13 @@ when ODIN_OS == .JS {
 process_events :: proc(po: ^Post_Office, actor: ^Actor) {
     if subs, ok := po.subscriptions[actor.id]; ok {
         for event_type in subs {
-            if mailbox, ok := po.routes[event_type][actor.id]; ok {
-                buffer_events(mailbox)
-                for &event in mailbox.inbox {
-                    mailbox.handler(actor, &event)
-                    free(event.data)
-                }
-                clear(&mailbox.inbox)
+            mailbox := po.routes[event_type][actor.id]
+            buffer_events(mailbox)
+            for &event in mailbox.inbox {
+                mailbox.handler(actor, &event)
+                free(event.data)
             }
+            clear(&mailbox.inbox)
         }
     }
 }
