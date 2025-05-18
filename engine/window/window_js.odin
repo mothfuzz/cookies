@@ -50,6 +50,9 @@ step :: proc "c" (delta_time: f64) -> bool {
         return true
     }
     if stopped {
+        for hook in quit_hooks {
+            hook()
+        }
         if user_quit != nil {
             user_quit()
         }
@@ -79,6 +82,12 @@ step :: proc "c" (delta_time: f64) -> bool {
     return true
 }
 
+resize_event :: proc(e: js.Event) {
+    for hook in resize_hooks {
+        hook()
+    }
+}
+
 run :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
     main_context = context
 
@@ -91,5 +100,8 @@ run :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
     user_tick = tick
     user_draw = draw
     user_quit = quit
+
+    js.add_window_event_listener(.Resize, nil, resize_event)
+
     started = true
 }

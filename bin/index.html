@@ -27,6 +27,7 @@
     <!-- Copy `core:sys/wasm/js/odin.js` into your web server -->
     <script type="text/javascript" src="odin.js"></script>
     <script type="text/javascript" src="audio.js"></script>
+    <script type="text/javascript" src="wgpu.js"></script>
     <script type="text/javascript">
 
       //memory
@@ -58,9 +59,11 @@
           },
       };
       let audio = new AudioInterface(memory);
+      let wgpu = new odin.WebGPUInterface(memory);
       let js_imports = {
           "window_imports": window_imports,
           "audio": audio.getInterface(),
+          "wgpu": wgpu.getInterface(),
       };
 
       document.getElementById("run").addEventListener("click", async function() {

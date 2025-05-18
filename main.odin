@@ -9,6 +9,7 @@ import "engine"
 import "engine/window"
 import "engine/input"
 import "engine/scene"
+import "engine/graphics"
 
 main_scene: scene.Scene = {name="Eve"}
 

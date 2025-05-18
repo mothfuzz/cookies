@@ -9,4 +9,4 @@ for %%a in ("bin\*.wasm") do (
     del %%a
 )
 
-del bin\audio.js
+del bin\*.js

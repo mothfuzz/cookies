@@ -8,10 +8,10 @@ import "vendor:sdl2"
 
 window: ^sdl2.Window
 
-set_size :: proc(width: uint, height: uint) {
+set_size :: proc "c" (width: uint, height: uint) {
     sdl2.SetWindowSize(window, i32(width), i32(height))
 }
-get_size :: proc() -> [2]uint {
+get_size :: proc "c" () -> [2]uint {
     rect: [2]i32
     sdl2.GetWindowSize(window, &rect.x, &rect.y)
     return {uint(rect.x), uint(rect.y)}
@@ -31,7 +31,7 @@ close :: proc() {
 run :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
     sdl2.Init(sdl2.INIT_EVERYTHING)
     defer sdl2.Quit()
-    window = sdl2.CreateWindow("hehe", sdl2.WINDOWPOS_UNDEFINED, sdl2.WINDOWPOS_UNDEFINED, 640, 400, sdl2.WINDOW_SHOWN)
+    window = sdl2.CreateWindow("hehe", sdl2.WINDOWPOS_UNDEFINED, sdl2.WINDOWPOS_UNDEFINED, 640, 400, sdl2.WINDOW_SHOWN | sdl2.WINDOW_RESIZABLE)
     defer sdl2.DestroyWindow(window)
 
     for hook in init_hooks {
@@ -50,6 +50,13 @@ run :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
         for sdl2.PollEvent(&e) {
             if e.type == .QUIT {
                 break main_loop
+            }
+            if e.type == .WINDOWEVENT{
+                if e.window.event == .RESIZED {
+                    for hook in resize_hooks {
+                        hook()
+                    }
+                }
             }
         }
         now := sdl2.GetTicks()
@@ -76,6 +83,9 @@ run :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
         }
     }
 
+    for hook in quit_hooks {
+        hook()
+    }
     if quit != nil {
         quit()
     }
