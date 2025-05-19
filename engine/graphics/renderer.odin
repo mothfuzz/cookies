@@ -1,6 +1,7 @@
 package graphics
 
 import "core:fmt"
+import "core:math/linalg"
 import "base:runtime"
 import "vendor:wgpu"
 import "../window"
@@ -83,7 +84,7 @@ configure_surface :: proc() {
         mipLevelCount = 1,
         sampleCount = 4,
         dimension = ._2D,
-        format = with_srgb(ren.config.format),
+        format = with_srgb(ren.config.format), //same as surface view
         usage = {.RenderAttachment},
     })
     ren.msaa_view = wgpu.TextureCreateView(ren.msaa_tex, nil)
@@ -268,7 +269,7 @@ render :: proc(t: f64) {
             loadOp = .Clear,
             storeOp = .Store,
             depthSlice = wgpu.DEPTH_SLICE_UNDEFINED, //the hell?
-            clearValue = {0.4, 0.6, 0.9, 1.0},
+            clearValue = linalg.vector4_srgb_to_linear([4]f64{0.4, 0.6, 0.9, 1.0}),
         },
     })
 

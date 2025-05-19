@@ -24,9 +24,13 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     return v;
 }
 
+fn gamma_uncorrect(color: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(pow(color.rgb, vec3<f32>(2.2)), color.a);
+}
 
 @fragment
 fn fs_main(v: VSOut) -> @location(0) vec4<f32> {
-    return mix(v.color, vec4<f32>(v.position.x/screen_size.x, v.position.y/screen_size.y, 1.0, 1.0), 0.0);
+    return mix(v.color, vec4<f32>(v.position.x/screen_size.x, v.position.y/screen_size.y, 1.0, 1.0), 0.6);
     //return v.color;
+    //return gamma_uncorrect(vec4<f32>(v.color));
 }
