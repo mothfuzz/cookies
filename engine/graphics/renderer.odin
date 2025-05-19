@@ -18,17 +18,54 @@ Renderer :: struct {
     shader: wgpu.ShaderModule,
     layout: wgpu.PipelineLayout,
     pipeline: wgpu.RenderPipeline,
-    ready: bool
+    ready: bool,
 }
 ren: Renderer
 
-resize_surface :: proc() {
-    fmt.println("resizing...")
+with_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
+    //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
+    #partial switch format {
+    case .RGBA8Unorm:
+        return .RGBA8UnormSrgb
+    case .BGRA8Unorm:
+        return .BGRA8UnormSrgb
+    case:
+        return format
+    }
+}
+without_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
+    //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
+    #partial switch format {
+    case .RGBA8UnormSrgb:
+        return .RGBA8Unorm
+    case .BGRA8UnormSrgb:
+        return .BGRA8Unorm
+    case:
+        return format
+    }
+}
+
+tex_format: wgpu.TextureFormat
+view_format: wgpu.TextureFormat
+configure_surface :: proc() {
+    fmt.println("reconfiguring draw surface...")
     size := window.get_size()
+    caps, status := wgpu.SurfaceGetCapabilities(ren.surface, ren.adapter)
+    if status == .Error {
+        panic("Unable to get surface capabilities!")
+    }
+    if caps.formatCount == 0 {
+        panic("No available surface formats!")
+    }
+    //fmt.println(caps)
+    tex_format = without_srgb(caps.formats[0])
+    view_format = with_srgb(caps.formats[0])
     ren.config = wgpu.SurfaceConfiguration {
         device = ren.device,
         usage = {.RenderAttachment},
-        format = .BGRA8Unorm,
+        format = tex_format,
+        viewFormatCount = 1,
+        viewFormats = &view_format,
         width = u32(size.x),
         height = u32(size.y),
         presentMode = .Fifo,
@@ -46,7 +83,7 @@ resize_surface :: proc() {
         mipLevelCount = 1,
         sampleCount = 4,
         dimension = ._2D,
-        format = ren.config.format,
+        format = with_srgb(ren.config.format),
         usage = {.RenderAttachment},
     })
     ren.msaa_view = wgpu.TextureCreateView(ren.msaa_tex, nil)
@@ -61,6 +98,9 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
     wgpu.AdapterRequestDevice(ren.adapter, nil, {callback = request_device, userdata1=userdata1})
 }
 
+screen_size_buffer: wgpu.Buffer
+uniform_bind_group: wgpu.BindGroup
+
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
     context = (^runtime.Context)(userdata1)^
     if status != .Success || device == nil {
@@ -68,7 +108,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     }
     ren.device = device
 
-    resize_surface()
+    configure_surface()
 
     ren.queue = wgpu.DeviceGetQueue(ren.device)
 
@@ -78,19 +118,72 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
             code = #load("renderer.wgsl"),
         },
     })
-    ren.layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{})
+
+    //bind group layouts
+    entries := []wgpu.BindGroupLayoutEntry{
+        wgpu.BindGroupLayoutEntry{
+            binding = 0,
+            visibility = {.Vertex, .Fragment},
+            buffer = {type=.Uniform},
+        },
+    }
+    uniform_layout := wgpu.DeviceCreateBindGroupLayout(ren.device, &{
+        entryCount = len(entries),
+        entries = raw_data(entries),
+    })
+    ren.layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
+        bindGroupLayoutCount = 1,
+        bindGroupLayouts = &uniform_layout,
+    })
+
+    fmt.println("size_of([2]f32):", size_of([2]f32))
+    screen_size_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of([2]f32)})
+    bindings := []wgpu.BindGroupEntry{
+        {binding = 0, buffer = screen_size_buffer, size = size_of([2]f32)},
+    }
+    uniform_bind_group = wgpu.DeviceCreateBindGroup(device, &{
+        layout = uniform_layout,
+        entryCount = len(bindings),
+        entries = raw_data(bindings),
+    })
+
+    vertex_attributes := []wgpu.VertexAttribute{
+        //position
+        {
+            format = .Float32x3,
+            offset = 0,
+            shaderLocation = 0,
+        },
+        //texcoords
+        {
+            format = .Float32x2,
+            offset = 0,
+            shaderLocation = 1,
+        },
+    }
+    vertex_buffers := []wgpu.VertexBufferLayout{
+        {
+            stepMode = .Vertex,
+            arrayStride = 0,
+            attributeCount = len(vertex_attributes),
+            attributes = raw_data(vertex_attributes)
+        }
+    }
+
     ren.pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         layout = ren.layout,
         vertex = {
             module = ren.shader,
             entryPoint = "vs_main",
+            //bufferCount = len(vertex_buffers),
+            //buffers = raw_data(vertex_buffers),
         },
         fragment = &{
             module = ren.shader,
             entryPoint = "fs_main",
-            targetCount= 1,
+            targetCount = 1,
             targets = &wgpu.ColorTargetState{
-                format = ren.config.format, //same as surface, since this outputs to screen.
+                format = with_srgb(ren.config.format), //same as surface, since this outputs to screen.
                 writeMask = wgpu.ColorWriteMaskFlags_All,
             },
         },
@@ -109,7 +202,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
 window_hooks :: proc() {
     append(&window.init_hooks, init)
     append(&window.quit_hooks, quit)
-    append(&window.resize_hooks, resize_surface)
+    append(&window.resize_hooks, configure_surface)
     append(&window.draw_hooks, render)
 }
 
@@ -150,17 +243,21 @@ render :: proc(t: f64) {
         if surface_tex.texture != nil {
             wgpu.TextureRelease(surface_tex.texture)
         }
-        resize_surface()
+        configure_surface()
         return
     case .OutOfMemory, .DeviceLost, .Error:
         fmt.eprintln(surface_tex.status)
-        panic("Surface texture lost.")
+        panic("Surface texture lost! Unable to draw to screen.")
     }
     defer wgpu.TextureRelease(surface_tex.texture)
-    screen := wgpu.TextureCreateView(surface_tex.texture, nil)
+    screen := wgpu.TextureCreateView(surface_tex.texture, &{format=with_srgb(ren.config.format), mipLevelCount=1, arrayLayerCount=1})
     defer wgpu.TextureViewRelease(screen)
     command_encoder := wgpu.DeviceCreateCommandEncoder(ren.device, nil)
     defer wgpu.CommandEncoderRelease(command_encoder)
+
+    window_size := window.get_size()
+    screen_size := [2]f32{f32(window_size.x), f32(window_size.y)}
+    wgpu.QueueWriteBuffer(ren.queue, screen_size_buffer, 0, raw_data(&screen_size), size_of([2]f32))
 
     //draw loop
     render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
@@ -176,6 +273,7 @@ render :: proc(t: f64) {
     })
 
     wgpu.RenderPassEncoderSetPipeline(render_pass, ren.pipeline)
+    wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
     wgpu.RenderPassEncoderDraw(render_pass, 3, 1, 0, 0) //draw 3 vertices, 1 instance.
 
     wgpu.RenderPassEncoderEnd(render_pass)
