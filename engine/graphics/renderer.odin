@@ -4,7 +4,6 @@ import "core:fmt"
 import "core:math/linalg"
 import "base:runtime"
 import "vendor:wgpu"
-import "../window"
 
 Renderer :: struct {
     ctx: runtime.Context,
@@ -48,9 +47,12 @@ without_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
 
 tex_format: wgpu.TextureFormat
 view_format: wgpu.TextureFormat
-configure_surface :: proc() {
+screen_size: [2]u32
+configure_surface :: proc(size: [2]uint = 0) {
+    if size != 0 {
+        screen_size = {u32(size.x), u32(size.y)}
+    }
     fmt.println("reconfiguring draw surface...")
-    size := window.get_size()
     caps, status := wgpu.SurfaceGetCapabilities(ren.surface, ren.adapter)
     if status == .Error {
         panic("Unable to get surface capabilities!")
@@ -67,8 +69,8 @@ configure_surface :: proc() {
         format = tex_format,
         viewFormatCount = 1,
         viewFormats = &view_format,
-        width = u32(size.x),
-        height = u32(size.y),
+        width = screen_size.x,
+        height = screen_size.y,
         presentMode = .Fifo,
         alphaMode = .Opaque,
     }
@@ -189,21 +191,14 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     ren.ready = true
 }
 
-@(init)
-window_hooks :: proc() {
-    append(&window.init_hooks, init)
-    append(&window.quit_hooks, quit)
-    append(&window.resize_hooks, configure_surface)
-    append(&window.draw_hooks, render)
-}
-
 ctx: runtime.Context
-init :: proc() {
+init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
+    screen_size = {u32(size.x), u32(size.y)}
     ren.instance = wgpu.CreateInstance(nil)
     if ren.instance == nil {
         panic("WebGPU not supported.")
     }
-    ren.surface = window.get_wgpu_surface(ren.instance)
+    ren.surface = surface_proc(ren.instance)
     ctx = context
     wgpu.InstanceRequestAdapter(ren.instance, &{compatibleSurface = ren.surface}, {callback=request_adapter, userdata1=&ctx})
 }
@@ -247,8 +242,7 @@ render :: proc(t: f64) {
     command_encoder := wgpu.DeviceCreateCommandEncoder(ren.device, nil)
     defer wgpu.CommandEncoderRelease(command_encoder)
 
-    window_size := window.get_size()
-    screen_size := [2]f32{f32(window_size.x), f32(window_size.y)}
+    screen_size := [2]f32{f32(screen_size.x), f32(screen_size.y)}
     wgpu.QueueWriteBuffer(ren.queue, screen_size_buffer, 0, raw_data(&screen_size), size_of([2]f32))
 
     //draw loop

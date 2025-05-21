@@ -74,41 +74,4 @@ js2key :: proc(e: js.Event) -> Scancode {
 }
 
 init :: proc() {
-    js.add_event_listener("canvas", .Key_Down, nil, proc(e: js.Event) {
-        js.event_prevent_default()
-        js.event_stop_propagation()
-        //fmt.println(js2key(e))
-        key := js2key(e)
-        keys_current_frame[key] = true
-    })
-    js.add_event_listener("canvas", .Key_Up, nil, proc(e: js.Event) {
-        js.event_prevent_default()
-        js.event_stop_propagation()
-        key := js2key(e)
-        keys_current_frame[key] = false
-    })
-    js.add_event_listener("canvas", .Mouse_Down, nil, proc(e: js.Event) {
-        //0, 1, 2
-        mouse_buttons_current_frame[MouseButton(e.mouse.button)] = true
-    })
-    js.add_event_listener("canvas", .Mouse_Up, nil, proc(e: js.Event) {
-        //0, 1, 2
-        mouse_buttons_current_frame[MouseButton(e.mouse.button)] = false
-    })
-    js.add_event_listener("canvas", .Mouse_Move, nil, proc(e: js.Event) {
-        pos := e.mouse.offset
-        rect := window.get_size()
-        mouse_position.x = i32(pos.x) - i32(rect.x/2)
-        mouse_position.y = i32(pos.y) - i32(rect.y/2)
-        //fmt.println(mouse_position)
-    })
-}
-
-update :: proc() {
-    for pressed, key in keys_current_frame {
-        keys_previous_frame[key] = pressed
-    }
-    for pressed, button in mouse_buttons_current_frame {
-        mouse_buttons_previous_frame[button] = pressed
-    }
 }

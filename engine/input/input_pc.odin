@@ -2,90 +2,70 @@
 
 package input
 
-import "../window"
 import "vendor:sdl2"
 import "core:fmt"
 
-init :: proc() {
-    //...
-}
-
-update :: proc() {
-    for pressed, key in keys_current_frame {
-        keys_previous_frame[key] = pressed
+sdl2key :: proc(e: sdl2.Event) -> Scancode {
+    #partial switch e.key.keysym.scancode {
+    case sdl2.SCANCODE_0: return .Key_0
+    case sdl2.SCANCODE_1: return .Key_1
+    case sdl2.SCANCODE_2: return .Key_2
+    case sdl2.SCANCODE_3: return .Key_3
+    case sdl2.SCANCODE_4: return .Key_4
+    case sdl2.SCANCODE_5: return .Key_5
+    case sdl2.SCANCODE_6: return .Key_6
+    case sdl2.SCANCODE_7: return .Key_7
+    case sdl2.SCANCODE_8: return .Key_8
+    case sdl2.SCANCODE_9: return .Key_9
+    case sdl2.SCANCODE_A: return .Key_A
+    case sdl2.SCANCODE_B: return .Key_B
+    case sdl2.SCANCODE_C: return .Key_C
+    case sdl2.SCANCODE_D: return .Key_D
+    case sdl2.SCANCODE_E: return .Key_E
+    case sdl2.SCANCODE_F: return .Key_F
+    case sdl2.SCANCODE_G: return .Key_G
+    case sdl2.SCANCODE_H: return .Key_H
+    case sdl2.SCANCODE_I: return .Key_I
+    case sdl2.SCANCODE_J: return .Key_J
+    case sdl2.SCANCODE_K: return .Key_K
+    case sdl2.SCANCODE_L: return .Key_L
+    case sdl2.SCANCODE_M: return .Key_M
+    case sdl2.SCANCODE_N: return .Key_N
+    case sdl2.SCANCODE_O: return .Key_O
+    case sdl2.SCANCODE_P: return .Key_P
+    case sdl2.SCANCODE_Q: return .Key_Q
+    case sdl2.SCANCODE_R: return .Key_R
+    case sdl2.SCANCODE_S: return .Key_S
+    case sdl2.SCANCODE_T: return .Key_T
+    case sdl2.SCANCODE_U: return .Key_U
+    case sdl2.SCANCODE_V: return .Key_V
+    case sdl2.SCANCODE_W: return .Key_W
+    case sdl2.SCANCODE_X: return .Key_X
+    case sdl2.SCANCODE_Y: return .Key_Y
+    case sdl2.SCANCODE_Z: return .Key_Z
+    case sdl2.SCANCODE_RETURN: return .Key_Return
+    case sdl2.SCANCODE_ESCAPE: return .Key_Escape
+    case sdl2.SCANCODE_BACKSPACE: return .Key_Backspace
+    case sdl2.SCANCODE_TAB: return .Key_Tab
+    case sdl2.SCANCODE_SPACE: return .Key_Space
+    case sdl2.SCANCODE_LSHIFT: return .Key_LeftShift
+    case sdl2.SCANCODE_LCTRL: return .Key_LeftCtrl
+    case sdl2.SCANCODE_LALT: return .Key_LeftAlt
+    case sdl2.SCANCODE_RSHIFT: return .Key_RightShift
+    case sdl2.SCANCODE_RCTRL: return .Key_RightCtrl
+    case sdl2.SCANCODE_RALT: return .Key_RightAlt
+    case sdl2.SCANCODE_F1: return .Key_F1
+    case sdl2.SCANCODE_F2: return .Key_F2
+    case sdl2.SCANCODE_F3: return .Key_F3
+    case sdl2.SCANCODE_F4: return .Key_F4
+    case sdl2.SCANCODE_F5: return .Key_F5
+    case sdl2.SCANCODE_F6: return .Key_F6
+    case sdl2.SCANCODE_F7: return .Key_F7
+    case sdl2.SCANCODE_F8: return .Key_F8
+    case sdl2.SCANCODE_F9: return .Key_F9
+    case sdl2.SCANCODE_F10: return .Key_F10
+    case sdl2.SCANCODE_F11: return .Key_F11
+    case sdl2.SCANCODE_F12: return .Key_F12
     }
-    numkeys: i32 = 0
-    keys := sdl2.GetKeyboardState(&numkeys)
-    keys_current_frame[.Key_0] = keys[sdl2.SCANCODE_0] == 1
-    keys_current_frame[.Key_1] = keys[sdl2.SCANCODE_1] == 1
-    keys_current_frame[.Key_2] = keys[sdl2.SCANCODE_2] == 1
-    keys_current_frame[.Key_3] = keys[sdl2.SCANCODE_3] == 1
-    keys_current_frame[.Key_4] = keys[sdl2.SCANCODE_4] == 1
-    keys_current_frame[.Key_5] = keys[sdl2.SCANCODE_5] == 1
-    keys_current_frame[.Key_6] = keys[sdl2.SCANCODE_6] == 1
-    keys_current_frame[.Key_7] = keys[sdl2.SCANCODE_7] == 1
-    keys_current_frame[.Key_8] = keys[sdl2.SCANCODE_8] == 1
-    keys_current_frame[.Key_9] = keys[sdl2.SCANCODE_9] == 1
-    keys_current_frame[.Key_A] = keys[sdl2.SCANCODE_A] == 1
-    keys_current_frame[.Key_B] = keys[sdl2.SCANCODE_B] == 1
-    keys_current_frame[.Key_C] = keys[sdl2.SCANCODE_C] == 1
-    keys_current_frame[.Key_D] = keys[sdl2.SCANCODE_D] == 1
-    keys_current_frame[.Key_E] = keys[sdl2.SCANCODE_E] == 1
-    keys_current_frame[.Key_F] = keys[sdl2.SCANCODE_F] == 1
-    keys_current_frame[.Key_G] = keys[sdl2.SCANCODE_G] == 1
-    keys_current_frame[.Key_H] = keys[sdl2.SCANCODE_H] == 1
-    keys_current_frame[.Key_I] = keys[sdl2.SCANCODE_I] == 1
-    keys_current_frame[.Key_J] = keys[sdl2.SCANCODE_J] == 1
-    keys_current_frame[.Key_K] = keys[sdl2.SCANCODE_K] == 1
-    keys_current_frame[.Key_L] = keys[sdl2.SCANCODE_L] == 1
-    keys_current_frame[.Key_M] = keys[sdl2.SCANCODE_M] == 1
-    keys_current_frame[.Key_N] = keys[sdl2.SCANCODE_N] == 1
-    keys_current_frame[.Key_O] = keys[sdl2.SCANCODE_O] == 1
-    keys_current_frame[.Key_P] = keys[sdl2.SCANCODE_P] == 1
-    keys_current_frame[.Key_Q] = keys[sdl2.SCANCODE_Q] == 1
-    keys_current_frame[.Key_R] = keys[sdl2.SCANCODE_R] == 1
-    keys_current_frame[.Key_S] = keys[sdl2.SCANCODE_S] == 1
-    keys_current_frame[.Key_T] = keys[sdl2.SCANCODE_T] == 1
-    keys_current_frame[.Key_U] = keys[sdl2.SCANCODE_U] == 1
-    keys_current_frame[.Key_V] = keys[sdl2.SCANCODE_V] == 1
-    keys_current_frame[.Key_W] = keys[sdl2.SCANCODE_W] == 1
-    keys_current_frame[.Key_X] = keys[sdl2.SCANCODE_X] == 1
-    keys_current_frame[.Key_Y] = keys[sdl2.SCANCODE_Y] == 1
-    keys_current_frame[.Key_Z] = keys[sdl2.SCANCODE_Z] == 1
-    keys_current_frame[.Key_Return] = keys[sdl2.SCANCODE_RETURN] == 1
-    keys_current_frame[.Key_Escape] = keys[sdl2.SCANCODE_ESCAPE] == 1
-    keys_current_frame[.Key_Backspace] = keys[sdl2.SCANCODE_BACKSPACE] == 1
-    keys_current_frame[.Key_Tab] = keys[sdl2.SCANCODE_TAB] == 1
-    keys_current_frame[.Key_Space] = keys[sdl2.SCANCODE_SPACE] == 1
-    keys_current_frame[.Key_LeftShift] = keys[sdl2.SCANCODE_LSHIFT] == 1
-    keys_current_frame[.Key_LeftCtrl] = keys[sdl2.SCANCODE_LCTRL] == 1
-    keys_current_frame[.Key_LeftAlt] = keys[sdl2.SCANCODE_LALT] == 1
-    keys_current_frame[.Key_RightShift] = keys[sdl2.SCANCODE_RSHIFT] == 1
-    keys_current_frame[.Key_RightCtrl] = keys[sdl2.SCANCODE_RCTRL] == 1
-    keys_current_frame[.Key_RightAlt] = keys[sdl2.SCANCODE_RALT] == 1
-    keys_current_frame[.Key_F1] = keys[sdl2.SCANCODE_F1] == 1
-    keys_current_frame[.Key_F2] = keys[sdl2.SCANCODE_F2] == 1
-    keys_current_frame[.Key_F3] = keys[sdl2.SCANCODE_F3] == 1
-    keys_current_frame[.Key_F4] = keys[sdl2.SCANCODE_F4] == 1
-    keys_current_frame[.Key_F5] = keys[sdl2.SCANCODE_F5] == 1
-    keys_current_frame[.Key_F6] = keys[sdl2.SCANCODE_F6] == 1
-    keys_current_frame[.Key_F7] = keys[sdl2.SCANCODE_F7] == 1
-    keys_current_frame[.Key_F8] = keys[sdl2.SCANCODE_F8] == 1
-    keys_current_frame[.Key_F9] = keys[sdl2.SCANCODE_F9] == 1
-    keys_current_frame[.Key_F10] = keys[sdl2.SCANCODE_F10] == 1
-    keys_current_frame[.Key_F11] = keys[sdl2.SCANCODE_F11] == 1
-    keys_current_frame[.Key_F12] = keys[sdl2.SCANCODE_F12] == 1
-
-    for pressed, button in mouse_buttons_current_frame {
-        mouse_buttons_previous_frame[button] = pressed
-    }
-    pos: [2]i32
-    mouse := sdl2.GetMouseState(&pos.x, &pos.y)
-    mouse_buttons_current_frame[.Left] = mouse & sdl2.BUTTON_LMASK != 0
-    mouse_buttons_current_frame[.Middle] = mouse & sdl2.BUTTON_MMASK != 0
-    mouse_buttons_current_frame[.Right] = mouse & sdl2.BUTTON_RMASK != 0
-    rect := window.get_size()
-    mouse_position.x = pos.x - i32(rect.x)/2
-    mouse_position.y = pos.y - i32(rect.y)/2
-    //fmt.println(mouse_position)
+    return .Key_None
 }

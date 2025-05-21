@@ -2,20 +2,6 @@
 
 package window
 
-user_tick: proc() = nil
-user_draw: proc(f64) = nil
-user_quit: proc() = nil
-
-import "core:time"
-
-started: bool = false
-stopped: bool = false
-accumulator: f64 = 0
-interpolator: time.Tick = {}
-
-
-import "base:runtime"
-main_context: runtime.Context
 
 //leaving this here so I remember how to do JS imports when I actually need to
 /*foreign import window_imports "window_imports"
@@ -38,70 +24,8 @@ set_title :: proc(title: string) {
     js.set_element_key_string("title", "innerText", title)
 }
 
+closed: bool = false
 close :: proc() {
-    stopped = true
+    closed = true
 }
 
-@(export)
-step :: proc "c" (delta_time: f64) -> bool {
-    context = main_context
-    if !started {
-        time.tick_lap_time(&interpolator)
-        return true
-    }
-    if stopped {
-        if user_quit != nil {
-            user_quit()
-        }
-        for hook in quit_hooks {
-            hook()
-        }
-        return false
-    }
-    accumulator += delta_time
-    for ; accumulator > 0; accumulator -= 1.0/f64(tick_rate) {
-        time.tick_lap_time(&interpolator)
-        for hook in pre_tick_hooks {
-            hook()
-        }
-        if user_tick != nil {
-            user_tick()
-        }
-        for hook in post_tick_hooks {
-            hook()
-        }
-    }
-    //this does not produce correct results, using 1.0 for now (no interpolation)
-    t := time.duration_seconds(time.tick_since(interpolator))*f64(tick_rate)
-    if user_draw != nil {
-        user_draw(1.0)
-    }
-    for hook in draw_hooks {
-        hook(1.0)
-    }
-    return true
-}
-
-resize_event :: proc(e: js.Event) {
-    for hook in resize_hooks {
-        hook()
-    }
-}
-
-run :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
-    main_context = context
-
-    for hook in init_hooks {
-        hook()
-    }
-    if init != nil {
-        init()
-    }
-    user_tick = tick
-    user_draw = draw
-    user_quit = quit
-
-    js.add_window_event_listener(.Resize, nil, resize_event)
-
-    started = true
-}

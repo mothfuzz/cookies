@@ -10,7 +10,7 @@ trans: transform.Transform = transform.origin()
 prev_t: f64 = 0.0
 
 init :: proc() {
-    window.set_tick_rate(15) //abysmal tick rate so we can lerp
+    engine.set_tick_rate(15) //abysmal tick rate so we can lerp
     window.set_size(640, 400)
 
     transform.set_translation(&parent, {100, 0, 0})

@@ -13,39 +13,57 @@ Scancode :: enum {
     Key_F1, Key_F2, Key_F3, Key_F4, Key_F5, Key_F6, Key_F7, Key_F8,
     Key_F9, Key_F10, Key_F11, Key_F12,
 }
-keys_current_frame: [Scancode]b8 = {}
-keys_previous_frame: [Scancode]b8 = {}
+keys_current: [Scancode]b8 = {}
+keys_pressed: [Scancode]b8 = {}
+keys_released: [Scancode]b8 = {}
 
 MouseButton :: enum {
     Left, Middle, Right
 }
 
-mouse_buttons_current_frame: [MouseButton]b8 = {}
-mouse_buttons_previous_frame: [MouseButton]b8 = {}
+mouse_buttons_current: [MouseButton]b8 = {}
+mouse_buttons_pressed: [MouseButton]b8 = {}
+mouse_buttons_released: [MouseButton]b8 = {}
 mouse_position: [2]i32 = {} //relative to center of window, y-negative.
 
+update :: proc() {
+    for &key in keys_pressed {
+        key = false
+    }
+    for &key in keys_released {
+        key = false
+    }
+    for &button in mouse_buttons_pressed {
+        button = false
+    }
+    for &button in mouse_buttons_released {
+        button = false
+    }
+}
+
 key_down :: proc(key: Scancode) -> bool {
-    return bool(keys_current_frame[key])
+    return bool(keys_current[key])
 }
 key_up :: proc(key: Scancode) -> bool {
-    return bool(!keys_current_frame[key])
+    return bool(!keys_current[key])
 }
 key_pressed :: proc(key: Scancode) -> bool {
-    return bool(keys_current_frame[key] && !keys_previous_frame[key])
+    //return bool(keys_current_frame[key] && !keys_previous_frame[key])
+    return bool(keys_pressed[key])
 }
 key_released :: proc(key: Scancode) -> bool {
-    return bool(keys_previous_frame[key] && !keys_current_frame[key])
+    return bool(keys_released[key])
 }
 
 mouse_down :: proc(button: MouseButton) -> bool {
-    return bool(mouse_buttons_current_frame[button])
+    return bool(mouse_buttons_current[button])
 }
 mouse_up :: proc(button: MouseButton) -> bool {
-    return bool(!mouse_buttons_current_frame[button])
+    return bool(!mouse_buttons_current[button])
 }
 mouse_pressed :: proc(button: MouseButton) -> bool {
-    return bool(mouse_buttons_current_frame[button] && !mouse_buttons_previous_frame[button])
+    return bool(mouse_buttons_pressed[button])
 }
 mouse_released :: proc(button: MouseButton) -> bool {
-    return bool(mouse_buttons_previous_frame[button] && !mouse_buttons_current_frame[button])
+    return bool(mouse_buttons_released[button])
 }

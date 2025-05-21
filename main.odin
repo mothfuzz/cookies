@@ -65,8 +65,8 @@ test_kill :: proc(a: ^scene.Actor) {
 }
 
 init :: proc() {
-    window.set_tick_rate(10)
     window.set_size(640, 400)
+    engine.set_tick_rate(10)
 
     for i := 0; i < 16; i += 1 {
         a := scene.spawn(&main_scene, TestActor{i=3, f=4}, {init=test_init, tick=test_tick, kill=test_kill}, "Joe")
@@ -103,6 +103,7 @@ tick :: proc() {
     }
     if input.mouse_pressed(.Left) {
         fmt.println("click!!!", accumulator)
+        fmt.println(input.mouse_position)
     }
     if input.mouse_pressed(.Right) {
         fmt.println("right click!!!", accumulator)
