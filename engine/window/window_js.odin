@@ -50,11 +50,11 @@ step :: proc "c" (delta_time: f64) -> bool {
         return true
     }
     if stopped {
-        for hook in quit_hooks {
-            hook()
-        }
         if user_quit != nil {
             user_quit()
+        }
+        for hook in quit_hooks {
+            hook()
         }
         return false
     }
@@ -73,11 +73,11 @@ step :: proc "c" (delta_time: f64) -> bool {
     }
     //this does not produce correct results, using 1.0 for now (no interpolation)
     t := time.duration_seconds(time.tick_since(interpolator))*f64(tick_rate)
-    for hook in draw_hooks {
-        hook(1.0)
-    }
     if user_draw != nil {
         user_draw(1.0)
+    }
+    for hook in draw_hooks {
+        hook(1.0)
     }
     return true
 }

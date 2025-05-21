@@ -51,7 +51,7 @@ run :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
             if e.type == .QUIT {
                 break main_loop
             }
-            if e.type == .WINDOWEVENT{
+            if e.type == .WINDOWEVENT {
                 if e.window.event == .RESIZED {
                     for hook in resize_hooks {
                         hook()
@@ -75,18 +75,18 @@ run :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
             }
         }
         t := time.duration_seconds(time.tick_since(interpolator))*f64(tick_rate)
-        for hook in draw_hooks {
-            hook(t)
-        }
         if draw != nil {
             draw(t)
         }
+        for hook in draw_hooks {
+            hook(t)
+        }
     }
 
-    for hook in quit_hooks {
-        hook()
-    }
     if quit != nil {
         quit()
+    }
+    for hook in quit_hooks {
+        hook()
     }
 }

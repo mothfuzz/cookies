@@ -27,6 +27,15 @@ origin :: proc() -> (trans: Transform) {
     trans.local_translation = 0
     trans.local_rotation = 1
     trans.local_scale = 1
+    //set all the others to default values so no first-frame artifacts
+    trans.world_model = 1
+    trans.world_translation = 0
+    trans.world_rotation = 1
+    trans.world_scale = 1
+    trans.current_world_model = 1
+    trans.current_world_translation = 0
+    trans.current_world_rotation = 1
+    trans.current_world_scale = 1
     return
 }
 
@@ -104,6 +113,7 @@ compute :: proc(trans: ^Transform) -> matrix[4, 4]f32 {
     if trans == nil {
         return 1
     }
+
     if trans.dirty {
         //cache the values
         trans.world_model = trans.current_world_model

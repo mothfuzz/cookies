@@ -148,36 +148,20 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         entries = raw_data(bindings),
     })
 
-    vertex_attributes := []wgpu.VertexAttribute{
-        //position
-        {
-            format = .Float32x3,
-            offset = 0,
-            shaderLocation = 0,
-        },
-        //texcoords
-        {
-            format = .Float32x2,
-            offset = 0,
-            shaderLocation = 1,
-        },
-    }
-    vertex_buffers := []wgpu.VertexBufferLayout{
-        {
-            stepMode = .Vertex,
-            arrayStride = 0,
-            attributeCount = len(vertex_attributes),
-            attributes = raw_data(vertex_attributes)
-        }
-    }
 
+    vertex_buffers := []wgpu.VertexBufferLayout{
+        position_attribute,
+        texcoord_attribute,
+        color_attribute,
+        model_attribute,
+    }
     ren.pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         layout = ren.layout,
         vertex = {
             module = ren.shader,
             entryPoint = "vs_main",
-            //bufferCount = len(vertex_buffers),
-            //buffers = raw_data(vertex_buffers),
+            bufferCount = len(vertex_buffers),
+            buffers = raw_data(vertex_buffers),
         },
         fragment = &{
             module = ren.shader,
@@ -190,7 +174,13 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         },
         primitive = {
             topology = .TriangleList,
+            cullMode = .None,
         },
+        /*depthStencil = &{
+            format = .Depth24PlusStencil8,
+            depthWriteEnabled = .True,
+            depthCompare = .LessEqual,
+        },*/
         multisample = {
             count = 4,
             mask = 0xffffffff,
@@ -230,6 +220,7 @@ quit :: proc() {
     wgpu.SurfaceRelease(ren.surface)
     wgpu.InstanceRelease(ren.instance)
 }
+
 
 render :: proc(t: f64) {
     if !ren.ready {
@@ -275,7 +266,8 @@ render :: proc(t: f64) {
 
     wgpu.RenderPassEncoderSetPipeline(render_pass, ren.pipeline)
     wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
-    wgpu.RenderPassEncoderDraw(render_pass, 3, 1, 0, 0) //draw 3 vertices, 1 instance.
+
+    draw_meshes(render_pass)
 
     wgpu.RenderPassEncoderEnd(render_pass)
     wgpu.RenderPassEncoderRelease(render_pass)
