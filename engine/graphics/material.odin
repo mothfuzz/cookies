@@ -27,6 +27,18 @@ Material :: struct {
     albedo: Texture,
 }
 
+rebuild_material :: proc(mat: ^Material) {
+    bindings := []wgpu.BindGroupEntry{
+        {binding = 0, sampler = mat.sampler},
+        {binding = 1, textureView = mat.albedo.view},
+    }
+    mat.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+        layout = material_layout,
+        entryCount = len(bindings),
+        entries = raw_data(bindings),
+    })
+}
+
 make_material :: proc(albedo: Texture) -> (mat: Material) {
     mat.sampler = wgpu.DeviceCreateSampler(ren.device, &{
         minFilter = .Linear,
@@ -35,16 +47,7 @@ make_material :: proc(albedo: Texture) -> (mat: Material) {
         maxAnisotropy = 16,
     })
     mat.albedo = albedo
-
-    bindings := []wgpu.BindGroupEntry{
-        {binding = 0, sampler = mat.sampler},
-        {binding = 1, textureView = albedo.view},
-    }
-    mat.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
-        layout = material_layout,
-        entryCount = len(bindings),
-        entries = raw_data(bindings),
-    })
+    rebuild_material(&mat)
     return
 }
 

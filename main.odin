@@ -20,6 +20,8 @@ mat2: graphics.Material
 triangle_trans := transform.origin()
 triangle_trans2 := transform.origin()
 
+//TODO: switch to miniaudio & stb_image
+
 TestActor :: struct {
     i: i32,
     f: f32,
@@ -78,8 +80,15 @@ init :: proc() {
     img2 := graphics.make_scaled_image_nearest(img, {4, 4}, {1024, 1024})
     tex = graphics.make_texture_2D(img2, {1024, 1024})
     delete(img2)
+    //tex = graphics.make_texture_2D(img, {4, 4})
     mat = graphics.make_material(albedo=tex)
-    mat2 = graphics.make_material(albedo=tex)
+
+    tex2 := graphics.make_texture_from_image(#load("frasier.png"))
+    mat2 = graphics.make_material(albedo=tex2)
+
+    mat.albedo = tex2
+    graphics.rebuild_material(&mat)
+
     transform.translate(&triangle_trans, {0, 0, 0.5})
     transform.translate(&triangle_trans2, {0, 0, 0.5})
 }

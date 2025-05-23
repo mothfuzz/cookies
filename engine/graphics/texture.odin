@@ -1,7 +1,7 @@
 package graphics
 
 import "vendor:wgpu"
-//import "vendor:sdl2/image"
+import stbi "vendor:stb/image"
 import "core:math"
 import "core:fmt"
 
@@ -140,7 +140,11 @@ make_texture_2D :: proc(input: []u32, size: [2]uint) -> (tex: Texture) {
                                    bytesPerRow = u32(mip_size.x*size_of(u32)),
                                    rowsPerImage = u32(mip_size.y),
                                },
-                               &{width=u32(mip_size.x), height=u32(mip_size.y), depthOrArrayLayers=1}
+                               &{
+                                   width = u32(mip_size.x),
+                                   height = u32(mip_size.y),
+                                   depthOrArrayLayers=1
+                               },
                               )
         if i != 0 {
             delete(mips[i])
@@ -153,4 +157,20 @@ make_texture_2D :: proc(input: []u32, size: [2]uint) -> (tex: Texture) {
 delete_texture :: proc(tex: Texture) {
     wgpu.TextureRelease(tex.image)
     wgpu.TextureViewRelease(tex.view)
+}
+
+//inherently 2D
+make_texture_from_image :: proc(image: []byte) -> (tex: Texture) {
+    x, y, channels: i32
+    img: [^]byte = stbi.load_from_memory(raw_data(image), i32(len(image)), &x, &y, &channels, 4)
+    img_u32 := make([]u32, x*y)
+    for i in 0..<int(x*y) {
+        for b in 0..<4 {
+            img_u32[i] |= u32(img[i*4+b]) << uint(b*8)
+        }
+    }
+    tex = make_texture_2D(img_u32, {uint(x), uint(y)})
+    stbi.image_free(img)
+    delete(img_u32)
+    return
 }
