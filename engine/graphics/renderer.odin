@@ -134,11 +134,20 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         entryCount = len(entries),
         entries = raw_data(entries),
     })
-    ren.layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
-        bindGroupLayoutCount = 1,
-        bindGroupLayouts = &uniform_layout,
+    material_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
+        entryCount = len(material_layout_entries),
+        entries = raw_data(material_layout_entries),
+        //one entry for each texture in the material
+        //binding for: albedo, normal, pbr, and environment (for now)
     })
 
+    bind_group_layouts := []wgpu.BindGroupLayout{uniform_layout, material_layout}
+    ren.layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
+        bindGroupLayoutCount = len(bind_group_layouts),
+        bindGroupLayouts = raw_data(bind_group_layouts),
+    })
+
+    //create uniform buffer/bind group up front
     fmt.println("size_of([2]f32):", size_of([2]f32))
     screen_size_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of([2]f32)})
     bindings := []wgpu.BindGroupEntry{
@@ -151,6 +160,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     })
 
 
+    //vertex data
     vertex_buffers := []wgpu.VertexBufferLayout{
         position_attribute,
         texcoord_attribute,
@@ -216,7 +226,6 @@ quit :: proc() {
     wgpu.InstanceRelease(ren.instance)
 }
 
-
 render :: proc(t: f64) {
     if !ren.ready {
         return
@@ -261,7 +270,15 @@ render :: proc(t: f64) {
     wgpu.RenderPassEncoderSetPipeline(render_pass, ren.pipeline)
     wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
 
-    draw_meshes(render_pass)
+    for mesh, &batch in batches {
+        //fmt.println("unique materials in this batch:", len(batch))
+        bind_mesh(render_pass, mesh)
+        for material, &instances in batch {
+            //fmt.println("number of instances:", len(instances.models))
+            bind_material(render_pass, material)
+            draw_batch(render_pass, mesh, material)
+        }
+    }
 
     wgpu.RenderPassEncoderEnd(render_pass)
     wgpu.RenderPassEncoderRelease(render_pass)

@@ -97,47 +97,57 @@ Batch :: struct {
     buffer: wgpu.Buffer,
     cap: u32,
 }
-meshes: map[Mesh]Batch
+//more often do we have the same mesh with different textures
+//than we have the same texture on different meshes
+batches: map[Mesh]map[Material]Batch
 
-@(private)
-draw_meshes :: proc(render_pass: wgpu.RenderPassEncoder) {
-    for mesh, &instances in meshes {
-
-        len := len(instances.models)
-        size := u64(instances.cap * size_of(matrix[4,4]f32))
-        if wgpu.BufferGetSize(instances.buffer) != size {
-            wgpu.BufferDestroy(instances.buffer)
-            instances.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Vertex, .CopyDst}, size=size})
-        }
-        wgpu.QueueWriteBuffer(ren.queue, instances.buffer, 0, raw_data(instances.models), uint(len)*size_of(matrix[4,4]f32))
-
-        wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 0, mesh.positions, 0, wgpu.BufferGetSize(mesh.positions))
-        wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 1, mesh.texcoords, 0, wgpu.BufferGetSize(mesh.texcoords))
-        wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 2, mesh.colors, 0, wgpu.BufferGetSize(mesh.colors))
-        wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 3, instances.buffer, 0, wgpu.BufferGetSize(instances.buffer))
-
-        if mesh.indices != nil {
-            wgpu.RenderPassEncoderSetIndexBuffer(render_pass, mesh.indices, .Uint32, 0, wgpu.BufferGetSize(mesh.indices))
-            wgpu.RenderPassEncoderDrawIndexed(render_pass, mesh.size, u32(len), 0, 0, 0)
-        } else {
-            wgpu.RenderPassEncoderDraw(render_pass, mesh.size, u32(len), 0, 0)
-        }
-        clear(&instances.models)
-    }
+bind_mesh :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh) {
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 0, mesh.positions, 0, wgpu.BufferGetSize(mesh.positions))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 1, mesh.texcoords, 0, wgpu.BufferGetSize(mesh.texcoords))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 2, mesh.colors, 0, wgpu.BufferGetSize(mesh.colors))
 }
 
-draw_mesh :: proc(mesh: Mesh, model: matrix[4, 4]f32) {
+//assumes material & mesh are already bound.
+@(private)
+draw_batch :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, material: Material) {
+    batches := &batches[mesh]
+    instances := &batches[material]
+
+    len := len(instances.models)
+    size := u64(instances.cap * size_of(matrix[4,4]f32))
+    if wgpu.BufferGetSize(instances.buffer) != size {
+        wgpu.BufferDestroy(instances.buffer)
+        instances.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Vertex, .CopyDst}, size=size})
+    }
+    wgpu.QueueWriteBuffer(ren.queue, instances.buffer, 0, raw_data(instances.models), uint(len)*size_of(matrix[4,4]f32))
+
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 3, instances.buffer, 0, wgpu.BufferGetSize(instances.buffer))
+
+    if mesh.indices != nil {
+        wgpu.RenderPassEncoderSetIndexBuffer(render_pass, mesh.indices, .Uint32, 0, wgpu.BufferGetSize(mesh.indices))
+        wgpu.RenderPassEncoderDrawIndexed(render_pass, mesh.size, u32(len), 0, 0, 0)
+    } else {
+        wgpu.RenderPassEncoderDraw(render_pass, mesh.size, u32(len), 0, 0)
+    }
+    clear(&instances.models)
+}
+
+draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32) {
     model := model
-    if !(mesh in meshes) {
+    if !(mesh in batches) {
+        batches[mesh] = {}
+    }
+    batch := &batches[mesh]
+    if !(material in batch) {
         //create instance buffer
-        meshes[mesh] = Batch{
+        batch[material] = Batch{
             models = {},
             buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Vertex, .CopyDst}}),
         }
     }
-    batch := &meshes[mesh]
-    append(&batch.models, model)
-    if u32(len(batch.models)) + 1 > batch.cap {
-        batch.cap = (batch.cap + 1) * 2
+    instances := &batch[material]
+    append(&instances.models, model)
+    if u32(len(instances.models)) + 1 > instances.cap {
+        instances.cap = (instances.cap + 1) * 2
     }
 }
