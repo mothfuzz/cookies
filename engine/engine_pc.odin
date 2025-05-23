@@ -16,6 +16,11 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
     window.window = sdl2.CreateWindow("hehe", sdl2.WINDOWPOS_UNDEFINED, sdl2.WINDOWPOS_UNDEFINED, 640, 400, sdl2.WINDOW_SHOWN | sdl2.WINDOW_RESIZABLE)
     defer sdl2.DestroyWindow(window.window)
 
+    img := #load("icon.bmp")
+    icon := sdl2.LoadBMP_RW(sdl2.RWFromConstMem(raw_data(img), i32(len(img))), true)
+    sdl2.SetWindowIcon(window.window, icon)
+    sdl2.FreeSurface(icon)
+
     audio.init()
 
     graphics.init(window.get_wgpu_surface, window.get_size())
