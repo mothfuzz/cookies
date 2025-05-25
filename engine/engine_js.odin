@@ -50,6 +50,7 @@ step :: proc "c" (delta_time: f64) -> bool {
             hook()
         }*/
         graphics.quit()
+        audio.quit()
         return false
     }
     accumulator += delta_time
@@ -121,6 +122,5 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
         input.mouse_position.y = i32(pos.y) - i32(rect.y/2)
     })
 
-    audio.init()
     graphics.init(window.get_wgpu_surface, window.get_size())
 }

@@ -124,4 +124,5 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
         hook()
     }*/
     graphics.quit()
+    audio.quit()
 }

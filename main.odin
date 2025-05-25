@@ -20,8 +20,6 @@ mat2: graphics.Material
 triangle_trans := transform.origin()
 triangle_trans2 := transform.origin()
 
-//TODO: switch to miniaudio & stb_image
-
 TestActor :: struct {
     i: i32,
     f: f32,

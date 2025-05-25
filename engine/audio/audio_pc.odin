@@ -2,170 +2,186 @@
 
 package audio
 
-import "vendor:sdl2"
-import "vendor:sdl2/mixer"
-import "core:fmt"
-import "core:math"
 import "base:runtime"
+import "vendor:sdl2"
+import ma "vendor:miniaudio"
+import "core:fmt"
 
-Sound :: ^mixer.Chunk
-Music :: ^mixer.Music
+Sound :: struct {
+    frames_len: u64,
+    frames_ptr: rawptr, //should be freed
+    format: ma.format,
+    channels: u32,
+    sample_rate: u32,
+}
 PlayingSound :: struct {
-    channel: i32,
-    gen: u16,
-    sound: Sound,
-}
-ActiveChannel :: struct {
-    gen: u16,
-    looping: bool,
-    sound: Sound,
-}
-active_channels: map[i32]ActiveChannel = {}
-active_music: Music
-music_playing_flag: bool = false
-music_played: f64 = 0.0
-music_paused: f64 = 0.0
-music_looped: bool = true
-music_fade_in: int = 0
-
-finished :: proc "c" (channel: i32) {
-    if active_channel, ok := &active_channels[channel]; ok {
-        if active_channel.looping {
-            mixer.PlayChannel(channel, active_channel.sound, 0)
-        } else {
-            active_channel.gen += 1
-        }
-    }
+    data: Sound,
+    sound: ^ma.sound,
+    audio_buffer: ^ma.audio_buffer,
 }
 
-music_finished :: proc "c" () {
-
-    if music_playing_flag {
-        play_music(active_music)
-        return
-    }
-
-    if music_played > 0 {
-        music_paused = f64(sdl2.GetTicks())/1000.0 - music_played
-        music_played = 0
-    }
-    if music_fade_in > 0 {
-        resume_music(music_fade_in)
-        music_fade_in = 0
-    }
-
-
-}
+engine: ma.engine
+live_sounds: map[^ma.sound]PlayingSound
+dead_sounds: map[^ma.sound]PlayingSound
 
 init :: proc() {
-    mixer.OpenAudio(mixer.DEFAULT_FREQUENCY, mixer.DEFAULT_FORMAT, mixer.DEFAULT_CHANNELS, 128)
-    mixer.ChannelFinished(finished)
-    mixer.HookMusicFinished(music_finished)
+    engine_config := ma.engine_config_init()
+    engine_config.channels = 0
+    engine_config.sampleRate = 0
+    engine_config.listenerCount = 1
+
+    engine_init_result := ma.engine_init(&engine_config, &engine)
+    if engine_init_result != .SUCCESS {
+        fmt.panicf("failed to init audio engine: %v", engine_init_result)
+    }
+    engine_start_result := ma.engine_start(&engine)
+    if engine_start_result != .SUCCESS {
+        fmt.panicf("failed to start audio engine: %v", engine_start_result)
+    }
 }
 
-load_sound :: proc(filedata: []u8) -> Sound {
-    return mixer.LoadWAV_RW(sdl2.RWFromMem(raw_data(filedata), i32(len(filedata))), true)
+quit :: proc() {
+    //fmt.println("live_sounds:", len(live_sounds))
+    //fmt.println("dead_sounds:", len(dead_sounds))
+    for _, sound in live_sounds {
+        ma.sound_uninit(sound.sound)
+        ma.audio_buffer_uninit(sound.audio_buffer)
+    }
+    for _, sound in dead_sounds {
+        ma.sound_uninit(sound.sound)
+        ma.audio_buffer_uninit(sound.audio_buffer)
+    }
+    ma.engine_uninit(&engine)
 }
 
-play_sound :: proc(sound: Sound, looped: bool = false) -> PlayingSound {
-    num_channels := mixer.AllocateChannels(-1)
-    if num_channels < i32(len(active_channels) + 1) {
-        mixer.AllocateChannels(num_channels * 2)
+make_sound_from_file :: proc(filedata: []u8) -> (sound: Sound) {
+    frames_len: u64
+    frames_ptr: rawptr
+    decoder_config: ma.decoder_config
+    result := ma.decode_memory(raw_data(filedata), len(filedata), &decoder_config, &sound.frames_len, &sound.frames_ptr)
+    if(result != .SUCCESS) {
+        fmt.panicf("failed to load sound: %v", result)
     }
-    //can't use the built-in looping because we want to be able to start and stop it after the fact
-    //channel := mixer.PlayChannel(-1, sound, looped? -1 : 0)
-    channel := mixer.PlayChannel(-1, sound, 0)
-    playing_sound := PlayingSound{channel, 0, sound}
-    if active_channel, ok := &active_channels[channel]; ok {
-        playing_sound.gen = active_channel.gen
-        active_channel.looping = looped
-        active_channel.sound = sound
-    } else {
-        active_channels[channel] = ActiveChannel{0, looped, sound}
-    }
-    fmt.println(playing_sound)
-    return playing_sound
+    sound.format = decoder_config.format
+    sound.channels = decoder_config.channels
+    sound.sample_rate = decoder_config.sampleRate
+    return
 }
+delete_sound :: proc(sound: Sound) {
+    //miniaudio doesn't want us to free the memory actually
+    //free(sound.frames_ptr)
+}
+
+@(private)
+get_new_sound :: proc() -> (playing_sound: PlayingSound) {
+    for key, sound in dead_sounds {
+        playing_sound = sound
+        //free old sound
+        ma.sound_uninit(sound.sound)
+        ma.audio_buffer_uninit(sound.audio_buffer)
+        //free(sound.audio_buffer)
+        delete_key(&dead_sounds, key)
+        break
+    }
+    if playing_sound.sound == nil {
+        playing_sound.sound = new(ma.sound)
+    }
+    live_sounds[playing_sound.sound] = playing_sound
+    return
+}
+
+@(private)
+sound_end :: proc "c" (pUserData: rawptr, pSound: ^ma.sound) {
+    context = (^runtime.Context)(pUserData)^
+    playing_sound := live_sounds[pSound]
+    delete_key(&live_sounds, pSound)
+    dead_sounds[pSound] = playing_sound
+}
+
+ctx: runtime.Context
+play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (playing_sound: PlayingSound){
+    playing_sound = get_new_sound()
+    playing_sound.data = sound
+
+    audio_buffer_config := ma.audio_buffer_config{
+        format = sound.format,
+        channels = sound.channels,
+        sampleRate = sound.sample_rate,
+        sizeInFrames = sound.frames_len,
+        pData = sound.frames_ptr,
+    }
+    ma.audio_buffer_alloc_and_init(&audio_buffer_config, &playing_sound.audio_buffer)
+
+    sound_config := ma.sound_config_init_2(&engine)
+    sound_config.flags = {.STREAM}
+    sound_config.pDataSource = playing_sound.audio_buffer.ref.ds.pCurrent
+    sound_config.endCallback = sound_end
+    ctx = context
+    sound_config.pEndCallbackUserData = &ctx
+    sound_config.isLooping = b32(looped)
+    sound_result := ma.sound_init_ex(&engine, &sound_config, playing_sound.sound)
+    if sound_result != .SUCCESS {
+        fmt.panicf("failed to init sound file from memory: %v", sound_result)
+    }
+    ma.sound_set_fade_in_milliseconds(playing_sound.sound, 0.0, 1.0, u64(fade_in))
+    ma.sound_start(playing_sound.sound)
+    return
+}
+
 loop_sound :: proc(playing_sound: ^PlayingSound, looped: bool = true) {
-    if active_channel, ok := &active_channels[playing_sound.channel]; ok {
-        if active_channel.gen == playing_sound.gen {
-            //sound is live, loop it
-            active_channel.looping = looped
-        } else {
-            //sound is dead, replay a new sound if we set loop on
-            if looped {
-                playing_sound^ = play_sound(playing_sound.sound, looped)
-            }
-        }
-    }
-}
-stop_sound :: proc(playing_sound: ^PlayingSound, finish_playing: bool = false) {
-    if active_channel, ok := &active_channels[playing_sound.channel]; ok {
-        if active_channel.gen == playing_sound.gen {
-            active_channel.looping = false
-            if !finish_playing {
-                mixer.HaltChannel(playing_sound.channel)
-            }
-        }
-    }
-}
-pause_sound :: proc(playing_sound: ^PlayingSound) {
-    if active_channel, ok := &active_channels[playing_sound.channel]; ok {
-        if active_channel.gen == playing_sound.gen {
-            mixer.Pause(playing_sound.channel)
-        }
-    }
-
-}
-resume_sound :: proc(playing_sound: ^PlayingSound) {
-    if active_channel, ok := &active_channels[playing_sound.channel]; ok {
-        if active_channel.gen == playing_sound.gen {
-            mixer.Resume(playing_sound.channel)
-        } else {
-            //looped=false since if it were looping the sound wouldn't have died.
-            playing_sound^ = play_sound(playing_sound.sound)
-        }
-    }
-}
-
-load_music :: proc(filedata: []u8) -> Music {
-    return mixer.LoadMUS_RW(sdl2.RWFromMem(raw_data(filedata), i32(len(filedata))), true)
-}
-
-play_music :: proc "c" (music: Music, fade: int = 0) {
-    active_music = music
-    music_paused = 0
-    resume_music(fade)
-}
-stop_music :: proc(fade: int = 0) {
-    music_played = 0
-    music_paused = 0
-    pause_music(fade)
-}
-pause_music :: proc(fade: int = 0) {
-    music_playing_flag = false
-    if mixer.FadingMusic() == mixer.FADING_OUT {
-        return;
-    }
-    mixer.FadeOutMusic(i32(fade))
-}
-resume_music :: proc "c" (fade: int = 0) {
-    //only resume once pause fade completes because otherwise this blocks
-    if mixer.FadingMusic() == mixer.NO_FADING {
-        music_playing_flag = true
-        mixer.FadeInMusic(active_music, 0, i32(fade))
-        mixer.SetMusicPosition(music_paused)
-        music_played = f64(sdl2.GetTicks())/1000.0 - music_paused
-        music_paused = 0
+    if playing_sound.sound in live_sounds {
+        ma.sound_set_looping(playing_sound.sound, b32(looped))
     } else {
-        music_fade_in = fade
+        playing_sound^ = play_sound(playing_sound.data, looped)
     }
 }
-queue_music :: proc(new_music: Music, fade_out: int = 0, fade_in: int = 0) {
-    stop_music(fade_out)
-    play_music(new_music, fade_in)
+sound_is_looping :: proc(playing_sound: ^PlayingSound) -> bool {
+    if playing_sound.sound in live_sounds {
+        return bool(ma.sound_is_looping(playing_sound.sound))
+    } else {
+        return false
+    }
 }
 
-music_playing :: proc "c" () -> bool {
-    return music_playing_flag
+stop_sound :: proc(playing_sound: ^PlayingSound, finish_playing: bool = false) {
+    if playing_sound.sound in live_sounds {
+        if finish_playing {
+            ma.sound_set_looping(playing_sound.sound, false)
+        } else {
+            ma.sound_stop(playing_sound.sound)
+            ma.sound_seek_to_pcm_frame(playing_sound.sound, 0)
+            //move to dead since sound_stop doesn't call the sound_end callback
+            delete_key(&live_sounds, playing_sound.sound)
+            dead_sounds[playing_sound.sound] = playing_sound^
+        }
+    }
+}
+
+sound_is_playing :: proc(playing_sound: ^PlayingSound) -> bool {
+    if playing_sound.sound in live_sounds {
+        return bool(ma.sound_is_playing(playing_sound.sound))
+    }
+    return false
+}
+
+pause_sound :: proc(playing_sound: ^PlayingSound, fade_out: uint = 0) {
+    if playing_sound.sound in live_sounds {
+        if fade_out > 0 {
+            ma.sound_stop_with_fade_in_milliseconds(playing_sound.sound, u64(fade_out))
+        } else {
+            ma.sound_stop(playing_sound.sound)
+        }
+    }
+}
+resume_sound :: proc(playing_sound: ^PlayingSound, fade_in: uint = 0) {
+    if playing_sound.sound in live_sounds {
+        ma.sound_set_stop_time_in_milliseconds(playing_sound.sound, ~u64(0)) //workaround for if sound was scheduled to stop
+        if fade_in > 0 {
+            ma.sound_set_fade_in_milliseconds(playing_sound.sound, -1, 1.0, u64(fade_in))
+        } else {
+            ma.sound_start(playing_sound.sound)
+        }
+    } else {
+        playing_sound^ = play_sound(playing_sound.data, false, fade_in)
+    }
 }
