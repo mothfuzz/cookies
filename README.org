@@ -6,22 +6,19 @@ Designed to support desktop and web out of the box, though it will likely run an
 
 Vendored binaries & build scripts are provided for Windows.
 The web build is using native web technologies and should run on any modern browser.
-To build/run on any other platform, simply make sure you have the following libraries and their dependencies installed:
-- SDL2
-- SDL2_mixer
-- SDL2_image
+To build/run on any other platform, simply make sure you have SDL2 and its dependencies installed.
 
 Special thanks to the SDL team for their commitment to easy cross-platform game libraries!
 
 Current features:
+- (in-progress) WebGPU renderer
 - window/context creation
 - keyboard & mouse input
 - main loop with fixed timestep for game updates & variable rate for drawing
-- basic audio (sound + music loading, playback, and looping)
+- basic audio (sound + music loading, playback, looping, and fading)
 - parallel actor system for in-game entities
 
 Planned features:
-- WebGPU renderer
 - 3D audio
 - gamepad support
 - exporting engine functionality to shared libraries
