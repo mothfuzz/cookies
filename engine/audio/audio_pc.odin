@@ -3,6 +3,7 @@
 package audio
 
 import "base:runtime"
+import "vendor:sdl3"
 import ma "vendor:miniaudio"
 import "core:fmt"
 
@@ -19,24 +20,46 @@ PlayingSound :: struct {
     audio_buffer: ^ma.audio_buffer,
 }
 
+ctx: runtime.Context
 engine: ma.engine
 live_sounds: map[^ma.sound]PlayingSound
 dead_sounds: map[^ma.sound]PlayingSound
 
+data_callback :: proc(userdata: rawptr, buffer: [^]u8, buffer_size_bytes: i32) {
+    context = (^runtime.Context)(userdata)^
+    buffer_size_frames := u64(buffer_size_bytes) / u64(ma.get_bytes_per_frame(.f32, ma.engine_get_channels(&engine)))
+    ma.engine_read_pcm_frames(&engine, buffer, buffer_size_frames, nil)
+}
+sdl_audio_callback :: proc "c" (userdata: rawptr, stream: ^sdl3.AudioStream, additional_amount: i32, total_amount: i32) {
+    context = (^runtime.Context)(userdata)^
+    if additional_amount > 0 {
+        data := make([]u8, additional_amount, context.temp_allocator)
+        data_callback(userdata, raw_data(data), additional_amount)
+        sdl3.PutAudioStreamData(stream, raw_data(data), additional_amount)
+    }
+}
+
+
 init :: proc() {
     engine_config := ma.engine_config_init()
-    engine_config.channels = 0
-    engine_config.sampleRate = 0
+    engine_config.channels = 2
+    engine_config.sampleRate = 48000
     engine_config.listenerCount = 1
+    engine_config.noDevice = true
 
     engine_init_result := ma.engine_init(&engine_config, &engine)
     if engine_init_result != .SUCCESS {
         fmt.panicf("failed to init audio engine: %v", engine_init_result)
     }
-    engine_start_result := ma.engine_start(&engine)
+    /*engine_start_result := ma.engine_start(&engine)
     if engine_start_result != .SUCCESS {
         fmt.panicf("failed to start audio engine: %v", engine_start_result)
-    }
+    }*/
+
+    ctx = context
+    spec := sdl3.AudioSpec{.F32, i32(ma.engine_get_channels(&engine)), i32(ma.engine_get_sample_rate(&engine))}
+    stream := sdl3.OpenAudioDeviceStream(sdl3.AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, sdl_audio_callback, &ctx)
+    sdl3.ResumeAudioDevice(sdl3.GetAudioStreamDevice(stream))
 }
 
 quit :: proc() {
@@ -97,7 +120,6 @@ sound_end :: proc "c" (pUserData: rawptr, pSound: ^ma.sound) {
     dead_sounds[pSound] = playing_sound
 }
 
-ctx: runtime.Context
 play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (playing_sound: PlayingSound){
     playing_sound = get_new_sound()
     playing_sound.data = sound

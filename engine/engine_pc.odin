@@ -11,8 +11,7 @@ import "input"
 import "audio"
 
 boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
-    fmt.println("bootin!")
-    success := sdl3.Init({.VIDEO, .EVENTS})
+    success := sdl3.Init({.VIDEO, .AUDIO})
     if !success {
         fmt.panicf("Unable to initialize SDL3")
     }
