@@ -3,7 +3,6 @@
 package audio
 
 import "base:runtime"
-import "vendor:sdl2"
 import ma "vendor:miniaudio"
 import "core:fmt"
 

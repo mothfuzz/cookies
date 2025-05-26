@@ -6,7 +6,7 @@ Designed to support desktop and web out of the box, though it will likely run an
 
 Vendored binaries & build scripts are provided for Windows.
 The web build is using native web technologies and should run on any modern browser.
-To build/run on any other platform, simply make sure you have SDL2 and its dependencies installed.
+To build/run on any other platform, simply make sure you have SDL3 and its dependencies installed.
 
 Special thanks to the SDL team for their commitment to easy cross-platform game libraries!
 
