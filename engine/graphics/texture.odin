@@ -124,7 +124,7 @@ make_texture_2D :: proc(input: []u32, size: [2]uint) -> (tex: Texture) {
             height = u32(size.y),
             depthOrArrayLayers = 1,
         },
-        format = .BGRA8UnormSrgb,
+        format = .RGBA8UnormSrgb,
         mipLevelCount = u32(len(mips)),
         sampleCount = 1,
     })
@@ -143,7 +143,7 @@ make_texture_2D :: proc(input: []u32, size: [2]uint) -> (tex: Texture) {
                                &{
                                    width = u32(mip_size.x),
                                    height = u32(mip_size.y),
-                                   depthOrArrayLayers=1
+                                   depthOrArrayLayers=1,
                                },
                               )
         if i != 0 {

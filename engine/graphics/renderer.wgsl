@@ -1,4 +1,5 @@
 @group(0) @binding(0) var<uniform> screen_size: vec2<f32>;
+@group(0) @binding(1) var<uniform> screen_color_blend: f32;
 @group(1) @binding(0) var smp: sampler;
 @group(1) @binding(1) var albedo: texture_2d<f32>;
 
@@ -28,16 +29,10 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     return v;
 }
 
-fn gamma_uncorrect(color: vec4<f32>) -> vec4<f32> {
-    return vec4<f32>(pow(color.rgb, vec3<f32>(2.2)), color.a);
-}
-
 @fragment
 fn fs_main(v: VSOut) -> @location(0) vec4<f32> {
     let albedo = textureSample(albedo, smp, v.texcoord);
     let screen_color = vec4<f32>(v.position.x/screen_size.x, v.position.y/screen_size.y, 1.0, 1.0);
-    let color = mix(v.color, screen_color, 0.6);
-    return mix(albedo, color, 0.75);
-    //return v.color;
-    //return gamma_uncorrect(vec4<f32>(v.color));
+    let color = mix(v.color, screen_color, screen_color_blend);
+    return albedo * color;
 }

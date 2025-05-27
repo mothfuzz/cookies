@@ -13,6 +13,8 @@ Renderer :: struct {
     surface: wgpu.Surface,
     msaa_tex: wgpu.Texture,
     msaa_view: wgpu.TextureView,
+    depth_tex: wgpu.Texture,
+    depth_view: wgpu.TextureView,
     config: wgpu.SurfaceConfiguration,
     queue: wgpu.Queue,
     shader: wgpu.ShaderModule,
@@ -90,6 +92,16 @@ configure_surface :: proc(size: [2]uint = 0) {
         usage = {.RenderAttachment},
     })
     ren.msaa_view = wgpu.TextureCreateView(ren.msaa_tex, nil)
+
+    ren.depth_tex = wgpu.DeviceCreateTexture(ren.device, &{
+        size = {ren.config.width, ren.config.height, 1},
+        mipLevelCount = 1,
+        sampleCount = 4,
+        dimension = ._2D,
+        format = .Depth24PlusStencil8,
+        usage = {.RenderAttachment},
+    })
+    ren.depth_view = wgpu.TextureCreateView(ren.depth_tex, nil)
 }
 
 request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Adapter, message: string, userdata1, userdata2: rawptr) {
@@ -102,6 +114,7 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
 }
 
 screen_size_buffer: wgpu.Buffer
+screen_color_blend_buffer: wgpu.Buffer
 uniform_bind_group: wgpu.BindGroup
 
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
@@ -123,16 +136,23 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     })
 
     //bind group layouts
-    entries := []wgpu.BindGroupLayoutEntry{
+    uniform_layout_entries := []wgpu.BindGroupLayoutEntry{
+        //screen_size
         wgpu.BindGroupLayoutEntry{
             binding = 0,
             visibility = {.Vertex, .Fragment},
             buffer = {type=.Uniform},
         },
+        //screen_color_blend
+        wgpu.BindGroupLayoutEntry{
+            binding = 1,
+            visibility = {.Vertex, .Fragment},
+            buffer = {type=.Uniform},
+        },
     }
     uniform_layout := wgpu.DeviceCreateBindGroupLayout(ren.device, &{
-        entryCount = len(entries),
-        entries = raw_data(entries),
+        entryCount = len(uniform_layout_entries),
+        entries = raw_data(uniform_layout_entries),
     })
     material_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(material_layout_entries),
@@ -147,11 +167,12 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         bindGroupLayouts = raw_data(bind_group_layouts),
     })
 
-    //create uniform buffer/bind group up front
-    fmt.println("size_of([2]f32):", size_of([2]f32))
+    //create uniform buffers/bind group up front
     screen_size_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of([2]f32)})
+    screen_color_blend_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of(f32)})
     bindings := []wgpu.BindGroupEntry{
         {binding = 0, buffer = screen_size_buffer, size = size_of([2]f32)},
+        {binding = 1, buffer = screen_color_blend_buffer, size = size_of(f32)},
     }
     uniform_bind_group = wgpu.DeviceCreateBindGroup(device, &{
         layout = uniform_layout,
@@ -188,11 +209,11 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
             topology = .TriangleList,
             cullMode = .None,
         },
-        /*depthStencil = &{
+        depthStencil = &{
             format = .Depth24PlusStencil8,
             depthWriteEnabled = .True,
             depthCompare = .LessEqual,
-        },*/
+        },
         multisample = {
             count = 4,
             mask = 0xffffffff,
@@ -252,7 +273,9 @@ render :: proc(t: f64) {
     defer wgpu.CommandEncoderRelease(command_encoder)
 
     screen_size := [2]f32{f32(screen_size.x), f32(screen_size.y)}
+    blend_factor := f32(0.0)
     wgpu.QueueWriteBuffer(ren.queue, screen_size_buffer, 0, raw_data(&screen_size), size_of([2]f32))
+    wgpu.QueueWriteBuffer(ren.queue, screen_color_blend_buffer, 0, &blend_factor, size_of(f32))
 
     //draw loop
     render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
@@ -264,6 +287,15 @@ render :: proc(t: f64) {
             storeOp = .Store,
             depthSlice = wgpu.DEPTH_SLICE_UNDEFINED, //the hell?
             clearValue = linalg.vector4_srgb_to_linear([4]f64{0.4, 0.6, 0.9, 1.0}),
+        },
+        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+            view = ren.depth_view,
+            depthLoadOp = .Clear,
+            depthStoreOp = .Store,
+            depthClearValue = 1.0,
+            stencilLoadOp = .Clear,
+            stencilStoreOp = .Store,
+            stencilClearValue = 1.0,
         },
     })
 

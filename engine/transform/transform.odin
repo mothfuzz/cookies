@@ -11,6 +11,7 @@ Transform :: struct {
     parent: ^Transform,
     children: map[^Transform]struct{},
     dirty: bool,
+    reset: bool,
     //relative to tick
     world_model: matrix[4,4]f32,
     world_translation: [3]f32,
@@ -62,7 +63,7 @@ translate :: proc(trans: ^Transform, translation: [3]f32) {
 }
 set_translation :: proc(trans: ^Transform, translation: [3]f32) {
     trans.local_translation = translation
-    dirt(trans)
+    reset(trans)
 }
 rotate :: proc(trans: ^Transform, rotation: [3]f32) {
     trans.local_rotation = linalg.quaternion_from_euler_angles(expand_values(rotation), linalg.Euler_Angle_Order.XYZ) * trans.local_rotation
@@ -82,7 +83,7 @@ rotatez :: proc(trans: ^Transform, rotation: f32) {
 }
 set_rotation :: proc(trans: ^Transform, rotation: [3]f32) {
     trans.local_rotation = linalg.quaternion_from_euler_angles(expand_values(rotation), linalg.Euler_Angle_Order.XYZ)
-    dirt(trans)
+    reset(trans)
 }
 scale :: proc(trans: ^Transform, scale: [3]f32) {
     trans.local_scale *= scale
@@ -90,7 +91,7 @@ scale :: proc(trans: ^Transform, scale: [3]f32) {
 }
 set_scale :: proc(trans: ^Transform, scale: [3]f32) {
     trans.local_scale = scale
-    dirt(trans)
+    reset(trans)
 }
 
 /*
@@ -105,6 +106,13 @@ dirt :: proc(trans: ^Transform) {
     trans.dirty = true
     for c in trans.children {
         dirt(c)
+    }
+}
+reset :: proc(trans: ^Transform) {
+    trans.dirty = true
+    trans.reset = true
+    for c in trans.children {
+        reset(c)
     }
 }
 
@@ -138,8 +146,13 @@ compute :: proc(trans: ^Transform) -> matrix[4, 4]f32 {
         world_model[2] /= trans.current_world_scale.z
         trans.current_world_rotation = linalg.quaternion_from_matrix4(world_model)
 
-        //clean :3
-        trans.dirty = false
+        //reset means compute for 2 ticks
+        if trans.reset {
+            trans.reset = false
+        } else {
+            //clean :3
+            trans.dirty = false
+        }
     }
     return trans.current_world_model
 }

@@ -14,11 +14,13 @@ import "engine/transform"
 
 main_scene: scene.Scene = {name="Eve"}
 triangle: graphics.Mesh
+quad: graphics.Mesh
 tex: graphics.Texture
+tex2: graphics.Texture
 mat: graphics.Material
 mat2: graphics.Material
 triangle_trans := transform.origin()
-triangle_trans2 := transform.origin()
+quad_trans := transform.origin()
 
 TestActor :: struct {
     i: i32,
@@ -81,14 +83,20 @@ init :: proc() {
     //tex = graphics.make_texture_2D(img, {4, 4})
     mat = graphics.make_material(albedo=tex)
 
-    tex2 := graphics.make_texture_from_image(#load("frasier.png"))
+    quad = graphics.make_mesh([]graphics.Vertex{
+        {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
+        {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
+        {position={+0.5, +0.5, 0.0}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
+        {position={-0.5, +0.5, 0.0}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
+    }, {0, 1, 2, 0, 2, 3})
+    tex2 = graphics.make_texture_from_image(#load("frasier.png"))
     mat2 = graphics.make_material(albedo=tex2)
 
-    mat.albedo = tex2
-    graphics.rebuild_material(&mat)
+    //mat.albedo = tex2
+    //graphics.rebuild_material(&mat)
 
-    transform.translate(&triangle_trans, {0, 0, 0.5})
-    transform.translate(&triangle_trans2, {0, 0, 0.5})
+    transform.set_translation(&triangle_trans, {-0.4, 0, 0.5})
+    transform.set_translation(&quad_trans, {0.4, 0, 1.0})
 }
 
 accumulator: int = 0
@@ -128,24 +136,27 @@ tick :: proc() {
     transform.rotatey(&triangle_trans, 0.1)
     //transform.scale(&triangle_trans, {0.99, 0.99, 0.99})
     //transform.translate(&triangle_trans, {0.01, 0, 0})
-    transform.rotatez(&triangle_trans2, 0.1)
+    transform.rotatez(&quad_trans, 0.01)
 }
 
 draw :: proc(t: f64) {
     scene.draw(&main_scene, t)
     //graphics.draw_mesh(triangle, mat, transform.compute(&triangle_trans))
     graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    graphics.draw_mesh(triangle, mat2, transform.smooth(&triangle_trans2, t))
+    //graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
+    //graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
+    //graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
+    graphics.draw_mesh(quad, mat2, transform.smooth(&quad_trans, t))
 }
 
 kill :: proc() {
     scene.destroy(&main_scene)
     graphics.delete_mesh(triangle)
+    graphics.delete_mesh(quad)
     graphics.delete_material(mat)
+    graphics.delete_material(mat2)
     graphics.delete_texture(tex)
+    graphics.delete_texture(tex2)
 }
 
 main :: proc() {
