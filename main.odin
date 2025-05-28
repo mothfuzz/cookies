@@ -72,7 +72,7 @@ init :: proc() {
         {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={0, 0, 1, 1}},
     }, {0, 1, 2})
     img := []u32{
-        0xffffffff, 0xff000000, 0xffffffff, 0xff000000,
+        0xffffffff, 0xff0000ff, 0xffffffff, 0xff000000,
         0xff000000, 0xffffffff, 0xff000000, 0xffffffff,
         0xffffffff, 0xff000000, 0xffffffff, 0xff000000,
         0xff000000, 0xffffffff, 0xff000000, 0xffffffff,
@@ -84,10 +84,10 @@ init :: proc() {
     mat = graphics.make_material(albedo=tex)
 
     quad = graphics.make_mesh([]graphics.Vertex{
-        {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
-        {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
-        {position={+0.5, +0.5, 0.0}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
         {position={-0.5, +0.5, 0.0}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
+        {position={+0.5, +0.5, 0.0}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
+        {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
+        {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
     }, {0, 1, 2, 0, 2, 3})
     tex2 = graphics.make_texture_from_image(#load("frasier.png"))
     mat2 = graphics.make_material(albedo=tex2)
@@ -95,8 +95,9 @@ init :: proc() {
     //mat.albedo = tex2
     //graphics.rebuild_material(&mat)
 
-    transform.set_translation(&triangle_trans, {-0.4, 0, 0.5})
-    transform.set_translation(&quad_trans, {0.4, 0, 1.0})
+    transform.set_translation(&quad_trans, {0, 0, 0})
+    transform.set_scale(&triangle_trans, {200, 200, 1})
+    transform.set_scale(&quad_trans, {80, 80, 1})
 }
 
 accumulator: int = 0
@@ -119,9 +120,10 @@ tick :: proc() {
     if input.key_pressed(.Key_Escape) {
         window.close()
     }
-    if input.mouse_pressed(.Left) {
-        fmt.println("click!!!", accumulator)
-        fmt.println(input.mouse_position)
+    if input.mouse_down(.Left) {
+        //fmt.println("click!!!", accumulator)
+        //fmt.println(input.mouse_position)
+        transform.set_translation(&quad_trans, {f32(input.mouse_position.x), f32(input.mouse_position.y), 0})
     }
     if input.mouse_pressed(.Right) {
         fmt.println("right click!!!", accumulator)
@@ -133,10 +135,13 @@ tick :: proc() {
         scene.publish(&main_scene, MyEvent{4.13})
     }
     scene.tick(&main_scene)
+    //transform.translate(&quad_trans, {0, 0, 0.001})
     transform.rotatey(&triangle_trans, 0.1)
     //transform.scale(&triangle_trans, {0.99, 0.99, 0.99})
     //transform.translate(&triangle_trans, {0.01, 0, 0})
     transform.rotatez(&quad_trans, 0.01)
+    //graphics.camera_look_at({0, 0, 10}, {0, 0, 0})
+    graphics.camera_set_position(0, 0)
 }
 
 draw :: proc(t: f64) {
@@ -160,6 +165,10 @@ kill :: proc() {
 }
 
 main :: proc() {
+
+    fmt.println(size_of(graphics.Camera))
+    fmt.println(size_of(matrix[4,4]f32) * 2)
+
     fmt.println("HEWWO!!!")
     engine.boot(init, tick, draw, kill)
 }

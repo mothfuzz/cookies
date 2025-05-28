@@ -119,7 +119,7 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
         pos := e.mouse.offset
         rect := window.get_size()
         input.mouse_position.x = i32(pos.x) - i32(rect.x/2)
-        input.mouse_position.y = i32(pos.y) - i32(rect.y/2)
+        input.mouse_position.y = i32(rect.y/2) - i32(pos.y)
     })
 
     graphics.init(window.get_wgpu_surface, window.get_size())

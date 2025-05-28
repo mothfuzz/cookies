@@ -1,5 +1,12 @@
 @group(0) @binding(0) var<uniform> screen_size: vec2<f32>;
 @group(0) @binding(1) var<uniform> screen_color_blend: f32;
+struct Camera {
+    eye: vec4<f32>,
+    center: vec4<f32>,
+    view: mat4x4<f32>,
+    projection: mat4x4<f32>,
+}
+@group(0) @binding(2) var<uniform> camera: Camera;
 @group(1) @binding(0) var smp: sampler;
 @group(1) @binding(1) var albedo: texture_2d<f32>;
 
@@ -23,7 +30,7 @@ struct VSOut {
 fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VSOut {
     var v: VSOut;
     let model = mat4x4<f32>(vertex.model_0, vertex.model_1, vertex.model_2, vertex.model_3);
-    v.position = model * vec4<f32>(vertex.position, 1.0);
+    v.position = camera.projection * camera.view * model * vec4<f32>(vertex.position, 1.0);
     v.texcoord = vertex.texcoord;
     v.color = vertex.color;
     return v;

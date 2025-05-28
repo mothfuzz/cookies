@@ -2,6 +2,7 @@ package graphics
 
 import "core:fmt"
 import "core:math/linalg"
+import "core:math/linalg/glsl"
 import "base:runtime"
 import "vendor:wgpu"
 
@@ -23,6 +24,24 @@ Renderer :: struct {
     ready: bool,
 }
 ren: Renderer
+
+Camera :: struct {
+    eye: [4]f32,
+    center: [4]f32,
+    view: matrix[4,4]f32,
+    projection: matrix[4,4]f32,
+}
+cam: Camera
+z2d: f32
+camera_look_at :: proc(eye: [3]f32, center: [3]f32) {
+    cam.eye = {eye.x, eye.y, eye.z, 1.0}
+    cam.center = {center.x, center.y, center.z, 1.0}
+    cam.view = linalg.matrix4_look_at(eye, center, [3]f32{0, 1, 0})
+}
+
+camera_set_position :: proc(x: f32, y: f32, z: f32 = z2d) {
+    camera_look_at({x, y, z}, {0, 0, 0})
+}
 
 with_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
     //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
@@ -54,6 +73,11 @@ configure_surface :: proc(size: [2]uint = 0) {
     if size != 0 {
         screen_size = {u32(size.x), u32(size.y)}
     }
+    fov := f32(linalg.to_radians(60.0))
+    width := f32(screen_size.x)
+    height := f32(screen_size.y)
+    cam.projection = linalg.matrix4_perspective(f32(fov), width/height, 0.1, 1000.0)
+    z2d = linalg.sqrt(linalg.pow(height, 2) - linalg.pow(height/2.0, 2))
     fmt.println("reconfiguring draw surface...")
     caps, status := wgpu.SurfaceGetCapabilities(ren.surface, ren.adapter)
     if status == .Error {
@@ -115,6 +139,7 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
 
 screen_size_buffer: wgpu.Buffer
 screen_color_blend_buffer: wgpu.Buffer
+camera_buffer: wgpu.Buffer
 uniform_bind_group: wgpu.BindGroup
 
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
@@ -149,6 +174,12 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
             visibility = {.Vertex, .Fragment},
             buffer = {type=.Uniform},
         },
+        //camera
+        wgpu.BindGroupLayoutEntry{
+            binding = 2,
+            visibility = {.Vertex, .Fragment},
+            buffer = {type=.Uniform},
+        },
     }
     uniform_layout := wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(uniform_layout_entries),
@@ -170,9 +201,11 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     //create uniform buffers/bind group up front
     screen_size_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of([2]f32)})
     screen_color_blend_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of(f32)})
+    camera_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of(Camera)})
     bindings := []wgpu.BindGroupEntry{
         {binding = 0, buffer = screen_size_buffer, size = size_of([2]f32)},
         {binding = 1, buffer = screen_color_blend_buffer, size = size_of(f32)},
+        {binding = 2, buffer = camera_buffer, size = size_of(Camera)},
     }
     uniform_bind_group = wgpu.DeviceCreateBindGroup(device, &{
         layout = uniform_layout,
@@ -208,6 +241,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         primitive = {
             topology = .TriangleList,
             cullMode = .None,
+            frontFace = .CW,
         },
         depthStencil = &{
             format = .Depth24PlusStencil8,
@@ -225,6 +259,12 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
 ctx: runtime.Context
 init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
     screen_size = {u32(size.x), u32(size.y)}
+    cam = {
+        //eye = {0, 0, -1},
+        //center = {0, 0, 0},
+        //view = 1,
+        projection = 1,
+    }
     ren.instance = wgpu.CreateInstance(nil)
     if ren.instance == nil {
         panic("WebGPU not supported.")
@@ -276,6 +316,7 @@ render :: proc(t: f64) {
     blend_factor := f32(0.0)
     wgpu.QueueWriteBuffer(ren.queue, screen_size_buffer, 0, raw_data(&screen_size), size_of([2]f32))
     wgpu.QueueWriteBuffer(ren.queue, screen_color_blend_buffer, 0, &blend_factor, size_of(f32))
+    wgpu.QueueWriteBuffer(ren.queue, camera_buffer, 0, &cam, size_of(Camera))
 
     //draw loop
     render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
@@ -285,7 +326,7 @@ render :: proc(t: f64) {
             resolveTarget = screen,
             loadOp = .Clear,
             storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED, //the hell?
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
             clearValue = linalg.vector4_srgb_to_linear([4]f64{0.4, 0.6, 0.9, 1.0}),
         },
         depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
