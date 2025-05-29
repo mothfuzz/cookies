@@ -171,13 +171,10 @@ kill :: proc() {
     graphics.delete_texture(tex)
     graphics.delete_texture(tex2)
     graphics.delete_camera(cam)
+    graphics.delete_camera(cam2)
 }
 
 main :: proc() {
-
-    fmt.println(size_of(graphics.Camera))
-    fmt.println(size_of(matrix[4,4]f32) * 2)
-
     fmt.println("HEWWO!!!")
     engine.boot(init, tick, draw, kill)
 }
