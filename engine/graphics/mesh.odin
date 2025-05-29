@@ -129,7 +129,15 @@ draw_batch :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, material: Ma
     } else {
         wgpu.RenderPassEncoderDraw(render_pass, mesh.size, u32(len), 0, 0)
     }
-    clear(&instances.models)
+}
+
+@(private)
+clear_batches :: proc() {
+    for mesh, &batch in batches {
+        for material, &instances in batch {
+            clear(&instances.models)
+        }
+    }
 }
 
 draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32) {

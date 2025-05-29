@@ -3,7 +3,6 @@ package graphics
 import "vendor:wgpu"
 
 
-//INIT
 material_layout_entries := []wgpu.BindGroupLayoutEntry{
     wgpu.BindGroupLayoutEntry{
         binding = 0,
@@ -18,8 +17,6 @@ material_layout_entries := []wgpu.BindGroupLayoutEntry{
     },
 }
 material_layout: wgpu.BindGroupLayout
-//DRAW
-//then create the actual bindings... here.
 
 Material :: struct {
     bind_group: wgpu.BindGroup,
@@ -51,11 +48,11 @@ make_material :: proc(albedo: Texture) -> (mat: Material) {
     return
 }
 
+bind_material :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, mat: Material) {
+    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, mat.bind_group)
+}
+
 delete_material :: proc(mat: Material) {
     wgpu.SamplerRelease(mat.sampler)
     wgpu.BindGroupRelease(mat.bind_group)
-}
-
-bind_material :: proc(render_pass: wgpu.RenderPassEncoder, mat: Material) {
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, 1, mat.bind_group)
 }

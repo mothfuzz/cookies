@@ -1,14 +1,16 @@
 @group(0) @binding(0) var<uniform> screen_size: vec2<f32>;
 @group(0) @binding(1) var<uniform> screen_color_blend: f32;
+
 struct Camera {
     eye: vec4<f32>,
     center: vec4<f32>,
     view: mat4x4<f32>,
     projection: mat4x4<f32>,
 }
-@group(0) @binding(2) var<uniform> camera: Camera;
-@group(1) @binding(0) var smp: sampler;
-@group(1) @binding(1) var albedo: texture_2d<f32>;
+@group(1) @binding(0) var<uniform> camera: Camera;
+
+@group(2) @binding(0) var smp: sampler;
+@group(2) @binding(1) var albedo: texture_2d<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,

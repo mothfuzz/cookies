@@ -2,7 +2,6 @@ package graphics
 
 import "core:fmt"
 import "core:math/linalg"
-import "core:math/linalg/glsl"
 import "base:runtime"
 import "vendor:wgpu"
 
@@ -21,28 +20,16 @@ Renderer :: struct {
     shader: wgpu.ShaderModule,
     layout: wgpu.PipelineLayout,
     pipeline: wgpu.RenderPipeline,
+    cameras: []Camera,
     ready: bool,
 }
 ren: Renderer
 
-Camera :: struct {
-    eye: [4]f32,
-    center: [4]f32,
-    view: matrix[4,4]f32,
-    projection: matrix[4,4]f32,
-}
-cam: Camera
-z2d: f32
-camera_look_at :: proc(eye: [3]f32, center: [3]f32) {
-    cam.eye = {eye.x, eye.y, eye.z, 1.0}
-    cam.center = {center.x, center.y, center.z, 1.0}
-    cam.view = linalg.matrix4_look_at(eye, center, [3]f32{0, 1, 0})
-}
-
-camera_set_position :: proc(x: f32, y: f32, z: f32 = z2d) {
-    camera_look_at({x, y, z}, {0, 0, 0})
-}
-
+/*
+TODO: move camera stuff into its own file.
+TODO: draw_sprite function that modifies the model matrix to scale it by wgpu.TextureGetWidth & wgpu.TextureGetHeight (potentially move this stuff into its own file too)
+TODO: also add texture clipping while you're at it
+*/
 with_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
     //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
     #partial switch format {
@@ -72,12 +59,11 @@ screen_size: [2]u32
 configure_surface :: proc(size: [2]uint = 0) {
     if size != 0 {
         screen_size = {u32(size.x), u32(size.y)}
+        for cam in cameras {
+            calculate_projection(cam)
+        }
     }
-    fov := f32(linalg.to_radians(60.0))
-    width := f32(screen_size.x)
-    height := f32(screen_size.y)
-    cam.projection = linalg.matrix4_perspective(f32(fov), width/height, 0.1, 1000.0)
-    z2d = linalg.sqrt(linalg.pow(height, 2) - linalg.pow(height/2.0, 2))
+
     fmt.println("reconfiguring draw surface...")
     caps, status := wgpu.SurfaceGetCapabilities(ren.surface, ren.adapter)
     if status == .Error {
@@ -139,7 +125,6 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
 
 screen_size_buffer: wgpu.Buffer
 screen_color_blend_buffer: wgpu.Buffer
-camera_buffer: wgpu.Buffer
 uniform_bind_group: wgpu.BindGroup
 
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
@@ -174,16 +159,14 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
             visibility = {.Vertex, .Fragment},
             buffer = {type=.Uniform},
         },
-        //camera
-        wgpu.BindGroupLayoutEntry{
-            binding = 2,
-            visibility = {.Vertex, .Fragment},
-            buffer = {type=.Uniform},
-        },
     }
     uniform_layout := wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(uniform_layout_entries),
         entries = raw_data(uniform_layout_entries),
+    })
+    camera_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
+        entryCount = len(camera_layout_entries),
+        entries = raw_data(camera_layout_entries),
     })
     material_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(material_layout_entries),
@@ -192,7 +175,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         //binding for: albedo, normal, pbr, and environment (for now)
     })
 
-    bind_group_layouts := []wgpu.BindGroupLayout{uniform_layout, material_layout}
+    bind_group_layouts := []wgpu.BindGroupLayout{uniform_layout, camera_layout, material_layout}
     ren.layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
         bindGroupLayoutCount = len(bind_group_layouts),
         bindGroupLayouts = raw_data(bind_group_layouts),
@@ -201,18 +184,15 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     //create uniform buffers/bind group up front
     screen_size_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of([2]f32)})
     screen_color_blend_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of(f32)})
-    camera_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of(Camera)})
     bindings := []wgpu.BindGroupEntry{
         {binding = 0, buffer = screen_size_buffer, size = size_of([2]f32)},
         {binding = 1, buffer = screen_color_blend_buffer, size = size_of(f32)},
-        {binding = 2, buffer = camera_buffer, size = size_of(Camera)},
     }
     uniform_bind_group = wgpu.DeviceCreateBindGroup(device, &{
         layout = uniform_layout,
         entryCount = len(bindings),
         entries = raw_data(bindings),
     })
-
 
     //vertex data
     vertex_buffers := []wgpu.VertexBufferLayout{
@@ -259,12 +239,6 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
 ctx: runtime.Context
 init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
     screen_size = {u32(size.x), u32(size.y)}
-    cam = {
-        //eye = {0, 0, -1},
-        //center = {0, 0, 0},
-        //view = 1,
-        projection = 1,
-    }
     ren.instance = wgpu.CreateInstance(nil)
     if ren.instance == nil {
         panic("WebGPU not supported.")
@@ -285,6 +259,18 @@ quit :: proc() {
     wgpu.AdapterRelease(ren.adapter)
     wgpu.SurfaceRelease(ren.surface)
     wgpu.InstanceRelease(ren.instance)
+}
+
+cameras: []^Camera
+set_camera :: proc(cam: ^Camera) {
+    delete(cameras)
+    cameras = make([]^Camera, 1)
+    cameras[0] = cam
+}
+set_cameras :: proc(cams: []^Camera) {
+    delete(cameras)
+    cameras = make([]^Camera, len(cams))
+    copy(cameras, cams)
 }
 
 render :: proc(t: f64) {
@@ -316,10 +302,8 @@ render :: proc(t: f64) {
     blend_factor := f32(0.0)
     wgpu.QueueWriteBuffer(ren.queue, screen_size_buffer, 0, raw_data(&screen_size), size_of([2]f32))
     wgpu.QueueWriteBuffer(ren.queue, screen_color_blend_buffer, 0, &blend_factor, size_of(f32))
-    wgpu.QueueWriteBuffer(ren.queue, camera_buffer, 0, &cam, size_of(Camera))
 
-    //draw loop
-    render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+    clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
         colorAttachmentCount = 1,
         colorAttachments = &wgpu.RenderPassColorAttachment{
             view = ren.msaa_view,
@@ -339,22 +323,50 @@ render :: proc(t: f64) {
             stencilClearValue = 1.0,
         },
     })
+    wgpu.RenderPassEncoderEnd(clear_pass)
+    wgpu.RenderPassEncoderRelease(clear_pass)
 
-    wgpu.RenderPassEncoderSetPipeline(render_pass, ren.pipeline)
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
 
-    for mesh, &batch in batches {
-        //fmt.println("unique materials in this batch:", len(batch))
-        bind_mesh(render_pass, mesh)
-        for material, &instances in batch {
-            //fmt.println("number of instances:", len(instances.models))
-            bind_material(render_pass, material)
-            draw_batch(render_pass, mesh, material)
+    //draw loop
+    for cam in cameras {
+        render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+            colorAttachmentCount = 1,
+            colorAttachments = &wgpu.RenderPassColorAttachment{
+                view = ren.msaa_view,
+                resolveTarget = screen,
+                loadOp = .Load,
+                storeOp = .Store,
+                depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            },
+            depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+                view = ren.depth_view,
+                depthLoadOp = .Load,
+                depthStoreOp = .Store,
+                stencilLoadOp = .Load,
+                stencilStoreOp = .Store,
+            },
+        })
+
+        wgpu.RenderPassEncoderSetPipeline(render_pass, ren.pipeline)
+        wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
+        bind_camera(render_pass, 1, cam)
+
+        for mesh, &batch in batches {
+            //fmt.println("unique materials in this batch:", len(batch))
+            bind_mesh(render_pass, mesh)
+            for material, &instances in batch {
+                //fmt.println("number of instances:", len(instances.models))
+                bind_material(render_pass, 2, material)
+                draw_batch(render_pass, mesh, material)
+            }
         }
+
+        wgpu.RenderPassEncoderEnd(render_pass)
+        wgpu.RenderPassEncoderRelease(render_pass)
+
     }
 
-    wgpu.RenderPassEncoderEnd(render_pass)
-    wgpu.RenderPassEncoderRelease(render_pass)
+    clear_batches()
 
     command_buffer := wgpu.CommandEncoderFinish(command_encoder, nil)
     defer wgpu.CommandBufferRelease(command_buffer)

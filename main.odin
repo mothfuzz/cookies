@@ -21,6 +21,8 @@ mat: graphics.Material
 mat2: graphics.Material
 triangle_trans := transform.origin()
 quad_trans := transform.origin()
+cam: graphics.Camera
+cam2: graphics.Camera
 
 TestActor :: struct {
     i: i32,
@@ -98,6 +100,9 @@ init :: proc() {
     transform.set_translation(&quad_trans, {0, 0, 0})
     transform.set_scale(&triangle_trans, {200, 200, 1})
     transform.set_scale(&quad_trans, {80, 80, 1})
+
+    cam = graphics.make_camera({0, 0, 320, 400})
+    cam2 = graphics.make_camera({319, 0, 320, 400})
 }
 
 accumulator: int = 0
@@ -141,10 +146,13 @@ tick :: proc() {
     //transform.translate(&triangle_trans, {0.01, 0, 0})
     transform.rotatez(&quad_trans, 0.01)
     //graphics.camera_look_at({0, 0, 10}, {0, 0, 0})
-    graphics.camera_set_position(0, 0)
+    graphics.look_at(&cam, {+20, 0, graphics.z_2d(&cam)}, {0, 0, 0})
+    graphics.look_at(&cam2, {-20, 0, graphics.z_2d(&cam2)}, {0, 0, 0})
 }
 
 draw :: proc(t: f64) {
+    //graphics.set_camera(&cam)
+    graphics.set_cameras({&cam, &cam2})
     scene.draw(&main_scene, t)
     //graphics.draw_mesh(triangle, mat, transform.compute(&triangle_trans))
     graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
@@ -162,6 +170,7 @@ kill :: proc() {
     graphics.delete_material(mat2)
     graphics.delete_texture(tex)
     graphics.delete_texture(tex2)
+    graphics.delete_camera(cam)
 }
 
 main :: proc() {
