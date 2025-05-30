@@ -11,6 +11,7 @@ import "engine/input"
 import "engine/scene"
 import "engine/graphics"
 import "engine/transform"
+import "core:math"
 
 main_scene: scene.Scene = {name="Eve"}
 triangle: graphics.Mesh
@@ -21,6 +22,7 @@ mat: graphics.Material
 mat2: graphics.Material
 triangle_trans := transform.origin()
 quad_trans := transform.origin()
+floor_trans := transform.origin()
 cam: graphics.Camera
 cam2: graphics.Camera
 
@@ -97,13 +99,19 @@ init :: proc() {
     //mat.albedo = tex2
     //graphics.rebuild_material(&mat)
 
-    transform.set_translation(&quad_trans, {0, 0, 0})
     transform.set_scale(&triangle_trans, {200, 200, 1})
-    transform.set_scale(&quad_trans, {80, 80, 1})
+
+    transform.set_translation(&quad_trans, {0, 100+128/2, 0})
+
+    transform.set_translation(&floor_trans, {0, -320, -320})
+    transform.set_scale(&floor_trans, {640, 640, 1})
+    transform.rotatex(&floor_trans, -0.5 * math.PI)
 
     cam = graphics.make_camera({0, 0, 320, 400})
     cam2 = graphics.make_camera({319, 0, 320, 400})
 }
+
+camera_pos: [2]f32 = {0, 0}
 
 accumulator: int = 0
 tick :: proc() {
@@ -113,11 +121,21 @@ tick :: proc() {
         fmt.println("tick...")
         accumulator = 0
     }
+    if input.key_down(.Key_W) {
+        fmt.println("UP")
+        camera_pos.y += 10
+    }
+    if input.key_down(.Key_S) {
+        fmt.println("DOWN")
+        camera_pos.y -= 10
+    }
     if input.key_down(.Key_A) {
         fmt.println("LEFT")
+        camera_pos.x -= 10
     }
     if input.key_down(.Key_D) {
         fmt.println("RIGHT")
+        camera_pos.x += 10
     }
     if input.key_pressed(.Key_Space) {
         fmt.println("JUMP:", accumulator)
@@ -127,7 +145,7 @@ tick :: proc() {
     }
     if input.mouse_down(.Left) {
         //fmt.println("click!!!", accumulator)
-        //fmt.println(input.mouse_position)
+        fmt.println(input.mouse_position)
         transform.set_translation(&quad_trans, {f32(input.mouse_position.x), f32(input.mouse_position.y), 0})
     }
     if input.mouse_pressed(.Right) {
@@ -141,13 +159,13 @@ tick :: proc() {
     }
     scene.tick(&main_scene)
     //transform.translate(&quad_trans, {0, 0, 0.001})
-    transform.rotatey(&triangle_trans, 0.1)
+    //transform.rotatey(&triangle_trans, 0.1)
     //transform.scale(&triangle_trans, {0.99, 0.99, 0.99})
     //transform.translate(&triangle_trans, {0.01, 0, 0})
     transform.rotatez(&quad_trans, 0.01)
     //graphics.camera_look_at({0, 0, 10}, {0, 0, 0})
-    graphics.look_at(&cam, {+20, 0, graphics.z_2d(&cam)}, {0, 0, 0})
-    graphics.look_at(&cam2, {-20, 0, graphics.z_2d(&cam2)}, {0, 0, 0})
+    graphics.look_at(&cam, {camera_pos.x+5, camera_pos.y, graphics.z_2d(&cam)}, {0, 0, 0})
+    graphics.look_at(&cam2, {camera_pos.x-5, camera_pos.y, graphics.z_2d(&cam2)}, {0, 0, 0})
 }
 
 draw :: proc(t: f64) {
@@ -159,7 +177,9 @@ draw :: proc(t: f64) {
     //graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
     //graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
     //graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    graphics.draw_mesh(quad, mat2, transform.smooth(&quad_trans, t))
+    //graphics.draw_mesh(quad, mat2, transform.smooth(&quad_trans, t), {0, 0, 128, 128})
+    graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {0, 0, 128, 128})
+    graphics.draw_mesh(quad, mat, transform.compute(&floor_trans))
 }
 
 kill :: proc() {

@@ -20,7 +20,6 @@ Renderer :: struct {
     shader: wgpu.ShaderModule,
     layout: wgpu.PipelineLayout,
     pipeline: wgpu.RenderPipeline,
-    cameras: []Camera,
     ready: bool,
 }
 ren: Renderer
@@ -198,7 +197,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         position_attribute,
         texcoord_attribute,
         color_attribute,
-        model_attribute,
+        instance_data_attribute,
     }
     ren.pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         layout = ren.layout,
@@ -248,6 +247,9 @@ init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
 }
 
 quit :: proc() {
+    if sprite_mesh.size > 0 {
+        delete_mesh(sprite_mesh)
+    }
     wgpu.RenderPipelineRelease(ren.pipeline)
     wgpu.PipelineLayoutRelease(ren.layout)
     wgpu.ShaderModuleRelease(ren.shader)
@@ -348,7 +350,12 @@ render :: proc(t: f64) {
 
         wgpu.RenderPassEncoderSetPipeline(render_pass, ren.pipeline)
         wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
-        bind_camera(render_pass, 1, cam, t)
+        bind_camera(render_pass, 1, cam, t) //view produced here.
+        //so have to bind MVP in the middle of the loop.
+        //would also have to do culling here.
+
+        //HAVE to get this working so that culling works for every shadow camera
+        //and also have to be able to put clipping parameters in with the material
 
         for mesh, &batch in batches {
             //fmt.println("unique materials in this batch:", len(batch))
@@ -356,7 +363,7 @@ render :: proc(t: f64) {
             for material, &instances in batch {
                 //fmt.println("number of instances:", len(instances.models))
                 bind_material(render_pass, 2, material)
-                draw_batch(render_pass, mesh, material)
+                draw_batch(render_pass, mesh, material, cam)
             }
         }
 

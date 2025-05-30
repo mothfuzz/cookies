@@ -29,7 +29,6 @@ camera_layout_entries := []wgpu.BindGroupLayoutEntry{
     },
 }
 camera_layout: wgpu.BindGroupLayout
-camera_bind_group: wgpu.BindGroup
 
 make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}) -> (cam: Camera) {
     cam.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Uniform, .CopyDst}, size=size_of(CameraUniforms)})
@@ -70,7 +69,7 @@ delete_camera :: proc(cam: Camera) {
 //look_at is instant, look_to is interpolated.
 look_at :: proc(cam: ^Camera, eye: [3]f32, center: [3]f32) {
     cam.eye_prev = eye
-    cam.center_prev = eye
+    cam.center_prev = center
     cam.eye_next = eye
     cam.center_next = center
 }
@@ -97,7 +96,7 @@ FOV :: 60.0
 calculate_projection :: proc(cam: ^Camera) {
     width, height := get_viewport_size(cam)
     fov := f32(linalg.to_radians(FOV))
-    cam.projection = linalg.matrix4_perspective(fov, width/height, 0.1, 1000.0)
+    cam.projection = linalg.matrix4_perspective(fov, width/height, 0.1, 2048.0)
 }
 
 z_2d :: proc(cam: ^Camera) -> f32 {

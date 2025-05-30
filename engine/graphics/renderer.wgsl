@@ -16,10 +16,11 @@ struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) texcoord: vec2<f32>,
     @location(2) color: vec4<f32>,
-    @location(3) model_0: vec4<f32>,
-    @location(4) model_1: vec4<f32>,
-    @location(5) model_2: vec4<f32>,
-    @location(6) model_3: vec4<f32>,
+    @location(3) mvp_0: vec4<f32>,
+    @location(4) mvp_1: vec4<f32>,
+    @location(5) mvp_2: vec4<f32>,
+    @location(6) mvp_3: vec4<f32>,
+    @location(7) clip_rect: vec4<f32>,
 }
 
 struct VSOut {
@@ -31,9 +32,11 @@ struct VSOut {
 @vertex
 fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VSOut {
     var v: VSOut;
-    let model = mat4x4<f32>(vertex.model_0, vertex.model_1, vertex.model_2, vertex.model_3);
-    v.position = camera.projection * camera.view * model * vec4<f32>(vertex.position, 1.0);
-    v.texcoord = vertex.texcoord;
+    let mvp = mat4x4<f32>(vertex.mvp_0, vertex.mvp_1, vertex.mvp_2, vertex.mvp_3);
+    v.position = mvp * vec4<f32>(vertex.position, 1.0);
+    let tex_offset = vertex.clip_rect.xy;
+    let tex_factor = vertex.clip_rect.zw;
+    v.texcoord = (vertex.texcoord + tex_offset)*tex_factor;
     v.color = vertex.color;
     return v;
 }
