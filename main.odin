@@ -109,6 +109,8 @@ init :: proc() {
 
     cam = graphics.make_camera({0, 0, 320, 400})
     cam2 = graphics.make_camera({319, 0, 320, 400})
+    graphics.look_at(&cam, {+5, 0, graphics.z_2d(&cam)}, {0, 0, 0})
+    graphics.look_at(&cam2, {-5, 0, graphics.z_2d(&cam2)}, {0, 0, 0})
 }
 
 camera_pos: [2]f32 = {0, 0}
@@ -164,8 +166,8 @@ tick :: proc() {
     //transform.translate(&triangle_trans, {0.01, 0, 0})
     transform.rotatez(&quad_trans, 0.01)
     //graphics.camera_look_at({0, 0, 10}, {0, 0, 0})
-    graphics.look_at(&cam, {camera_pos.x+5, camera_pos.y, graphics.z_2d(&cam)}, {0, 0, 0})
-    graphics.look_at(&cam2, {camera_pos.x-5, camera_pos.y, graphics.z_2d(&cam2)}, {0, 0, 0})
+    graphics.look_to(&cam, {camera_pos.x+5, camera_pos.y, graphics.z_2d(&cam)}, {0, 0, 0})
+    graphics.look_to(&cam2, {camera_pos.x-5, camera_pos.y, graphics.z_2d(&cam2)}, {0, 0, 0})
 }
 
 draw :: proc(t: f64) {
