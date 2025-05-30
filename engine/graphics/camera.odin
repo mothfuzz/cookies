@@ -13,6 +13,10 @@ CameraUniforms :: struct {
 Camera :: struct {
     bind_group: wgpu.BindGroup,
     buffer: wgpu.Buffer,
+    eye_prev: [3]f32,
+    eye_next: [3]f32,
+    center_prev: [3]f32,
+    center_next: [3]f32,
     viewport: [4]f32,
     using uniforms: CameraUniforms,
 }
@@ -42,7 +46,13 @@ make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}) -> (cam: Camera) {
     return
 }
 
-bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: ^Camera) {
+bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: ^Camera, t: f64 = 1.0) {
+    t := f32(t)
+    eye := linalg.lerp(cam.eye_prev, cam.eye_next, [3]f32{t, t, t})
+    center := linalg.lerp(cam.center_prev, cam.center_next, [3]f32{t, t, t})
+    cam.eye = {eye.x, eye.y, eye.z, 1.0}
+    cam.center = {center.x, center.y, center.z, 1.0}
+    cam.view = linalg.matrix4_look_at(cam.eye.xyz, cam.center.xyz, [3]f32{0, 1, 0})
     wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &cam.uniforms, size_of(CameraUniforms))
     wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, cam.bind_group)
     x := cam.viewport.x
@@ -57,15 +67,19 @@ delete_camera :: proc(cam: Camera) {
     wgpu.BindGroupRelease(cam.bind_group)
 }
 
+//look_at is instant, look_to is interpolated.
 look_at :: proc(cam: ^Camera, eye: [3]f32, center: [3]f32) {
-    cam.eye = {eye.x, eye.y, eye.z, 1.0}
-    cam.center = {center.x, center.y, center.z, 1.0}
-    cam.view = linalg.matrix4_look_at(eye, center, [3]f32{0, 1, 0})
+    cam.eye_prev = eye
+    cam.center_prev = eye
+    cam.eye_next = eye
+    cam.center_next = center
 }
-
-/*set_camera_position_2d :: proc(cam: ^Camera, x: f32, y: f32, z_offset: f32 = 0) {
-    camera_look_at(cam, {x, y, z_offset + z_2d()}, {0, 0, 0})
-}*/
+look_to :: proc(cam: ^Camera, eye: [3]f32, center: [3]f32) {
+    cam.eye_prev = cam.eye_next
+    cam.center_prev = cam.center_next
+    cam.eye_next = eye
+    cam.center_next = center
+}
 
 get_viewport_size :: proc(cam: ^Camera) -> (width, height: f32) {
     width = cam.viewport[2]

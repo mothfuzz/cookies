@@ -26,8 +26,7 @@ Renderer :: struct {
 ren: Renderer
 
 /*
-TODO: move camera stuff into its own file.
-TODO: draw_sprite function that modifies the model matrix to scale it by wgpu.TextureGetWidth & wgpu.TextureGetHeight (potentially move this stuff into its own file too)
+TODO: draw_sprite function that modifies the model matrix to scale it by wgpu.TextureGetWidth & wgpu.TextureGetHeight (potentially move this stuff into its own file)
 TODO: also add texture clipping while you're at it
 */
 with_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
@@ -349,7 +348,7 @@ render :: proc(t: f64) {
 
         wgpu.RenderPassEncoderSetPipeline(render_pass, ren.pipeline)
         wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
-        bind_camera(render_pass, 1, cam)
+        bind_camera(render_pass, 1, cam, t)
 
         for mesh, &batch in batches {
             //fmt.println("unique materials in this batch:", len(batch))
