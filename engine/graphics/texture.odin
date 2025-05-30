@@ -14,33 +14,13 @@ Texture :: struct {
 make_scaled_image_nearest :: proc(input: []u32, in_size, out_size: [2]uint) -> (output: []u32) {
     output = make([]u32, out_size.x * out_size.y)
     scale: [2]f32
-    scale.x = f32(max(1, out_size.x-1)) / f32(max(1, in_size.x-1))
-    scale.y = f32(max(1, out_size.y-1)) / f32(max(1, in_size.y-1))
+    scale.x = f32(out_size.x) / f32(in_size.x)
+    scale.y = f32(out_size.y) / f32(in_size.y)
     for i in 0..<out_size.y {
         for j in 0..<out_size.x {
             //nearest neighbor
-            //x
-            l := math.floor(f32(j)/f32(scale.x))
-            r := math.ceil(f32(j)/f32(scale.x))
-            l_dist := math.abs(l - f32(j)/scale.x)
-            r_dist := math.abs(r - f32(j)/scale.x)
-            x: uint
-            if l < r {
-                x = uint(l)
-            } else {
-                x = uint(r)
-            }
-            //y
-            u := math.floor(f32(i)/f32(scale.y))
-            d := math.ceil(f32(i)/f32(scale.y))
-            u_dist := math.abs(u - f32(i)/scale.y)
-            d_dist := math.abs(d - f32(i)/scale.y)
-            y: uint
-            if u < d {
-                y = uint(u)
-            } else {
-                y = uint(d)
-            }
+            x := uint(math.floor((f32(j)+0.5)/f32(scale.x)))
+            y := uint(math.floor((f32(i)+0.5)/f32(scale.y)))
             output[i*out_size.x+j] = input[y*in_size.x+x]
         }
     }
@@ -65,30 +45,30 @@ from_bgra8 :: #force_inline proc(i: [4]f32) -> (o: u32) {
 make_scaled_image_bilinear :: proc(input: []u32, in_size, out_size: [2]uint) -> (output: []u32) {
     output = make([]u32, out_size.x * out_size.y)
     scale: [2]f32
-    scale.x = f32(max(1, out_size.x-1)) / f32(max(1, in_size.x-1))
-    scale.y = f32(max(1, out_size.y-1)) / f32(max(1, in_size.y-1))
+    scale.x = f32(out_size.x) / f32(in_size.x)
+    scale.y = f32(out_size.y) / f32(in_size.y)
+    //scale.x = max(1, f32(out_size.x-1)) / max(1, f32(in_size.x-1))
+    //scale.y = max(1, f32(out_size.y-1)) / max(1, f32(in_size.y-1))
     for i in 0..<out_size.y {
         for j in 0..<out_size.x {
             //bilinear
-            l := math.floor(f32(j)/f32(scale.x))
-            r := math.ceil(f32(j)/f32(scale.x))
-            u := math.floor(f32(i)/f32(scale.y))
-            d := math.ceil(f32(i)/f32(scale.y))
-
-            //interp factors
-            lr_dist := math.abs(l - f32(j)/scale.x)
-            ud_dist := math.abs(u - f32(i)/scale.y)
-
-            //samples (16 total, converted to bytes)
-            ul := to_bgra8(input[uint(u)*in_size.x+uint(l)])
-            ur := to_bgra8(input[uint(u)*in_size.x+uint(r)])
-            dl := to_bgra8(input[uint(d)*in_size.x+uint(l)])
-            dr := to_bgra8(input[uint(d)*in_size.x+uint(r)])
-
-            //interp
-            top := ul * (1 - lr_dist) + ur * lr_dist
-            bot := dl * (1 - lr_dist) + dr * lr_dist
-            mix := top * (1 - ud_dist) + bot * ud_dist
+            x := clamp(f32(j)/scale.x-0.5, 0, f32(in_size.x-1))
+            y := clamp(f32(i)/scale.y-0.5, 0, f32(in_size.y-1))
+            xi := uint(x)
+            yi := uint(y)
+            dx := x - f32(xi)
+            dy := y - f32(yi)
+            l := clamp(xi+0, 0, in_size.x-1)
+            r := clamp(xi+1, 0, in_size.x-1)
+            u := clamp(yi+0, 0, in_size.y-1)
+            d := clamp(yi+1, 0, in_size.y-1)
+            ul := to_bgra8(input[u*in_size.x + l])
+            ur := to_bgra8(input[u*in_size.x + r])
+            dl := to_bgra8(input[d*in_size.x + l])
+            dr := to_bgra8(input[d*in_size.x + r])
+            top := ul * (1 - dx) + ur * dx
+            bot := dl * (1 - dx) + dr * dx
+            mix := top * (1 - dy) + bot * dy
 
             output[i*out_size.x+j] = from_bgra8(mix)
         }
