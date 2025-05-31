@@ -101,11 +101,14 @@ init :: proc() {
 
     transform.set_scale(&triangle_trans, {200, 200, 1})
 
-    transform.set_translation(&quad_trans, {0, 100+128/2, 0})
+    transform.set_translation(&quad_trans, {0, f32(100+128/2)/200, 0})
+    transform.set_scale(&quad_trans, {1.0/200, 1.0/200, 1})
 
     transform.set_translation(&floor_trans, {0, -320, -320})
     transform.set_scale(&floor_trans, {640, 640, 1})
     transform.rotatex(&floor_trans, -0.5 * math.PI)
+
+    transform.parent(&triangle_trans, &quad_trans)
 
     cam = graphics.make_camera({0, 0, 320, 400})
     cam2 = graphics.make_camera({319, 0, 320, 400})
@@ -161,10 +164,10 @@ tick :: proc() {
     }
     scene.tick(&main_scene)
     //transform.translate(&quad_trans, {0, 0, 0.001})
-    //transform.rotatey(&triangle_trans, 0.1)
+    transform.rotatez(&triangle_trans, 0.01)
     //transform.scale(&triangle_trans, {0.99, 0.99, 0.99})
     //transform.translate(&triangle_trans, {0.01, 0, 0})
-    transform.rotatez(&quad_trans, 0.01)
+    transform.rotatez(&quad_trans, -0.01)
     //graphics.camera_look_at({0, 0, 10}, {0, 0, 0})
     graphics.look_to(&cam, {camera_pos.x+5, camera_pos.y, graphics.z_2d(&cam)}, {0, 0, 0})
     graphics.look_to(&cam2, {camera_pos.x-5, camera_pos.y, graphics.z_2d(&cam2)}, {0, 0, 0})
