@@ -19,25 +19,25 @@ Mesh :: struct {
     indices: wgpu.Buffer,
 }
 
-make_mesh_array :: proc(vertices: [$i]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
+make_mesh_from_array :: proc(vertices: [$i]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
     new_vertices := #soa[i]Vertex
     for i in 0..<i {
         new_vertices[i] = vertices[i]
     }
-    mesh = make_mesh_soa(new_vertices, indices)
+    mesh = make_mesh_from_soa(new_vertices, indices)
     return
 }
-make_mesh_slice :: proc(vertices: []Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
+make_mesh_from_slice :: proc(vertices: []Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
     size := len(vertices)
     new_vertices := make(#soa[]Vertex, size)
     for i in 0..<size {
         new_vertices[i] = vertices[i]
     }
-    mesh = make_mesh_soa(new_vertices, indices)
+    mesh = make_mesh_from_soa(new_vertices, indices)
     delete(new_vertices)
     return
 }
-make_mesh_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
+make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
     n := len(vertices)
     mesh.positions = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.position[0:n])
     mesh.texcoords = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.texcoord[0:n])
@@ -59,7 +59,7 @@ delete_mesh :: proc(mesh: Mesh) {
     }
 }
 
-make_mesh :: proc{make_mesh_array, make_mesh_slice, make_mesh_soa}
+make_mesh :: proc{make_mesh_from_array, make_mesh_from_slice, make_mesh_from_soa}
 
 position_attribute := wgpu.VertexBufferLayout{
     stepMode = .Vertex,
@@ -105,22 +105,15 @@ InstanceBufferData :: struct {
     clip_rect: [4]f32,
 }
 
-//more often do we have the same mesh with different textures
-//than we have the same texture on different meshes
-batches: map[Mesh]map[Material][dynamic]InstanceData
-
 bind_mesh :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh) {
     wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 0, mesh.positions, 0, wgpu.BufferGetSize(mesh.positions))
     wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 1, mesh.texcoords, 0, wgpu.BufferGetSize(mesh.texcoords))
     wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 2, mesh.colors, 0, wgpu.BufferGetSize(mesh.colors))
 }
 
-//assumes material & mesh are already bound.
+//assumes material, mesh, and camera are all already bound.
 @(private)
-draw_batch :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, material: Material, cam: ^Camera) {
-    batches := &batches[mesh]
-    instances := &batches[material]
-
+draw_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, material: Material, cam: ^Camera, instances: []InstanceData) {
     instances_actual := make([]InstanceBufferData, len(instances))
     defer delete(instances_actual)
     for instance, i in instances {
@@ -171,41 +164,4 @@ draw_batch :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, material: Ma
     } else {
         wgpu.RenderPassEncoderDraw(render_pass, mesh.size, u32(len(instances_actual)), 0, 0)
     }
-}
-
-@(private)
-clear_batches :: proc() {
-    for mesh, &batch in batches {
-        for material, &instances in batch {
-            clear(&instances)
-        }
-    }
-}
-
-draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0, clip_rect: [4]f32 = 0, sprite: bool = false, billboard: bool = false) {
-    model := model
-    if !(mesh in batches) {
-        batches[mesh] = {}
-    }
-    batch := &batches[mesh]
-    if !(material in batch) {
-        //create instance buffer
-        batch[material] = make([dynamic]InstanceData, 0)
-    }
-    instances := &batch[material]
-    append(instances, InstanceData{{model, clip_rect}, sprite, billboard})
-}
-
-sprite_mesh: Mesh
-
-draw_sprite :: proc(material: Material, model: matrix[4, 4]f32 = 0, clip_rect: [4]f32 = 0, billboard: bool = true) {
-    if sprite_mesh.size == 0 {
-        sprite_mesh = make_mesh([]Vertex{
-            {position={-0.5, +0.5, 0.0}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
-            {position={+0.5, +0.5, 0.0}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
-            {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
-            {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
-        }, {0, 1, 2, 0, 2, 3})
-    }
-    draw_mesh(sprite_mesh, material, model, clip_rect, true, billboard)
 }

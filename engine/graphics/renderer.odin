@@ -274,6 +274,7 @@ set_cameras :: proc(cams: []^Camera) {
     copy(cameras, cams)
 }
 
+
 render :: proc(t: f64) {
     if !ren.ready {
         return
@@ -363,7 +364,7 @@ render :: proc(t: f64) {
             for material, &instances in batch {
                 //fmt.println("number of instances:", len(instances.models))
                 bind_material(render_pass, 2, material)
-                draw_batch(render_pass, mesh, material, cam)
+                draw_instances(render_pass, mesh, material, cam, instances[:])
             }
         }
 
