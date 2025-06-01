@@ -36,12 +36,14 @@ rebuild_material :: proc(mat: ^Material) {
     })
 }
 
-make_material :: proc(albedo: Texture) -> (mat: Material) {
+make_material :: proc(albedo: Texture, filtering: bool = true, tiling: [2]bool = false) -> (mat: Material) {
     mat.sampler = wgpu.DeviceCreateSampler(ren.device, &{
-        minFilter = .Linear,
-        magFilter = .Linear,
-        mipmapFilter = .Linear,
-        maxAnisotropy = 16,
+        minFilter = .Linear if filtering else .Nearest,
+        magFilter = .Linear if filtering else .Nearest,
+        mipmapFilter = .Linear if filtering else .Nearest,
+        maxAnisotropy = 16 if filtering else 1,
+        addressModeU = .Repeat if tiling.x else .ClampToEdge,
+        addressModeV = .Repeat if tiling.y else .ClampToEdge,
     })
     mat.albedo = albedo
     rebuild_material(&mat)

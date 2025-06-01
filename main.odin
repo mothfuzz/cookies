@@ -81,11 +81,11 @@ init :: proc() {
         0xffffffff, 0xff000000, 0xffffffff, 0xff000000,
         0xff000000, 0xffffffff, 0xff000000, 0xffffffff,
     }
-    img2 := graphics.make_scaled_image_nearest(img, {4, 4}, {1024, 1024})
-    tex = graphics.make_texture_2D(img2, {1024, 1024})
-    delete(img2)
-    //tex = graphics.make_texture_2D(img, {4, 4})
-    mat = graphics.make_material(albedo=tex)
+    //img2 := graphics.make_scaled_image_nearest(img, {4, 4}, {1024, 1024})
+    //tex = graphics.make_texture_2D(img2, {1024, 1024})
+    //delete(img2)
+    tex = graphics.make_texture_2D(img, {4, 4})
+    mat = graphics.make_material(albedo=tex, filtering=false)
 
     quad = graphics.make_mesh([]graphics.Vertex{
         {position={-0.5, +0.5, 0.0}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
