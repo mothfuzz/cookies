@@ -274,7 +274,6 @@ set_cameras :: proc(cams: []^Camera) {
     copy(cameras, cams)
 }
 
-
 render :: proc(t: f64) {
     if !ren.ready {
         return
@@ -328,6 +327,19 @@ render :: proc(t: f64) {
     wgpu.RenderPassEncoderEnd(clear_pass)
     wgpu.RenderPassEncoderRelease(clear_pass)
 
+    all_meshes := make([dynamic]MeshRenderItem)
+    defer delete(all_meshes)
+    all_indices := make([dynamic]int)
+    defer delete(all_indices)
+    for mesh, &batch in batches {
+        for material, &instances in batch {
+            for instance, i in instances {
+                append(&all_meshes, MeshRenderItem{mesh=mesh, material=material, draw=instance})
+                append(&all_indices, len(all_indices))
+            }
+            clear(&instances)
+        }
+    }
 
     //draw loop
     for cam in cameras {
@@ -351,20 +363,45 @@ render :: proc(t: f64) {
 
         wgpu.RenderPassEncoderSetPipeline(render_pass, ren.pipeline)
         wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
-        bind_camera(render_pass, 1, cam, t) //view produced here.
-        //so have to bind MVP in the middle of the loop.
-        //would also have to do culling here.
+        bind_camera(render_pass, 1, cam, t) //view produced here
 
-        //HAVE to get this working so that culling works for every shadow camera
-        //and also have to be able to put clipping parameters in with the material
+        indices := frustum_culling(cam, all_meshes[:], all_indices[:])
+        defer delete(indices)
 
-        for mesh, &batch in batches {
-            //fmt.println("unique materials in this batch:", len(batch))
-            bind_mesh(render_pass, mesh)
-            for material, &instances in batch {
-                //fmt.println("number of instances:", len(instances.models))
-                bind_material(render_pass, 2, material)
-                draw_instances(render_pass, mesh, material, cam, instances[:])
+        current_mesh: Mesh
+        current_material: Material
+        instances := make([dynamic]InstanceData, 0)
+        flush := false
+        defer delete(instances)
+        for i in 0..<len(indices) {
+            //batch em up
+            instance := &all_meshes[indices[i]]
+            if instance.mesh != current_mesh {
+                current_mesh = instance.mesh
+                bind_mesh(render_pass, current_mesh)
+            }
+            if instance.material != current_material {
+                current_material = instance.material
+                bind_material(render_pass, 2, current_material)
+            }
+            calculate_mvp(instance, cam)
+            append(&instances, InstanceData{mvp=instance.mvp, clip_rect=instance.clip_rect})
+
+            //if next mesh is different, or there is no next mesh, draw the current batch
+            switch {
+            case i+1 < len(indices):
+                instance := &all_meshes[indices[i+1]]
+                if instance.mesh != current_mesh || instance.material != current_material {
+                    flush = true
+                }
+            case i+1 == len(indices):
+                flush = true
+            }
+
+            if flush {
+                draw_mesh_instances(render_pass, current_mesh, instances[:])
+                clear(&instances)
+                flush = false
             }
         }
 
@@ -372,8 +409,6 @@ render :: proc(t: f64) {
         wgpu.RenderPassEncoderRelease(render_pass)
 
     }
-
-    clear_batches()
 
     command_buffer := wgpu.CommandEncoderFinish(command_encoder, nil)
     defer wgpu.CommandBufferRelease(command_buffer)

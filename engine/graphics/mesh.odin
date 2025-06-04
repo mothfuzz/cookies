@@ -1,6 +1,7 @@
 package graphics
 
 import "core:fmt"
+import "core:math"
 import "core:math/linalg"
 import "vendor:wgpu"
 
@@ -10,6 +11,11 @@ Vertex :: struct {
     color: [4]f32,
 }
 
+Extents :: struct {
+    mini: [3]f32,
+    maxi: [3]f32,
+}
+
 Mesh :: struct {
     size: u32,
     //buffers
@@ -17,6 +23,8 @@ Mesh :: struct {
     texcoords: wgpu.Buffer,
     colors: wgpu.Buffer,
     indices: wgpu.Buffer,
+    //optimizations
+    bounding_box: Extents,
 }
 
 make_mesh_from_array :: proc(vertices: [$i]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
@@ -47,6 +55,28 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mes
         mesh.size = u32(len(indices))
     } else {
         mesh.size = u32(len(vertices))
+    }
+    mesh.bounding_box.mini = math.INF_F32
+    mesh.bounding_box.maxi = math.NEG_INF_F32
+    for v in vertices {
+        if v.position.x > mesh.bounding_box.maxi.x {
+            mesh.bounding_box.maxi.x = v.position.x
+        }
+        if v.position.y > mesh.bounding_box.maxi.y {
+            mesh.bounding_box.maxi.y = v.position.y
+        }
+        if v.position.z > mesh.bounding_box.maxi.z {
+            mesh.bounding_box.maxi.z = v.position.z
+        }
+        if v.position.x < mesh.bounding_box.mini.x {
+            mesh.bounding_box.mini.x = v.position.x
+        }
+        if v.position.y < mesh.bounding_box.mini.y {
+            mesh.bounding_box.mini.y = v.position.y
+        }
+        if v.position.z < mesh.bounding_box.mini.z {
+            mesh.bounding_box.mini.z = v.position.z
+        }
     }
     return
 }
@@ -95,73 +125,106 @@ instance_data_attribute := wgpu.VertexBufferLayout{
     attributes = raw_data(instance_data_attributes),
 }
 
-InstanceData :: struct {
-    using buffer_data: InstanceBufferData,
-    is_sprite: bool,
-    is_billboard: bool,
-}
-InstanceBufferData :: struct {
+//all data needed to render a single instance
+MeshRenderItem :: struct {
+    mesh: Mesh,
+    material: Material,
+    draw: MeshDraw,
+    //don't calculate these twice.
+    bounding_box: [8][4]f32,
     model: matrix[4,4]f32,
+    clip_rect: [4]f32,
+    local_calculated: bool,
+    mvp: matrix[4,4]f32,
+    mvp_calculated: bool,
+}
+
+//data that actually gets passed to the GPU
+InstanceData :: struct {
+    mvp: matrix[4,4]f32,
     clip_rect: [4]f32,
 }
 
+//this happens at an earlier stage than draw_instances i.e. multiple materials could be bound for one mesh
 bind_mesh :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh) {
     wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 0, mesh.positions, 0, wgpu.BufferGetSize(mesh.positions))
     wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 1, mesh.texcoords, 0, wgpu.BufferGetSize(mesh.texcoords))
     wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 2, mesh.colors, 0, wgpu.BufferGetSize(mesh.colors))
 }
 
-//assumes material, mesh, and camera are all already bound.
-@(private)
-draw_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, material: Material, cam: ^Camera, instances: []InstanceData) {
-    instances_actual := make([]InstanceBufferData, len(instances))
-    defer delete(instances_actual)
-    for instance, i in instances {
-        w := f32(wgpu.TextureGetWidth(material.albedo.image))
-        h := f32(wgpu.TextureGetHeight(material.albedo.image))
-        instances_actual[i].clip_rect.x = instance.clip_rect.x / w
-        instances_actual[i].clip_rect.y = instance.clip_rect.y / h
-        if instance.clip_rect[2] == 0 {
-            instances_actual[i].clip_rect[2] = 1.0
-        } else {
-            instances_actual[i].clip_rect[2] = instance.clip_rect[2] / w
-        }
-        if instance.clip_rect[3] == 0 {
-            instances_actual[i].clip_rect[3] = 1.0
-        } else {
-            instances_actual[i].clip_rect[3] = instance.clip_rect[3] / h
-        }
-
-        if instance.is_sprite {
-            instances_actual[i].model = instance.model
-            instances_actual[i].model[3] = {0, 0, 0, 1}
-            scale := linalg.matrix4_scale([3]f32{instance.clip_rect[2], instance.clip_rect[3], 1.0})
-            instances_actual[i].model *= scale
-            instances_actual[i].model[3] = instance.model[3]
-        } else {
-            instances_actual[i].model = instance.model
-        }
-        view_model: matrix[4,4]f32
-        if instance.is_billboard {
-            rotation_scale := cast(matrix[3,3]f32)(instances_actual[i].model)
-            view_model = cam.view * instances_actual[i].model;
-            trans := view_model[3] //save produced translation vector
-            view_model = cast(matrix[4,4]f32)(rotation_scale) //and then revert to untransformed scaling/rotation
-            view_model[3] = trans
-        } else {
-            view_model = cam.view * instances_actual[i].model
-        }
-        instances_actual[i].model = cam.projection * view_model
-
+//calculates local mesh data
+precalcs :: proc(instance: ^MeshRenderItem) {
+    if instance.local_calculated {
+        return
     }
-    instance_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, instances_actual)
+    //calculate clip_rect
+    w := f32(wgpu.TextureGetWidth(instance.material.albedo.image))
+    h := f32(wgpu.TextureGetHeight(instance.material.albedo.image))
+    instance.clip_rect.x = instance.draw.clip_rect.x / w
+    instance.clip_rect.y = instance.draw.clip_rect.y / h
+    if instance.draw.clip_rect[2] == 0 {
+        instance.clip_rect[2] = 1.0
+    } else {
+        instance.clip_rect[2] = instance.draw.clip_rect[2] / w
+    }
+    if instance.draw.clip_rect[3] == 0 {
+        instance.clip_rect[3] = 1.0
+    } else {
+        instance.clip_rect[3] = instance.draw.clip_rect[3] / h
+    }
+    //calculate model
+    instance.model = instance.draw.model
+    if instance.draw.is_sprite {
+        instance.model[3] = {0, 0, 0, 1}
+        scale := linalg.matrix4_scale([3]f32{instance.draw.clip_rect[2], instance.draw.clip_rect[3], 1.0})
+        instance.model *= scale
+        instance.model[3] = instance.draw.model[3]
+    }
+    //calculate bounding box
+    bb := instance.mesh.bounding_box
+    for i in 0..<8 {
+        for j in 0..<3 {
+            //convert extents to individual points (using 3-digit binary)
+            instance.bounding_box[i][j] = bb.maxi[j] if i % (1 << uint(j+1)) > (1 << uint(j) - 1) else bb.mini[j]
+        }
+        instance.bounding_box[i][3] = 1
+        instance.bounding_box[i] = instance.model * instance.bounding_box[i]
+    }
+
+    instance.local_calculated = true
+}
+
+//calculates world mesh data (aka the mvp)
+//assumes local data already calculated
+calculate_mvp :: proc(instance: ^MeshRenderItem, cam: ^Camera) {
+    if instance.mvp_calculated {
+        return
+    }
+    view_model: matrix[4,4]f32
+    if instance.draw.is_billboard {
+        rotation_scale := cast(matrix[3,3]f32)(instance.model)
+        view_model = cam.view * instance.model;
+        trans := view_model[3] //save produced translation vector
+        view_model = cast(matrix[4,4]f32)(rotation_scale) //and then revert to untransformed scaling/rotation
+        view_model[3] = trans
+    } else {
+        view_model = cam.view * instance.model
+    }
+    instance.mvp = cam.projection * view_model
+    instance.mvp_calculated = true
+}
+
+//assumes material, mesh, and camera are all already bound & calculations are all done.
+@(private)
+draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, instances: []InstanceData) {
+    instance_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, instances)
     wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 3, instance_buffer, 0, wgpu.BufferGetSize(instance_buffer))
     wgpu.BufferRelease(instance_buffer)
 
     if mesh.indices != nil {
         wgpu.RenderPassEncoderSetIndexBuffer(render_pass, mesh.indices, .Uint32, 0, wgpu.BufferGetSize(mesh.indices))
-        wgpu.RenderPassEncoderDrawIndexed(render_pass, mesh.size, u32(len(instances_actual)), 0, 0, 0)
+        wgpu.RenderPassEncoderDrawIndexed(render_pass, mesh.size, u32(len(instances)), 0, 0, 0)
     } else {
-        wgpu.RenderPassEncoderDraw(render_pass, mesh.size, u32(len(instances_actual)), 0, 0)
+        wgpu.RenderPassEncoderDraw(render_pass, mesh.size, u32(len(instances)), 0, 0)
     }
 }

@@ -116,7 +116,7 @@ init :: proc() {
     graphics.look_at(&cam2, {-5, 0, graphics.z_2d(&cam2)}, {0, 0, 0})
 }
 
-camera_pos: [2]f32 = {0, 0}
+camera_pos: [3]f32 = {0, 0, 0}
 
 accumulator: int = 0
 tick :: proc() {
@@ -151,7 +151,7 @@ tick :: proc() {
     if input.mouse_down(.Left) {
         //fmt.println("click!!!", accumulator)
         fmt.println(input.mouse_position)
-        transform.set_translation(&quad_trans, {f32(input.mouse_position.x), f32(input.mouse_position.y), 0})
+        transform.set_translation(&triangle_trans, {f32(input.mouse_position.x), f32(input.mouse_position.y), 0})
     }
     if input.mouse_pressed(.Right) {
         fmt.println("right click!!!", accumulator)
@@ -163,26 +163,16 @@ tick :: proc() {
         scene.publish(&main_scene, MyEvent{4.13})
     }
     scene.tick(&main_scene)
-    //transform.translate(&quad_trans, {0, 0, 0.001})
     transform.rotatez(&triangle_trans, 0.01)
-    //transform.scale(&triangle_trans, {0.99, 0.99, 0.99})
-    //transform.translate(&triangle_trans, {0.01, 0, 0})
     transform.rotatez(&quad_trans, -0.01)
-    //graphics.camera_look_at({0, 0, 10}, {0, 0, 0})
-    graphics.look_to(&cam, {camera_pos.x+5, camera_pos.y, graphics.z_2d(&cam)}, {0, 0, 0})
-    graphics.look_to(&cam2, {camera_pos.x-5, camera_pos.y, graphics.z_2d(&cam2)}, {0, 0, 0})
+    graphics.look_to(&cam, {camera_pos.x+5, camera_pos.y, camera_pos.z + graphics.z_2d(&cam)}, camera_pos+{0, 0, 0})
+    graphics.look_to(&cam2, {camera_pos.x-5, camera_pos.y, camera_pos.z + graphics.z_2d(&cam2)}, camera_pos+{0, 0, 0})
 }
 
 draw :: proc(t: f64) {
-    //graphics.set_camera(&cam)
     graphics.set_cameras({&cam, &cam2})
     scene.draw(&main_scene, t)
-    //graphics.draw_mesh(triangle, mat, transform.compute(&triangle_trans))
     graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    //graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    //graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    //graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    //graphics.draw_mesh(quad, mat2, transform.smooth(&quad_trans, t), {0, 0, 128, 128})
     graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {0, 0, 128, 128})
     graphics.draw_mesh(quad, mat, transform.compute(&floor_trans))
 }
