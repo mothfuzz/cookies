@@ -365,6 +365,7 @@ render :: proc(t: f64) {
         wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
         bind_camera(render_pass, 1, cam, t) //view produced here
 
+        reset_mvps(all_meshes[:])
         indices := frustum_culling(cam, all_meshes[:], all_indices[:])
         defer delete(indices)
 

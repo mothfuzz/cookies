@@ -214,6 +214,12 @@ calculate_mvp :: proc(instance: ^MeshRenderItem, cam: ^Camera) {
     instance.mvp_calculated = true
 }
 
+reset_mvps :: proc(instances: []MeshRenderItem) {
+    for &instance in instances {
+        instance.mvp_calculated = false
+    }
+}
+
 //assumes material, mesh, and camera are all already bound & calculations are all done.
 @(private)
 draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, instances: []InstanceData) {
