@@ -94,11 +94,12 @@ get_viewport_size :: proc(cam: ^Camera) -> (width, height: f32) {
 
 FOV :: 60.0
 NEAR :: 0.1
-FAR :: 2048.0
+FAR :: 2048.0*1024.0
 calculate_projection :: proc(cam: ^Camera) {
     width, height := get_viewport_size(cam)
     fov := f32(linalg.to_radians(FOV))
-    cam.projection = linalg.matrix4_perspective(fov, width/height, NEAR, FAR)
+    //cam.projection = linalg.matrix4_perspective(fov, width/height, NEAR, FAR)
+    cam.projection = linalg.matrix4_infinite_perspective(fov, width/height, NEAR)
 }
 
 z_2d :: proc(cam: ^Camera) -> f32 {
