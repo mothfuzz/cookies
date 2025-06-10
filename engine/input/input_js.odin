@@ -69,6 +69,10 @@ js2key :: proc(e: js.Event) -> Scancode {
     case "F10": return .Key_F10
     case "F11": return .Key_F11
     case "F12": return .Key_F12
+    case "ArrowLeft": return .Key_Left
+    case "ArrowRight": return .Key_Right
+    case "ArrowUp": return .Key_Up
+    case "ArrowDown": return .Key_Down
     }
     return .Key_None
 }

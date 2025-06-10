@@ -12,13 +12,14 @@ Scancode :: enum {
     Key_LeftShift, Key_LeftCtrl, Key_LeftAlt, Key_RightShift, Key_RightCtrl, Key_RightAlt,
     Key_F1, Key_F2, Key_F3, Key_F4, Key_F5, Key_F6, Key_F7, Key_F8,
     Key_F9, Key_F10, Key_F11, Key_F12,
+    Key_Left, Key_Right, Key_Up, Key_Down,
 }
 keys_current: [Scancode]b8 = {}
 keys_pressed: [Scancode]b8 = {}
 keys_released: [Scancode]b8 = {}
 
 MouseButton :: enum {
-    Left, Middle, Right
+    Left, Middle, Right,
 }
 
 mouse_buttons_current: [MouseButton]b8 = {}

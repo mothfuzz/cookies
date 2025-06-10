@@ -66,6 +66,10 @@ sdl2key :: proc(e: sdl3.Event) -> Scancode {
     case .F10: return .Key_F10
     case .F11: return .Key_F11
     case .F12: return .Key_F12
+    case .LEFT: return .Key_Left
+    case .RIGHT: return .Key_Right
+    case .UP: return .Key_Up
+    case .DOWN: return .Key_Down
     }
     return .Key_None
 }
