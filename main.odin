@@ -105,18 +105,20 @@ init :: proc() {
     transform.set_scale(&quad_trans, {1.0/200, 1.0/200, 1})
 
     transform.set_translation(&floor_trans, {0, -320, -320})
-    transform.set_scale(&floor_trans, {640, 640, 1})
+    transform.set_scale(&floor_trans, {640*4, 640*4, 1})
     transform.rotatex(&floor_trans, -0.5 * math.PI)
 
     transform.parent(&triangle_trans, &quad_trans)
 
     cam = graphics.make_camera({0, 0, 320, 400})
     cam2 = graphics.make_camera({319, 0, 320, 400})
-    graphics.look_at(&cam, {+5, 0, graphics.z_2d(&cam)}, {0, 0, 0})
-    graphics.look_at(&cam2, {-5, 0, graphics.z_2d(&cam2)}, {0, 0, 0})
+    graphics.look_at(&cam, {+5, 0, 0}, {0, 0, graphics.z_2d(&cam)})
+    graphics.look_at(&cam2, {-5, 0, 0}, {0, 0, graphics.z_2d(&cam2)})
 }
 
 camera_pos: [3]f32 = {0, 0, 0}
+camera_angle: f32 = 270*math.PI/180.0
+move_speed: f32 = 25
 
 accumulator: int = 0
 tick :: proc() {
@@ -127,20 +129,26 @@ tick :: proc() {
         accumulator = 0
     }
     if input.key_down(.Key_W) {
-        fmt.println("UP")
-        camera_pos.y += 10
+        camera_pos.z += math.sin(camera_angle)*move_speed
+        camera_pos.x += math.cos(camera_angle)*move_speed
     }
     if input.key_down(.Key_S) {
-        fmt.println("DOWN")
-        camera_pos.y -= 10
+        camera_pos.z -= math.sin(camera_angle)*move_speed
+        camera_pos.x -= math.cos(camera_angle)*move_speed
     }
     if input.key_down(.Key_A) {
-        fmt.println("LEFT")
-        camera_pos.x -= 10
+        camera_pos.z -= math.cos(camera_angle)*move_speed
+        camera_pos.x += math.sin(camera_angle)*move_speed
     }
     if input.key_down(.Key_D) {
-        fmt.println("RIGHT")
-        camera_pos.x += 10
+        camera_pos.z += math.cos(camera_angle)*move_speed
+        camera_pos.x -= math.sin(camera_angle)*move_speed
+    }
+    if input.key_down(.Key_Left) {
+        camera_angle -= 0.1
+    }
+    if input.key_down(.Key_Right) {
+        camera_angle += 0.1
     }
     if input.key_pressed(.Key_Space) {
         fmt.println("JUMP:", accumulator)
@@ -165,8 +173,12 @@ tick :: proc() {
     scene.tick(&main_scene)
     transform.rotatez(&triangle_trans, 0.01)
     transform.rotatez(&quad_trans, -0.01)
-    graphics.look_to(&cam, {camera_pos.x+5, camera_pos.y, camera_pos.z + graphics.z_2d(&cam)}, camera_pos+{0, 0, 0})
-    graphics.look_to(&cam2, {camera_pos.x-5, camera_pos.y, camera_pos.z + graphics.z_2d(&cam2)}, camera_pos+{0, 0, 0})
+
+    forward := [3]f32{camera_pos.x + math.cos(camera_angle)*graphics.z_2d(&cam),
+                      camera_pos.y,
+                      camera_pos.z + math.sin(camera_angle)*graphics.z_2d(&cam)}
+    graphics.look_to(&cam, {camera_pos.x+5, camera_pos.y, camera_pos.z}, forward)
+    graphics.look_to(&cam2, {camera_pos.x-5, camera_pos.y, camera_pos.z}, forward)
 }
 
 draw :: proc(t: f64) {
