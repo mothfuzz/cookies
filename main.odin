@@ -25,6 +25,7 @@ quad_trans := transform.origin()
 floor_trans := transform.origin()
 cam: graphics.Camera
 cam2: graphics.Camera
+unifont: graphics.Font
 
 TestActor :: struct {
     i: i32,
@@ -61,8 +62,10 @@ test_kill :: proc(a: ^scene.Actor) {
     fmt.println("I was killed!!")
 }
 
+screen_size: [2]f32 = {640, 400}
+
 init :: proc() {
-    window.set_size(640, 400)
+    window.set_size(uint(screen_size.x), uint(screen_size.y))
     engine.set_tick_rate(30)
 
     for i := 0; i < 16; i += 1 {
@@ -87,6 +90,7 @@ init :: proc() {
     tex = graphics.make_texture_2D(img, {4, 4})
     mat = graphics.make_material(albedo=tex, filtering=false)
 
+
     quad = graphics.make_mesh([]graphics.Vertex{
         {position={-0.5, +0.5, 0.0}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
         {position={+0.5, +0.5, 0.0}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
@@ -110,15 +114,21 @@ init :: proc() {
 
     transform.parent(&triangle_trans, &quad_trans)
 
-    cam = graphics.make_camera({0, 0, 320, 400})
-    cam2 = graphics.make_camera({319, 0, 320, 400})
+    cam = graphics.make_camera({0, 0, screen_size.x/2, screen_size.y})
+    cam2 = graphics.make_camera({screen_size.x/2 - 1, 0, screen_size.x/2, screen_size.y})
     graphics.look_at(&cam, {+5, 0, 0}, {0, 0, graphics.z_2d(&cam)})
     graphics.look_at(&cam2, {-5, 0, 0}, {0, 0, graphics.z_2d(&cam2)})
+
+    //fmt.println("loading font...")
+    unifont = graphics.make_font_from_file(#load("unifont.otf"), 32)
 }
 
 camera_pos: [3]f32 = {0, 0, 0}
 camera_angle: f32 = 270*math.PI/180.0
 move_speed: f32 = 25
+
+str := "yippeeeeee!!!!!!!!!!!!!!"
+text_counter := 0
 
 accumulator: int = 0
 tick :: proc() {
@@ -127,6 +137,9 @@ tick :: proc() {
         //prints every 1 second
         fmt.println("tick...")
         accumulator = 0
+    }
+    if accumulator % 2 == 1 && text_counter < len(str) {
+        text_counter += 1
     }
     if input.key_down(.Key_W) {
         camera_pos.z += math.sin(camera_angle)*move_speed
@@ -182,11 +195,23 @@ tick :: proc() {
 }
 
 draw :: proc(t: f64) {
+
+    screen_size.x = f32(window.get_size().x)
+    screen_size.y = f32(window.get_size().y)
+    graphics.set_viewport(&cam, {0, 0, screen_size.x/2, screen_size.y})
+    graphics.set_viewport(&cam2, {screen_size.x/2 - 1, 0, screen_size.x/2, screen_size.y})
+
     graphics.set_cameras({&cam, &cam2})
     scene.draw(&main_scene, t)
     graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
     graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {0, 0, 128, 128})
     graphics.draw_mesh(quad, mat, transform.compute(&floor_trans))
+
+    offset: [2]f32
+    offset.x = -screen_size.x/2
+    offset.y = +screen_size.y/2
+    graphics.ui_draw_text(str[0:text_counter], unifont, offset, {0, 0, 0, 1})
+    graphics.ui_draw_text(str[0:text_counter], unifont, offset+{1, -1}, {1, 1, 1, 1})
 }
 
 kill :: proc() {
@@ -199,6 +224,7 @@ kill :: proc() {
     graphics.delete_texture(tex2)
     graphics.delete_camera(cam)
     graphics.delete_camera(cam2)
+    graphics.delete_font(unifont)
 }
 
 main :: proc() {

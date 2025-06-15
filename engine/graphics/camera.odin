@@ -80,6 +80,11 @@ look_to :: proc(cam: ^Camera, eye: [3]f32, center: [3]f32) {
     cam.center_next = center
 }
 
+set_viewport :: proc(cam: ^Camera, viewport: [4]f32) {
+    cam.viewport = viewport
+    calculate_projection(cam)
+}
+
 get_viewport_size :: proc(cam: ^Camera) -> (width, height: f32) {
     width = cam.viewport[2]
     height = cam.viewport[3]

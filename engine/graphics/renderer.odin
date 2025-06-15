@@ -24,10 +24,6 @@ Renderer :: struct {
 }
 ren: Renderer
 
-/*
-TODO: draw_sprite function that modifies the model matrix to scale it by wgpu.TextureGetWidth & wgpu.TextureGetHeight (potentially move this stuff into its own file)
-TODO: also add texture clipping while you're at it
-*/
 with_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
     //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
     #partial switch format {
@@ -128,6 +124,7 @@ uniform_bind_group: wgpu.BindGroup
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
     context = (^runtime.Context)(userdata1)^
     if status != .Success || device == nil {
+        fmt.println("THERE WAS AN ERROR!!!!")
         panic(message)
     }
     ren.device = device
@@ -231,7 +228,13 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
             mask = 0xffffffff,
         },
     })
+
+    init_ui()
+
     ren.ready = true
+    fmt.println("renderer SAYS it's ready.")
+    fmt.println(status)
+    fmt.println(ren.device)
 }
 
 ctx: runtime.Context
@@ -408,8 +411,9 @@ render :: proc(t: f64) {
 
         wgpu.RenderPassEncoderEnd(render_pass)
         wgpu.RenderPassEncoderRelease(render_pass)
-
     }
+
+    render_ui(screen, command_encoder)
 
     command_buffer := wgpu.CommandEncoderFinish(command_encoder, nil)
     defer wgpu.CommandBufferRelease(command_buffer)

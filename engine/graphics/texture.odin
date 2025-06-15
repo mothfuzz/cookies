@@ -134,6 +134,7 @@ make_texture_2D :: proc(input: []u32, size: [2]uint) -> (tex: Texture) {
     tex.view = wgpu.TextureCreateView(tex.image)
     return
 }
+
 delete_texture :: proc(tex: Texture) {
     wgpu.TextureRelease(tex.image)
     wgpu.TextureViewRelease(tex.view)
