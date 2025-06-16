@@ -28,6 +28,7 @@ ui_attributes := []wgpu.VertexAttribute{
     {format = .Float32x4, offset = 0 * size_of([4]f32), shaderLocation = 0},
     {format = .Float32x4, offset = 1 * size_of([4]f32), shaderLocation = 1},
     {format = .Float32x4, offset = 2 * size_of([4]f32), shaderLocation = 2},
+    {format = .Float32x4, offset = 3 * size_of([4]f32), shaderLocation = 3},
 }
 
 init_ui :: proc() {
@@ -73,8 +74,8 @@ init_ui :: proc() {
                 writeMask = wgpu.ColorWriteMaskFlags_All,
                 blend = &{
                     color = wgpu.BlendComponent{.Add, .SrcAlpha, .OneMinusSrcAlpha},
-                    alpha = wgpu.BlendComponent{.Add, .SrcAlpha, .OneMinusSrcAlpha},
-                }
+                    alpha = wgpu.BlendComponent{.Add, .One, .OneMinusSrcAlpha},
+                },
             },
         },
         primitive = {
@@ -85,7 +86,7 @@ init_ui :: proc() {
         depthStencil = &{
             format = .Depth24PlusStencil8,
             depthWriteEnabled = .True,
-            depthCompare = .Always,
+            depthCompare = .LessEqual,
         },
         multisample = {
             count = 4,
@@ -111,8 +112,10 @@ UiInstanceData :: struct {
     fill_rect: [4]f32,
     color: [4]f32,
     clip_rect: [4]f32,
+    z_index: [4]f32, //it's 4 so we don't run into alignment issues.
 }
 ui_batches: map[Texture]UiBatch
+z_index: f32 = 0 //so things are rendered in-order
 
 //base function for all UI drawing.
 //assumes fill_rect is normalized screen space xywh -1:+1 & clip_rect is texcoord space xywh 0:1...
@@ -132,7 +135,8 @@ draw_ui :: proc(fill_rect: [4]f32, color: [4]f32, texture: Texture, clip_rect: [
         }
     }
     batch := &ui_batches[texture]
-    append(&batch.instances, UiInstanceData{fill_rect, color, clip_rect})
+    append(&batch.instances, UiInstanceData{fill_rect, color, clip_rect, z_index})
+    z_index += 1
 }
 
 render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder) {
@@ -147,10 +151,11 @@ render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder
         },
         depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
             view = ren.depth_view,
-            depthLoadOp = .Load,
+            depthLoadOp = .Clear,
             depthStoreOp = .Store,
             stencilLoadOp = .Load,
             stencilStoreOp = .Store,
+            depthClearValue = 1.0,
         },
     })
 
@@ -160,6 +165,10 @@ render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder
 
     //fmt.println("rendering ui batch...")
     for tex, &batch in ui_batches {
+        for &instance in batch.instances {
+            //preserve precision
+            instance.z_index = 1.0 - (instance.z_index / z_index)
+        }
         //fmt.println("ui batch size...", len(batch.instances))
         wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, batch.bind_group)
         instance_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, batch.instances[:])
@@ -168,6 +177,7 @@ render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder
         wgpu.RenderPassEncoderDraw(render_pass, 6, u32(len(batch.instances)), 0, 0)
         clear(&batch.instances)
     }
+    z_index = 0
 
     wgpu.RenderPassEncoderEnd(render_pass)
     wgpu.RenderPassEncoderRelease(render_pass)

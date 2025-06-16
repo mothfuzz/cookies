@@ -7,6 +7,7 @@ struct UiInstanceData {
     @location(0) fill_rect: vec4<f32>,
     @location(1) color: vec4<f32>,
     @location(2) clip_rect: vec4<f32>,
+    @location(3) z_index: vec4<f32>,
 }
 
 struct VSOut {
@@ -35,7 +36,7 @@ fn vs_main(instance: UiInstanceData, @builtin(vertex_index) vertex_index: u32, @
     var base: vec2<f32> = instance.fill_rect.xy;
     var size: vec2<f32> = instance.fill_rect.zw;
     var position: vec2<f32> = vertices[indices[vertex_index]];
-    v.position = vec4<f32>(position*size/2 + base, 0.0, 1.0);
+    v.position = vec4<f32>(position*size/2 + base, instance.z_index.z, 1.0);
     let tex_offset = instance.clip_rect.xy;
     let tex_factor = instance.clip_rect.zw;
     var texcoord: vec2<f32> = texcoords[indices[vertex_index]];
@@ -47,5 +48,8 @@ fn vs_main(instance: UiInstanceData, @builtin(vertex_index) vertex_index: u32, @
 @fragment
 fn fs_main(v: VSOut) -> @location(0) vec4<f32> {
     var tex_color = textureSample(tex, smp, v.texcoord);
+    if !(tex_color.a > 0) {
+        discard;
+    }
     return tex_color * v.color;
 }

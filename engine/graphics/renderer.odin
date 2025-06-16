@@ -229,6 +229,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         },
     })
 
+    init_defaults()
     init_ui()
 
     ren.ready = true
@@ -250,9 +251,7 @@ init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
 }
 
 quit :: proc() {
-    if sprite_mesh.size > 0 {
-        delete_mesh(sprite_mesh)
-    }
+    delete_defaults()
     wgpu.RenderPipelineRelease(ren.pipeline)
     wgpu.PipelineLayoutRelease(ren.layout)
     wgpu.ShaderModuleRelease(ren.shader)

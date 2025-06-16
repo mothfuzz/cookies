@@ -108,6 +108,7 @@ make_texture_2D :: proc(input: []u32, size: [2]uint) -> (tex: Texture) {
         mipLevelCount = u32(len(mips)),
         sampleCount = 1,
     })
+    tex.size = size
     mip_size := size
     for mip, i in mips {
         if mip_size == {0, 0} {

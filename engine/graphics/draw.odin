@@ -30,16 +30,27 @@ draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0, cl
     append(instances, MeshDraw{model, clip_rect, sprite, billboard})
 }
 
-sprite_mesh: Mesh
 
 draw_sprite :: proc(material: Material, model: matrix[4, 4]f32 = 0, clip_rect: [4]f32 = 0, billboard: bool = true) {
-    if sprite_mesh.size == 0 {
-        sprite_mesh = make_mesh([]Vertex{
-            {position={-0.5, +0.5, 0.0}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
-            {position={+0.5, +0.5, 0.0}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
-            {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
-            {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
-        }, {0, 1, 2, 0, 2, 3})
+    draw_mesh(quad_mesh, material, model, clip_rect, true, billboard)
+}
+
+ui_draw_rect :: proc(rect: [4]f32, color: [4]f32 = 1, texture: Texture = white_tex, clip_rect: [4]f32 = 0) {
+    sx := f32(screen_size.x)/2
+    sy := f32(screen_size.y)/2
+    fill_rect := [4]f32{
+        rect[0]/sx,
+        rect[1]/sy,
+        rect[2]/sx*2,
+        rect[3]/sy*2,
     }
-    draw_mesh(sprite_mesh, material, model, clip_rect, true, billboard)
+    tx := f32(texture.size.x)
+    ty := f32(texture.size.y)
+    clip_rect := [4]f32{
+        clip_rect[0]/tx,
+        clip_rect[1]/ty,
+        clip_rect[2]/tx,
+        clip_rect[3]/ty,
+    }
+    draw_ui(fill_rect, color, texture, clip_rect)
 }

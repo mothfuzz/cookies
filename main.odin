@@ -210,6 +210,7 @@ draw :: proc(t: f64) {
     offset: [2]f32
     offset.x = -screen_size.x/2
     offset.y = +screen_size.y/2
+    graphics.ui_draw_rect({offset.x, offset.y, screen_size.x, 48}, {0, 0, 0, 0.5})
     graphics.ui_draw_text(str[0:text_counter], unifont, offset, {0, 0, 0, 1})
     graphics.ui_draw_text(str[0:text_counter], unifont, offset+{1, -1}, {1, 1, 1, 1})
 }
