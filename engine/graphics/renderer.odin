@@ -66,6 +66,15 @@ configure_surface :: proc(size: [2]uint = 0) {
     if caps.formatCount == 0 {
         panic("No available surface formats!")
     }
+    //prefer mailbox to unlink FPS from refresh rate
+    presentMode := wgpu.PresentMode.Fifo
+    for i in 0..<caps.presentModeCount {
+        if caps.presentModes[i] == .Mailbox {
+            presentMode = .Mailbox
+            fmt.println("Upgrading to fast vsync.")
+            break
+        }
+    }
     //fmt.println(caps)
     tex_format = without_srgb(caps.formats[0])
     view_format = with_srgb(caps.formats[0])
@@ -77,7 +86,7 @@ configure_surface :: proc(size: [2]uint = 0) {
         viewFormats = &view_format,
         width = screen_size.x,
         height = screen_size.y,
-        presentMode = .Fifo,
+        presentMode = presentMode,
         alphaMode = .Opaque,
     }
     wgpu.SurfaceConfigure(ren.surface, &ren.config)
