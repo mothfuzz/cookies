@@ -36,7 +36,7 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     v.position = mvp * vec4<f32>(vertex.position, 1.0);
     let tex_offset = vertex.clip_rect.xy;
     let tex_factor = vertex.clip_rect.zw;
-    v.texcoord = (vertex.texcoord + tex_offset)*tex_factor;
+    v.texcoord = vertex.texcoord*tex_factor+tex_offset;
     v.color = vertex.color;
     return v;
 }
@@ -46,5 +46,10 @@ fn fs_main(v: VSOut) -> @location(0) vec4<f32> {
     let albedo = textureSample(albedo, smp, v.texcoord);
     let screen_color = vec4<f32>(v.position.x/screen_size.x, v.position.y/screen_size.y, 1.0, 1.0);
     let color = mix(v.color, screen_color, screen_color_blend);
-    return albedo * color;
+    let final_color = albedo * color;
+
+    if !(final_color.a > 0) {
+        discard;
+    }
+    return final_color;
 }

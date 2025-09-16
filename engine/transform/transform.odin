@@ -24,7 +24,7 @@ Transform :: struct {
     current_world_scale: [3]f32,
 }
 
-origin :: proc() -> (trans: Transform) {
+origin :: proc "contextless" () -> (trans: Transform) {
     trans.local_translation = 0
     trans.local_rotation = 1
     trans.local_scale = 1
@@ -37,6 +37,16 @@ origin :: proc() -> (trans: Transform) {
     trans.current_world_translation = 0
     trans.current_world_rotation = 1
     trans.current_world_scale = 1
+    return
+}
+
+init :: proc "contextless" (translation: [3]f32 = {0, 0, 0}, rotation: [3]f32 = {0, 0, 0}, scale: [3]f32 = {1, 1, 1}) -> (trans: Transform) {
+    trans = origin()
+    set_translation(&trans, translation)
+    set_rotation(&trans, rotation)
+    set_scale(&trans, scale)
+    compute(&trans)
+    compute(&trans)
     return
 }
 
@@ -57,42 +67,55 @@ parent :: proc(parent: ^Transform, child: ^Transform) {
     child.parent.children[child] = {}
 }
 
-translate :: proc(trans: ^Transform, translation: [3]f32) {
+translate :: proc "contextless" (trans: ^Transform, translation: [3]f32) {
     trans.local_translation += translation
     dirt(trans)
 }
-set_translation :: proc(trans: ^Transform, translation: [3]f32) {
+set_translation :: proc "contextless" (trans: ^Transform, translation: [3]f32) {
     trans.local_translation = translation
     reset(trans)
 }
-rotate :: proc(trans: ^Transform, rotation: [3]f32) {
+get_position :: proc "contextless" (trans: ^Transform) -> [3]f32 {
+    return trans.world_translation
+}
+
+rotate :: proc "contextless" (trans: ^Transform, rotation: [3]f32) {
     trans.local_rotation = linalg.quaternion_from_euler_angles(expand_values(rotation), linalg.Euler_Angle_Order.XYZ) * trans.local_rotation
     dirt(trans)
 }
-rotatex :: proc(trans: ^Transform, rotation: f32) {
+rotatex :: proc "contextless" (trans: ^Transform, rotation: f32) {
     trans.local_rotation = linalg.quaternion_from_euler_angle_x(rotation) * trans.local_rotation
     dirt(trans)
 }
-rotatey :: proc(trans: ^Transform, rotation: f32) {
+rotatey :: proc "contextless" (trans: ^Transform, rotation: f32) {
     trans.local_rotation = linalg.quaternion_from_euler_angle_y(rotation) * trans.local_rotation
     dirt(trans)
 }
-rotatez :: proc(trans: ^Transform, rotation: f32) {
+rotatez :: proc "contextless" (trans: ^Transform, rotation: f32) {
     trans.local_rotation = linalg.quaternion_from_euler_angle_z(rotation) * trans.local_rotation
     dirt(trans)
 }
-set_rotation :: proc(trans: ^Transform, rotation: [3]f32) {
-    trans.local_rotation = linalg.quaternion_from_euler_angles(expand_values(rotation), linalg.Euler_Angle_Order.XYZ)
+set_rotation :: proc "contextless" (trans: ^Transform, rotation: [3]f32) {
+    trans.local_rotation = linalg.quaternion_from_euler_angles(expand_values(rotation), .XYZ)
     reset(trans)
 }
-scale :: proc(trans: ^Transform, scale: [3]f32) {
+get_orientation :: proc "contextless" (trans: ^Transform) -> [3]f32 {
+    x, y, z := linalg.euler_angles_from_quaternion(trans.world_rotation, .XYZ)
+    return {x, y, z}
+}
+
+scale :: proc "contextless" (trans: ^Transform, scale: [3]f32) {
     trans.local_scale *= scale
     dirt(trans)
 }
-set_scale :: proc(trans: ^Transform, scale: [3]f32) {
+set_scale :: proc "contextless" (trans: ^Transform, scale: [3]f32) {
     trans.local_scale = scale
     reset(trans)
 }
+get_scale :: proc "contextless" (trans: ^Transform) -> [3]f32 {
+    return trans.world_scale
+}
+
 
 /*
 world_model, world_translation, world_rotation, and world_scale are ALWAYS CACHED.
@@ -102,13 +125,13 @@ this is good for multithreading.
 transforms will only be updated once per tick, but may or may not be used in each draw.
 */
 
-dirt :: proc(trans: ^Transform) {
+dirt :: proc "contextless" (trans: ^Transform) {
     trans.dirty = true
     for c in trans.children {
         dirt(c)
     }
 }
-reset :: proc(trans: ^Transform) {
+reset :: proc "contextless" (trans: ^Transform) {
     trans.dirty = true
     trans.reset = true
     for c in trans.children {
@@ -117,7 +140,7 @@ reset :: proc(trans: ^Transform) {
 }
 
 //computed ONCE globally at the end of a tick, after all is said and done.
-compute :: proc(trans: ^Transform) -> matrix[4, 4]f32 {
+compute :: proc "contextless" (trans: ^Transform) -> matrix[4, 4]f32 {
     if trans == nil {
         return 1
     }
@@ -162,7 +185,7 @@ since transforms are optimized to only be computed once when necessary, that mea
 this will provide smooth frame-by-frame visuals even when your tick rate is lower than your draw rate.
 to use this functionality, simply call transform.smooth() with a delta time instead of transform.compute() in your draw procedure.
 */
-smooth :: proc(trans: ^Transform, t: f64) -> matrix[4, 4]f32 {
+smooth :: proc "contextless" (trans: ^Transform, t: f64) -> matrix[4, 4]f32 {
     t := f32(t)
     compute(trans)
     translation := linalg.lerp(trans.world_translation, trans.current_world_translation, [3]f32{t, t, t})

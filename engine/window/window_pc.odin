@@ -11,6 +11,7 @@ window: ^sdl3.Window
 
 set_size :: proc "c" (width: uint, height: uint) {
     sdl3.SetWindowSize(window, i32(width), i32(height))
+    sdl3.SetWindowPosition(window, sdl3.WINDOWPOS_CENTERED, sdl3.WINDOWPOS_CENTERED)
 }
 get_size :: proc "c" () -> [2]uint {
     rect: [2]i32

@@ -204,13 +204,13 @@ draw :: proc(t: f64) {
     graphics.set_cameras({&cam, &cam2})
     scene.draw(&main_scene, t)
     graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {0, 0, 128, 128})
+    graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {64, 64, 128, 128})
     graphics.draw_mesh(quad, mat, transform.compute(&floor_trans))
 
     offset: [2]f32
     offset.x = -screen_size.x/2
     offset.y = +screen_size.y/2
-    graphics.ui_draw_rect({offset.x, offset.y, screen_size.x, 48}, {0, 0, 0, 0.5})
+    graphics.ui_draw_rect({0, offset.y-48/2, screen_size.x, 48}, {0, 0, 0, 0.5})
     graphics.ui_draw_text(str[0:text_counter], unifont, offset, {0, 0, 0, 1})
     graphics.ui_draw_text(str[0:text_counter], unifont, offset+{1, -1}, {1, 1, 1, 1})
 }

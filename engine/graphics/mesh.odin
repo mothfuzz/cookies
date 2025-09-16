@@ -166,17 +166,19 @@ precalcs :: proc(instance: ^MeshRenderItem) {
         instance.clip_rect[2] = 1.0
     } else {
         instance.clip_rect[2] = instance.draw.clip_rect[2] / w
+        w = instance.draw.clip_rect[2]
     }
     if instance.draw.clip_rect[3] == 0 {
         instance.clip_rect[3] = 1.0
     } else {
         instance.clip_rect[3] = instance.draw.clip_rect[3] / h
+        h = instance.draw.clip_rect[3]
     }
     //calculate model
     instance.model = instance.draw.model
     if instance.draw.is_sprite {
         instance.model[3] = {0, 0, 0, 1}
-        scale := linalg.matrix4_scale([3]f32{instance.draw.clip_rect[2], instance.draw.clip_rect[3], 1.0})
+        scale := linalg.matrix4_scale([3]f32{w, h, 1.0})
         instance.model *= scale
         instance.model[3] = instance.draw.model[3]
     }

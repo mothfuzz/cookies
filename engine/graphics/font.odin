@@ -38,6 +38,8 @@ delete_font :: proc(font: Font) {
     delete_texture(font.texture)
 }
 
+//no accurate way to get width and height, really
+//origin is center of the window, positive y is up, that's all I can say...
 ui_draw_text :: proc(txt: string, font: Font, pos: [2]f32 = 0, color: [4]f32 = 1) {
     x: f32
     y: f32

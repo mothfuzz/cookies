@@ -285,6 +285,11 @@ set_cameras :: proc(cams: []^Camera) {
     copy(cameras, cams)
 }
 
+background_color: [3]f32 = {0.4, 0.6, 0.9}
+set_background_color :: proc(color: [3]f32) {
+    background_color = color
+}
+
 render :: proc(t: f64) {
     if !ren.ready {
         return
@@ -323,7 +328,9 @@ render :: proc(t: f64) {
             loadOp = .Clear,
             storeOp = .Store,
             depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = linalg.vector4_srgb_to_linear([4]f64{0.4, 0.6, 0.9, 1.0}),
+            clearValue = linalg.vector4_srgb_to_linear([4]f64{f64(background_color.r),
+                                                              f64(background_color.g),
+                                                              f64(background_color.b), 1.0}),
         },
         depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
             view = ren.depth_view,

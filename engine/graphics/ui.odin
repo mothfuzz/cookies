@@ -121,6 +121,7 @@ z_index: f32 = 0 //so things are rendered in-order
 //assumes fill_rect is normalized screen space xywh -1:+1 & clip_rect is texcoord space xywh 0:1...
 draw_ui :: proc(fill_rect: [4]f32, color: [4]f32, texture: Texture, clip_rect: [4]f32) {
     if !(texture in ui_batches) {
+        fmt.println("attempting to load texture...")
         bindings := []wgpu.BindGroupEntry{
             {binding = 0, sampler = ui_sampler},
             {binding = 1, textureView = texture.view},
@@ -165,6 +166,9 @@ render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder
 
     //fmt.println("rendering ui batch...")
     for tex, &batch in ui_batches {
+        if len(batch.instances) == 0 {
+            continue;
+        }
         for &instance in batch.instances {
             //preserve precision
             instance.z_index = 1.0 - (instance.z_index / z_index)

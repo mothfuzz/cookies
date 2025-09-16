@@ -69,7 +69,7 @@
       document.getElementById("run").addEventListener("click", async function() {
           canvas.focus();
           audio.reset();
-          odin.runWasm("cookies.wasm", document.getElementById("console"), js_imports, memory);
+          odin.runWasm("arena_game.wasm", document.getElementById("console"), js_imports, memory);
       });
       
     </script>

@@ -111,7 +111,7 @@ make_texture_2D :: proc(input: []u32, size: [2]uint) -> (tex: Texture) {
     tex.size = size
     mip_size := size
     for mip, i in mips {
-        if mip_size == {0, 0} {
+        if mip_size.x == 0 || mip_size.y == 0 {
             break;
         }
         wgpu.QueueWriteTexture(ren.queue, &{texture = tex.image, mipLevel = u32(i)},

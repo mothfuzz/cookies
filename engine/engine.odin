@@ -7,7 +7,7 @@ import "input"
 import "audio"
 
 @(init)
-init_dylib :: proc() {
+init_dylib :: proc "contextless" () {
     //actually this might be better handled by the modules themselves
 }
 
