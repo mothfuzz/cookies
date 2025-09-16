@@ -50,8 +50,8 @@ ui_draw_rect :: proc(rect: [4]f32, color: [4]f32 = 1, texture: Texture = white_t
     clip_rect := [4]f32{
         clip_rect[0]/tx,
         clip_rect[1]/ty,
-        clip_rect[2]/tx,
-        clip_rect[3]/ty,
+        (clip_rect[2]==0?tx:clip_rect[2])/tx,
+        (clip_rect[3]==0?ty:clip_rect[2])/ty,
     }
     draw_ui(fill_rect, color, texture, clip_rect)
 }
