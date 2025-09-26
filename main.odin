@@ -20,6 +20,7 @@ tex: graphics.Texture
 tex2: graphics.Texture
 mat: graphics.Material
 mat2: graphics.Material
+text_mat: graphics.Material
 triangle_trans := transform.origin()
 quad_trans := transform.origin()
 floor_trans := transform.origin()
@@ -100,9 +101,6 @@ init :: proc() {
     tex2 = graphics.make_texture_from_image(#load("frasier.png"))
     mat2 = graphics.make_material(albedo=tex2)
 
-    //mat.albedo = tex2
-    //graphics.rebuild_material(&mat)
-
     transform.set_scale(&triangle_trans, {200, 200, 1})
 
     transform.set_translation(&quad_trans, {0, f32(100+128/2)/200, 0})
@@ -121,6 +119,8 @@ init :: proc() {
 
     //fmt.println("loading font...")
     unifont = graphics.make_font_from_file(#load("unifont.otf"), 32)
+
+    text_mat = graphics.make_material(unifont.texture, filtering=false, albedo_tint={1, 0, 1, 1})
 }
 
 camera_pos: [3]f32 = {0, 0, 0}
@@ -206,6 +206,9 @@ draw :: proc(t: f64) {
     graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
     graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {64, 64, 128, 128})
     graphics.draw_mesh(quad, mat, transform.compute(&floor_trans))
+    plus_one := floor_trans
+    transform.translate(&plus_one, {0, 1, 0})
+    graphics.draw_mesh(quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'))
 
     offset: [2]f32
     offset.x = -screen_size.x/2

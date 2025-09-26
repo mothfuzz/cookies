@@ -1,5 +1,4 @@
 package graphics
-import "core:fmt"
 import stbtt "vendor:stb/truetype"
 
 /*TODO:
@@ -36,6 +35,16 @@ make_font_from_file :: proc(filedata: []byte, font_size: uint, num_chars: uint =
 }
 delete_font :: proc(font: Font) {
     delete_texture(font.texture)
+}
+
+//returns char for use in clip_rect
+get_char :: proc(font: Font, c: rune) -> (clip_rect: [4]f32) {
+    quad: stbtt.aligned_quad
+    x, y: f32
+    stbtt.GetBakedQuad(raw_data(font.baked_chars), FONT_RES, FONT_RES, i32(c), &x, &y, &quad, true)
+    clip_rect = {quad.s0, quad.t0, quad.s1 - quad.s0, quad.t1 - quad.t0}
+    clip_rect *= FONT_RES
+    return
 }
 
 //no accurate way to get width and height, really

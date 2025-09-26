@@ -12,6 +12,11 @@ struct Camera {
 @group(2) @binding(0) var smp: sampler;
 @group(2) @binding(1) var albedo: texture_2d<f32>;
 
+struct Material {
+    albedo_tint: vec4<f32>,
+}
+@group(2) @binding(2) var<uniform> material: Material;
+
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) texcoord: vec2<f32>,
@@ -43,7 +48,7 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
 
 @fragment
 fn fs_main(v: VSOut) -> @location(0) vec4<f32> {
-    let albedo = textureSample(albedo, smp, v.texcoord);
+    let albedo = textureSample(albedo, smp, v.texcoord) * material.albedo_tint;
     let screen_color = vec4<f32>(v.position.x/screen_size.x, v.position.y/screen_size.y, 1.0, 1.0);
     let color = mix(v.color, screen_color, screen_color_blend);
     let final_color = albedo * color;
