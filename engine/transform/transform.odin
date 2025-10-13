@@ -5,115 +5,197 @@ package transform
 import "core:math/linalg"
 
 Transform :: struct {
-    local_translation: [3]f32,
-    local_rotation: quaternion128,
-    local_scale: [3]f32,
+    position: [3]f32,
+    orientation: quaternion128,
+    scale: [3]f32,
+    prev_local_trans: matrix[4, 4]f32,
+    prev_world_trans: matrix[4, 4]f32,
+    next_local_trans: matrix[4, 4]f32,
+    next_world_trans: matrix[4, 4]f32,
     parent: ^Transform,
-    children: map[^Transform]struct{},
+    first_child: ^Transform,
+    last_child: ^Transform,
+    prev_sibling: ^Transform,
+    next_sibling: ^Transform,
     dirty: bool,
-    reset: bool,
-    //relative to tick
-    world_model: matrix[4,4]f32,
-    world_translation: [3]f32,
-    world_rotation: quaternion128,
-    world_scale: [3]f32,
-    //relative to draw
-    current_world_model: matrix[4,4]f32,
-    current_world_translation: [3]f32,
-    current_world_rotation: quaternion128,
-    current_world_scale: [3]f32,
 }
 
-origin :: proc "contextless" () -> (trans: Transform) {
-    trans.local_translation = 0
-    trans.local_rotation = 1
-    trans.local_scale = 1
-    //set all the others to default values so no first-frame artifacts
-    trans.world_model = 1
-    trans.world_translation = 0
-    trans.world_rotation = 1
-    trans.world_scale = 1
-    trans.current_world_model = 1
-    trans.current_world_translation = 0
-    trans.current_world_rotation = 1
-    trans.current_world_scale = 1
-    return
-}
+ORIGIN :: Transform{position=1, orientation=1, scale=1,
+                    prev_local_trans=1, prev_world_trans=1,
+                    next_local_trans=1, next_world_trans=1}
 
-init :: proc "contextless" (translation: [3]f32 = {0, 0, 0}, rotation: [3]f32 = {0, 0, 0}, scale: [3]f32 = {1, 1, 1}) -> (trans: Transform) {
-    trans = origin()
-    set_translation(&trans, translation)
-    set_rotation(&trans, rotation)
-    set_scale(&trans, scale)
-    compute(&trans)
-    compute(&trans)
-    return
-}
-
-unlink :: proc(trans: ^Transform) {
-    if trans == nil {
-        return
-    }
-    if trans.parent == nil {
-        return
-    }
-    delete_key(&trans.parent.children, trans)
-    trans.parent = nil
-}
-
-parent :: proc(parent: ^Transform, child: ^Transform) {
-    unlink(child.parent)
+link :: proc "contextless" (parent: ^Transform, child: ^Transform) {
+    unlink(child)
     child.parent = parent
-    child.parent.children[child] = {}
+    if parent.first_child == nil {
+        parent.first_child = child
+    } else {
+        parent.last_child.next_sibling = child
+        child.prev_sibling =  parent.last_child
+    }
+    parent.last_child = child
 }
+
+unlink :: proc "contextless" (node: ^Transform) {
+    if node.parent != nil {
+        if node.parent.first_child == node {
+            node.parent.first_child = nil
+        }
+        if node.parent.last_child == node {
+            node.parent.last_child = nil
+        }
+        node.parent = nil
+    }
+    if node.prev_sibling != nil {
+        node.prev_sibling.next_sibling = nil
+        node.prev_sibling = nil
+    }
+    if node.next_sibling != nil {
+        node.next_sibling.prev_sibling = nil
+        node.next_sibling = nil
+    }
+}
+
+//to compute a transform immediately and 'cancel' interpolation
+reset :: proc "contextless" (node: ^Transform) {
+    node.dirty = true
+    update_root(node)
+    node.prev_local_trans = node.next_local_trans
+    node.prev_world_trans = node.next_world_trans
+}
+
+update_root :: proc "contextless" (node: ^Transform) {
+    if node == nil {
+        return
+    }
+    if node.parent != nil {
+        update_root(node.parent)
+    } else {
+        update(node)
+    }
+}
+
+update :: proc "contextless" (node: ^Transform, dirty: bool = false) {
+    if node == nil {
+        return
+    }
+    dirty := dirty || node.dirty
+    if dirty {
+        node.prev_local_trans = node.next_local_trans
+        node.prev_world_trans = node.next_world_trans
+        node.next_local_trans = linalg.matrix4_from_trs(node.position, node.orientation, node.scale)
+        if node.parent != nil {
+            node.next_world_trans = node.parent.next_world_trans * node.next_local_trans
+        } else {
+            node.next_world_trans = node.next_local_trans
+        }
+        node.dirty = false
+        update(node.next_sibling, dirty)
+        update(node.first_child, dirty)
+    }
+}
+extract :: proc "contextless" (m: matrix[4, 4]f32) -> (position: [3]f32, orientation: quaternion128, scale: [3]f32) {
+    position = m[3].xyz
+    basis := cast(matrix[3, 3]f32)(m)
+    scale.x = linalg.length(basis[0])
+    scale.y = linalg.length(basis[1])
+    scale.z = linalg.length(basis[2])
+    basis[0] /= scale.x
+    basis[1] /= scale.y
+    basis[2] /= scale.z
+    orientation = linalg.to_quaternion(basis)
+    return
+}
+
+interp :: proc "contextless" (trans: ^Transform, t: f32) -> (position: [3]f32, orientation: quaternion128, scale: [3]f32) {
+    prev_position, prev_orientation, prev_scale := extract(trans.prev_world_trans)
+    next_position, next_orientation, next_scale := extract(trans.next_world_trans)
+    position = linalg.lerp(prev_position, next_position, t)
+    orientation = linalg.quaternion_slerp(prev_orientation, next_orientation, t)
+    scale = linalg.lerp(prev_scale, next_scale, t)
+    return
+}
+
+compute :: proc "contextless" (trans: ^Transform) -> matrix[4, 4]f32 {
+    update_root(trans)
+    return trans.next_world_trans
+}
+
+smooth :: proc "contextless" (trans: ^Transform, t: f64) -> matrix[4, 4]f32 {
+    update_root(trans)
+    return linalg.matrix4_from_trs(interp(trans, f32(t)))
+}
+
 
 translate :: proc "contextless" (trans: ^Transform, translation: [3]f32) {
-    trans.local_translation += translation
-    dirt(trans)
+    trans.position += translation
+    trans.dirty = true
 }
-set_translation :: proc "contextless" (trans: ^Transform, translation: [3]f32) {
-    trans.local_translation = translation
-    reset(trans)
+set_position :: proc "contextless" (trans: ^Transform, position: [3]f32, interpolate: bool = false) {
+    trans.position = position
+    trans.dirty = true
+    if !interpolate {
+        reset(trans)
+    }
 }
 get_position :: proc "contextless" (trans: ^Transform) -> [3]f32 {
-    return trans.world_translation
+    t, r, s := extract(trans.prev_world_trans)
+    return t
 }
 
 rotate :: proc "contextless" (trans: ^Transform, rotation: [3]f32) {
-    trans.local_rotation = linalg.quaternion_from_euler_angles(expand_values(rotation), linalg.Euler_Angle_Order.XYZ) * trans.local_rotation
-    dirt(trans)
+    trans.orientation = linalg.quaternion_from_euler_angles(expand_values(rotation), linalg.Euler_Angle_Order.XYZ) * trans.orientation
+    trans.dirty = true
 }
 rotatex :: proc "contextless" (trans: ^Transform, rotation: f32) {
-    trans.local_rotation = linalg.quaternion_from_euler_angle_x(rotation) * trans.local_rotation
-    dirt(trans)
+    trans.orientation = linalg.quaternion_from_euler_angle_x(rotation) * trans.orientation
+    trans.dirty = true
 }
 rotatey :: proc "contextless" (trans: ^Transform, rotation: f32) {
-    trans.local_rotation = linalg.quaternion_from_euler_angle_y(rotation) * trans.local_rotation
-    dirt(trans)
+    trans.orientation = linalg.quaternion_from_euler_angle_y(rotation) * trans.orientation
+    trans.dirty = true
 }
 rotatez :: proc "contextless" (trans: ^Transform, rotation: f32) {
-    trans.local_rotation = linalg.quaternion_from_euler_angle_z(rotation) * trans.local_rotation
-    dirt(trans)
+    trans.orientation = linalg.quaternion_from_euler_angle_z(rotation) * trans.orientation
+    trans.dirty = true
 }
-set_rotation :: proc "contextless" (trans: ^Transform, rotation: [3]f32) {
-    trans.local_rotation = linalg.quaternion_from_euler_angles(expand_values(rotation), .XYZ)
-    reset(trans)
+set_orientation :: proc "contextless" (trans: ^Transform, orientation: [3]f32, interpolate: bool = false) {
+    trans.orientation = linalg.quaternion_from_euler_angles(expand_values(orientation), .XYZ)
+    trans.dirty = true
+    if !interpolate {
+        reset(trans)
+    }
 }
 get_orientation :: proc "contextless" (trans: ^Transform) -> [3]f32 {
-    x, y, z := linalg.euler_angles_from_quaternion(trans.world_rotation, .XYZ)
+    t, r, s := extract(trans.prev_world_trans)
+    x, y, z := linalg.euler_angles_from_quaternion(r, .XYZ)
     return {x, y, z}
 }
 
 scale :: proc "contextless" (trans: ^Transform, scale: [3]f32) {
-    trans.local_scale *= scale
-    dirt(trans)
+    trans.scale *= scale
+    trans.dirty = true
 }
-set_scale :: proc "contextless" (trans: ^Transform, scale: [3]f32) {
-    trans.local_scale = scale
-    reset(trans)
+set_scale :: proc "contextless" (trans: ^Transform, scale: [3]f32, interpolate: bool = false) {
+    trans.scale = scale
+    trans.dirty = true
+    if !interpolate {
+        reset(trans)
+    }
 }
 get_scale :: proc "contextless" (trans: ^Transform) -> [3]f32 {
-    return trans.world_scale
+    t, r, s := extract(trans.prev_world_trans)
+    return s
+}
+
+init :: proc "contextless" (trans: ^Transform,
+                            position: [3]f32 = 0,
+                            orientation: quaternion128 = 1,
+                            scale: [3]f32 = 1) {
+    trans.position = position
+    trans.orientation = orientation
+    trans.scale = scale
+    reset(trans)
 }
 
 
@@ -125,83 +207,9 @@ this is good for multithreading.
 transforms will only be updated once per tick, but may or may not be used in each draw.
 */
 
-dirt :: proc "contextless" (trans: ^Transform) {
-    trans.dirty = true
-    for c in trans.children {
-        dirt(c)
-    }
-}
-reset :: proc "contextless" (trans: ^Transform) {
-    trans.dirty = true
-    trans.reset = true
-    for c in trans.children {
-        reset(c)
-    }
-}
-
 //computed ONCE globally at the end of a tick, after all is said and done.
-compute :: proc "contextless" (trans: ^Transform) -> matrix[4, 4]f32 {
-    if trans == nil {
-        return 1
-    }
 
-    if trans.dirty {
-        //cache the values
-        trans.world_model = trans.current_world_model
-        trans.world_translation = trans.current_world_translation
-        trans.world_rotation = trans.current_world_rotation
-        trans.world_scale = trans.current_world_scale
-
-        //recalculate
-        parent_world_model := compute(trans.parent)
-        local_model := linalg.matrix4_from_trs(trans.local_translation, trans.local_rotation, trans.local_scale)
-        world_model := parent_world_model * local_model
-        trans.current_world_model = world_model
-
-        //extract components
-        trans.current_world_translation = world_model[3].xyz
-        world_model[3].xyz = 0
-        trans.current_world_scale.x = linalg.length(world_model[0])
-        trans.current_world_scale.y = linalg.length(world_model[1])
-        trans.current_world_scale.z = linalg.length(world_model[2])
-        world_model[0] /= trans.current_world_scale.x
-        world_model[1] /= trans.current_world_scale.y
-        world_model[2] /= trans.current_world_scale.z
-        trans.current_world_rotation = linalg.quaternion_from_matrix4(world_model)
-
-        //reset means compute for 2 ticks
-        if trans.reset {
-            trans.reset = false
-        } else {
-            //clean :3
-            trans.dirty = false
-        }
-    }
-    return trans.current_world_model
-}
-
-/*
-since transforms are optimized to only be computed once when necessary, that means we can also smoothly interpolate between the last time a transform was computed and now.
+/*since transforms are optimized to only be computed once when necessary, that means we can also smoothly interpolate between the last time a transform was computed and now.
 this will provide smooth frame-by-frame visuals even when your tick rate is lower than your draw rate.
 to use this functionality, simply call transform.smooth() with a delta time instead of transform.compute() in your draw procedure.
-*/
-smooth :: proc "contextless" (trans: ^Transform, t: f64) -> matrix[4, 4]f32 {
-    t := f32(t)
-    compute(trans)
-    translation := linalg.lerp(trans.world_translation, trans.current_world_translation, [3]f32{t, t, t})
-    rotation := linalg.quaternion_slerp(trans.world_rotation, trans.current_world_rotation, t)
-    scale := linalg.lerp(trans.world_scale, trans.current_world_scale, [3]f32{t, t, t})
-    return linalg.matrix4_from_trs(translation, rotation, scale)
-}
-
-/*
-TODO, for collision:
-
-colliders should have userdata. Don't tie it to the actor system, but have the option to attach an ActorID.
-
-tick:
-collision.transform(collider, transform) <- would need to be staged until post-tick (double-buffered!) to get correct world transforms.
-
-kill:
-collision.destroy(collider)
 */

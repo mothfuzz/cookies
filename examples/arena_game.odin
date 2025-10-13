@@ -103,7 +103,7 @@ init :: proc() {
     //player resources
     player_sprite = graphics.make_texture_from_image(#load("arena_game_player.png"))
     player_mat = graphics.make_material(albedo=player_sprite, filtering=false)
-    player.trans = transform.origin()
+    player.trans = transform.ORIGIN
     transform.set_scale(&player.trans, {2, 2, 1})
     player.hp = 10
     player.score = 0
@@ -120,10 +120,11 @@ init :: proc() {
 update_player :: proc() {
 
     mouse_pos := [2]f32{f32(input.mouse_position.x), f32(input.mouse_position.y)}
-    mouse_vec := mouse_pos - player.trans.world_translation.xy
+    player_pos := transform.get_position(&player.trans)
+    mouse_vec := mouse_pos - player_pos.xy
     angle := linalg.atan2(mouse_vec.y, mouse_vec.x)
 
-    transform.set_rotation(&player.trans, {0, 0, angle-linalg.PI/2})
+    transform.set_orientation(&player.trans, {0, 0, angle-linalg.PI/2}, true)
 
     //relative movement, works for 3D but not really for 2D
     /*x := linalg.cos(angle)*Player_Speed
@@ -154,8 +155,8 @@ update_player :: proc() {
     }
 
     if input.mouse_pressed(.Left) {
-        new_trans := transform.origin()
-        transform.set_translation(&new_trans, player.trans.world_translation)
+        new_trans := transform.ORIGIN
+        transform.set_position(&new_trans, player_pos)
         arena.insert(&bullets, Bullet{trans=new_trans, trajectory=angle})
     }
 
@@ -167,7 +168,9 @@ spawn_enemy :: proc() {
     angle := (0.1 + rand.float32()) * linalg.PI * 2
     x := linalg.cos(angle)*(Screen_Width/2+Screen_Width/4)
     y := linalg.sin(angle)*(Screen_Height/2+Screen_Height/4)
-    new_trans := transform.init(translation={x, y, 0}, scale={4, 4, 0})
+    new_trans := transform.ORIGIN
+    transform.set_position(&new_trans, {x, y, 0})
+    transform.set_scale(&new_trans, {4, 4, 0})
 
     arena.insert(&enemies, Enemy{trans=new_trans})
 }
@@ -181,22 +184,24 @@ update_enemies :: proc() {
 
     it: arena.Iterator
     for handle, enemy in arena.iter(&enemies, &it) {
-        player_vec := player.trans.world_translation.xy - enemy.trans.world_translation.xy
+        player_pos := transform.get_position(&player.trans)
+        enemy_pos := transform.get_position(&enemy.trans)
+        player_vec := player_pos.xy - enemy_pos.xy
         angle := linalg.atan2(player_vec.y, player_vec.x)
-        transform.set_rotation(&enemy.trans, {0, 0, angle-linalg.PI/2})
+        transform.set_orientation(&enemy.trans, {0, 0, angle-linalg.PI/2}, true)
         x := linalg.cos(angle)*Enemy_Speed
         y := linalg.sin(angle)*Enemy_Speed
         transform.translate(&enemy.trans, {x, y, 0})
 
-        e := enemy.trans.world_translation.xy
+        e := enemy_pos.xy
         r: f32 = 32
 
         //for the player, check each corner
         player_points := [4][2]f32 {
-            player.trans.world_translation.xy + {-16, +16}, //top-left
-            player.trans.world_translation.xy + {+16, +16}, //top-right
-            player.trans.world_translation.xy + {-16, -16}, //bottom-left
-            player.trans.world_translation.xy + {+16, -16}, //bottom-right
+            player_pos.xy + {-16, +16}, //top-left
+            player_pos.xy + {+16, +16}, //top-right
+            player_pos.xy + {-16, -16}, //bottom-left
+            player_pos.xy + {+16, -16}, //bottom-right
         }
         for p in player_points {
             if (p.x - e.x)*(p.x - e.x) + (p.y - e.y)*(p.y - e.y) < r*r {
@@ -209,7 +214,7 @@ update_enemies :: proc() {
         //for each bullet, just check the bullet's center point
         bit: arena.Iterator
         for bhandle, bullet in arena.iter(&bullets, &bit) {
-            b := bullet.trans.world_translation.xy
+            b := transform.get_position(&bullet.trans).xy
             if (b.x - e.x)*(b.x - e.x) + (b.y - e.y)*(b.y - e.y) < r*r {
                 arena.remove(&enemies, handle)
                 arena.remove(&bullets, bhandle)
@@ -226,10 +231,11 @@ update_bullets :: proc() {
         x := linalg.cos(bullet.trajectory)*Bullet_Speed
         y := linalg.sin(bullet.trajectory)*Bullet_Speed
         transform.translate(&bullet.trans, {x, y, 0})
-        if bullet.trans.world_translation.x > Screen_Width/2 ||
-            bullet.trans.world_translation.x < -Screen_Width/2 ||
-            bullet.trans.world_translation.y > Screen_Height/2 ||
-            bullet.trans.world_translation.y < -Screen_Height/2 {
+        bullet_pos := transform.get_position(&bullet.trans)
+        if bullet_pos.x > Screen_Width/2 ||
+            bullet_pos.x < -Screen_Width/2 ||
+            bullet_pos.y > Screen_Height/2 ||
+            bullet_pos.y < -Screen_Height/2 {
                 arena.remove(&bullets, handle)
             }
     }
@@ -277,10 +283,10 @@ tick :: proc() {
 
 draw_player :: proc(t: f64) {
     transform.smooth(&player.trans, t)
-    pos := player.trans.world_translation
+    pos := transform.get_position(&player.trans)
     for i in 0..<16 {
         trans := player.trans
-        transform.set_translation(&trans, {pos.x, pos.y + f32(i), f32(i)})
+        transform.set_position(&trans, {pos.x, pos.y + f32(i), f32(i)})
         model := transform.compute(&trans)
         graphics.draw_sprite(player_mat, model, clip_rect={f32(i)*16, 0, 16, 16})
     }
@@ -300,10 +306,10 @@ draw_enemies :: proc(t: f64) {
     it: arena.Iterator
     for handle, enemy in arena.iter(&enemies, &it) {
         transform.smooth(&enemy.trans, t)
-        pos := enemy.trans.world_translation
+        pos := transform.get_position(&enemy.trans)
         for i in 0..<16 {
             trans := enemy.trans
-            transform.set_translation(&trans, {pos.x, pos.y + 2*f32(i), 2*f32(i)})
+            transform.set_position(&trans, {pos.x, pos.y + 2*f32(i), 2*f32(i)})
             model := transform.compute(&trans)
             graphics.draw_sprite(enemy_mat, model, clip_rect={f32(i)*16, 0, 16, 16})
         }

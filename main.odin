@@ -21,9 +21,9 @@ tex2: graphics.Texture
 mat: graphics.Material
 mat2: graphics.Material
 text_mat: graphics.Material
-triangle_trans := transform.origin()
-quad_trans := transform.origin()
-floor_trans := transform.origin()
+triangle_trans := transform.ORIGIN
+quad_trans := transform.ORIGIN
+floor_trans := transform.ORIGIN
 cam: graphics.Camera
 cam2: graphics.Camera
 unifont: graphics.Font
@@ -103,17 +103,19 @@ init :: proc() {
 
     transform.set_scale(&triangle_trans, {200, 200, 1})
 
-    transform.set_translation(&quad_trans, {0, f32(100+128/2)/200, 0})
+    transform.set_position(&quad_trans, {0, f32(100+128/2)/200, 0})
     transform.set_scale(&quad_trans, {1.0/200, 1.0/200, 1})
 
-    transform.set_translation(&floor_trans, {0, -320, -320})
+    transform.set_position(&floor_trans, {0, -320, -320})
     transform.set_scale(&floor_trans, {640*4, 640*4, 1})
     transform.rotatex(&floor_trans, -0.5 * math.PI)
 
-    transform.parent(&triangle_trans, &quad_trans)
+    transform.link(&triangle_trans, &quad_trans)
 
     cam = graphics.make_camera({0, 0, screen_size.x/2, screen_size.y})
     cam2 = graphics.make_camera({screen_size.x/2 - 1, 0, screen_size.x/2, screen_size.y})
+    //cam = graphics.make_camera({0, 0, screen_size.x, screen_size.y})
+    //cam2 = graphics.make_camera({0, 0, screen_size.x, screen_size.y})
     graphics.look_at(&cam, {+5, 0, 0}, {0, 0, graphics.z_2d(&cam)})
     graphics.look_at(&cam2, {-5, 0, 0}, {0, 0, graphics.z_2d(&cam2)})
 
@@ -172,7 +174,7 @@ tick :: proc() {
     if input.mouse_down(.Left) {
         //fmt.println("click!!!", accumulator)
         fmt.println(input.mouse_position)
-        transform.set_translation(&triangle_trans, {f32(input.mouse_position.x), f32(input.mouse_position.y), 0})
+        transform.set_position(&triangle_trans, {f32(input.mouse_position.x), f32(input.mouse_position.y), 0})
     }
     if input.mouse_pressed(.Right) {
         fmt.println("right click!!!", accumulator)
