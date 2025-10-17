@@ -42,7 +42,7 @@ insert :: proc(a: ^Arena($T), t: T) -> (h: Handle) {
     return
 }
 get :: proc(a: ^Arena($T), h: Handle) -> ^T {
-    entity := a.entities[h.id]
+    entity := &a.entities[h.id]
     if  entity.generation == h.generation {
         return &entity.data
     }
