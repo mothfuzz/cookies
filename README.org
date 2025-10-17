@@ -17,6 +17,8 @@ Current features:
 - main loop with fixed timestep for game updates & variable rate for drawing
 - basic audio (sound + music loading, playback, looping, and fading)
 - parallel actor system for in-game entities
+- generational arena for simpler & more efficient entity handling
+- spatial querying/collision detection
 
 Planned features:
 - 3D audio

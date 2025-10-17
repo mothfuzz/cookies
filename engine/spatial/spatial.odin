@@ -4,7 +4,7 @@ insert :: proc{grid_insert, spatial_insert}
 remove :: proc{grid_remove}
 update :: proc{grid_update, spatial_update_shape, spatial_update_transform, spatial_update_both}
 clear :: proc{grid_clear, spatial_clear}
-nearby :: proc{grid_nearby}
+nearby :: proc{grid_nearby, spatial_nearby_entity, spatial_nearby_position_radius}
 neighbors :: proc{grid_neighbors}
 
 //just to make sure parapoly works
@@ -78,4 +78,22 @@ overlapping :: proc(s: ^Spatial($Entity, $S), ea: Entity) -> []Entity {
         }
     }
     return results[:]
+}
+
+spatial_nearby_entity :: proc(s: ^Spatial($Entity, $S), e: Entity, radius: f32) -> []Entity {
+    pos := s.colliders[e].trans[3]
+    return spatial_nearby_position_radius(pos, radius)
+}
+
+spatial_nearby_position_radius :: proc(s: ^Spatial($Entity, $S), position: [3]f32, radius: f32) -> []Entity {
+    results := make([dynamic]Entity)
+    extents := [2][3]f32{{position-radius}, {position+radius}}
+    for e in nearby(&s.st, extents) {
+        pos := s.colliders[e].trans[3]
+        vec := pos - position
+        if vec*vec <= radius*radius {
+            append(&results, e)
+        }
+    }
+    return results
 }
