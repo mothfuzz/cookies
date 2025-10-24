@@ -138,6 +138,16 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     }
     ren.device = device
 
+    //print limits
+    limits, _ := wgpu.DeviceGetLimits(ren.device)
+    fmt.println("max uniform buffers:", limits.maxUniformBuffersPerShaderStage)
+    fmt.println("max uniform buffer size:", limits.maxUniformBufferBindingSize, "bytes")
+    fmt.println("max storage buffers:", limits.maxStorageBuffersPerShaderStage)
+    fmt.println("max storage buffer size:", limits.maxStorageBufferBindingSize, "bytes")
+    fmt.println("max vertex buffers:", limits.maxVertexBuffers)
+    fmt.println("max vertex buffer size:", limits.maxBufferSize, "bytes")
+    fmt.println("max vertex attributes:", limits.maxVertexAttributes)
+
     configure_surface()
 
     ren.queue = wgpu.DeviceGetQueue(ren.device)
