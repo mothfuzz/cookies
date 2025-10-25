@@ -1,7 +1,7 @@
 package graphics
 import stbtt "vendor:stb/truetype"
 
-/*TODO:
+/*
 we're gonna do this how stb_truetype wants us to do it.
 Pack an atlas.
 Use instancing - the geometry is just a single quad.
@@ -11,6 +11,7 @@ Upload the whole texture as an atlas, use the sub-coordinates as instanced data.
 
 Font :: struct {
     texture: Texture,
+    material: Material,
     baked_chars: []stbtt.bakedchar,
     height: f32,
 }
@@ -30,10 +31,12 @@ make_font_from_file :: proc(filedata: []byte, font_size: uint, num_chars: uint =
         }
     }
     font.texture = make_texture_2D(image, {FONT_RES, FONT_RES})
+    font.material = make_material(albedo=font.texture, filtering=false)
     font.height = f32(font_size)
     return
 }
 delete_font :: proc(font: Font) {
+    delete_material(font.material)
     delete_texture(font.texture)
 }
 
@@ -49,11 +52,11 @@ get_char :: proc(font: Font, c: rune) -> (clip_rect: [4]f32) {
 
 //no accurate way to get width and height, really
 //origin is center of the window, positive y is up, that's all I can say...
-ui_draw_text :: proc(txt: string, font: Font, pos: [2]f32 = 0, color: [4]f32 = 1) {
+ui_draw_text :: proc(text: string, font: Font, pos: [2]f32 = 0, color: [4]f32 = 1) {
     x: f32
     y: f32
     //render a quad for every rune in txt...
-    for c, i in txt {
+    for c, i in text {
         quad: stbtt.aligned_quad
         stbtt.GetBakedQuad(raw_data(font.baked_chars), FONT_RES, FONT_RES, i32(c), &x, &y, &quad, true)
         w := quad.x1 - quad.x0
@@ -72,4 +75,40 @@ ui_draw_text :: proc(txt: string, font: Font, pos: [2]f32 = 0, color: [4]f32 = 1
         }
         draw_ui(fill_rect, color, font.texture, clip_rect)
     }
+}
+
+/*lord*/ char_quad: Mesh
+draw_text :: proc(text: string, font: Font, model: matrix[4,4]f32 = 1, color: [4]f32 = 1, sprite: bool=true, billboard: bool=false) {
+
+    if char_quad.size == 0 {
+        char_quad = make_mesh([]Vertex{
+            {{-0.5, +0.5, 0}, {0, 0}, {1, 1, 1, 1}},
+            {{+0.5, +0.5, 0}, {1, 0}, {1, 1, 1, 1}},
+            {{+0.5, -0.5, 0}, {1, 1}, {1, 1, 1, 1}},
+            {{-0.5, -0.5, 0}, {0, 1}, {1, 1, 1, 1}},
+        }, []u32{0, 1, 2, 0, 2, 3})
+    }
+
+    x: f32
+    y: f32
+    for c, i in text {
+        quad: stbtt.aligned_quad
+        stbtt.GetBakedQuad(raw_data(font.baked_chars), FONT_RES, FONT_RES, i32(c), &x, &y, &quad, true)
+        w := quad.x1 - quad.x0
+        h := quad.y1 - quad.y0
+        trans: matrix[4,4]f32 = {
+            1, 0, 0, x,
+            0, 1, 0, h/2-y,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        }
+        clip_rect := [4]f32{
+            quad.s0*FONT_RES,
+            quad.t0*FONT_RES,
+            (quad.s1 - quad.s0)*FONT_RES,
+            (quad.t1 - quad.t0)*FONT_RES,
+        }
+        draw_mesh(char_quad, font.material, model * trans, clip_rect, color, sprite, billboard)
+    }
+
 }

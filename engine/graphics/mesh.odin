@@ -27,14 +27,14 @@ Mesh :: struct {
     bounding_box: Extents,
 }
 
-make_mesh_from_array :: proc(vertices: [$i]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
+/*make_mesh_from_array :: proc(vertices: [$i]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
     new_vertices := #soa[i]Vertex
     for i in 0..<i {
         new_vertices[i] = vertices[i]
     }
     mesh = make_mesh_from_soa(new_vertices, indices)
     return
-}
+}*/
 make_mesh_from_slice :: proc(vertices: []Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
     size := len(vertices)
     new_vertices := make(#soa[]Vertex, size)
@@ -89,7 +89,7 @@ delete_mesh :: proc(mesh: Mesh) {
     }
 }
 
-make_mesh :: proc{make_mesh_from_array, make_mesh_from_slice, make_mesh_from_soa}
+make_mesh :: proc{/*make_mesh_from_array,*/ make_mesh_from_slice, make_mesh_from_soa}
 
 position_attribute := wgpu.VertexBufferLayout{
     stepMode = .Vertex,
@@ -117,6 +117,7 @@ instance_data_attributes := []wgpu.VertexAttribute{
     {format = .Float32x4, offset = 2 * size_of([4]f32), shaderLocation = instance_data_location + 2},
     {format = .Float32x4, offset = 3 * size_of([4]f32), shaderLocation = instance_data_location + 3},
     {format = .Float32x4, offset = 4 * size_of([4]f32), shaderLocation = instance_data_location + 4},
+    {format = .Float32x4, offset = 5 * size_of([4]f32), shaderLocation = instance_data_location + 5},
 }
 instance_data_attribute := wgpu.VertexBufferLayout{
     stepMode = .Instance,
@@ -125,15 +126,17 @@ instance_data_attribute := wgpu.VertexBufferLayout{
     attributes = raw_data(instance_data_attributes),
 }
 
+//TODO: figure out why we don't just update the 'draw' directly instead of using copies of all the variables.
+//TODO: then add the clip_rect & finish the move from clip_rect -> dynamic_material
+
 //all data needed to render a single instance
 MeshRenderItem :: struct {
     mesh: Mesh,
     material: Material,
-    draw: MeshDraw,
+    using draw: MeshDraw,
     //don't calculate these twice.
     bounding_box: [8][4]f32,
-    model: matrix[4,4]f32,
-    clip_rect: [4]f32,
+    //model: matrix[4,4]f32,
     local_calculated: bool,
     mvp: matrix[4,4]f32,
     mvp_calculated: bool,
@@ -142,7 +145,7 @@ MeshRenderItem :: struct {
 //data that actually gets passed to the GPU
 InstanceData :: struct {
     mvp: matrix[4,4]f32,
-    clip_rect: [4]f32,
+    dynamic_material: DynamicMaterial,
 }
 
 //this happens at an earlier stage than draw_instances i.e. multiple materials could be bound for one mesh
@@ -160,27 +163,27 @@ precalcs :: proc(instance: ^MeshRenderItem) {
     //calculate clip_rect
     w := f32(wgpu.TextureGetWidth(instance.material.albedo.image))
     h := f32(wgpu.TextureGetHeight(instance.material.albedo.image))
-    instance.clip_rect.x = instance.draw.clip_rect.x / w
-    instance.clip_rect.y = instance.draw.clip_rect.y / h
-    if instance.draw.clip_rect[2] == 0 {
+    instance.clip_rect.x /= w
+    instance.clip_rect.y /= h
+    if instance.clip_rect[2] == 0 {
         instance.clip_rect[2] = 1.0
     } else {
-        instance.clip_rect[2] = instance.draw.clip_rect[2] / w
-        w = instance.draw.clip_rect[2]
+        instance.clip_rect[2] /= w
     }
     if instance.draw.clip_rect[3] == 0 {
         instance.clip_rect[3] = 1.0
     } else {
-        instance.clip_rect[3] = instance.draw.clip_rect[3] / h
-        h = instance.draw.clip_rect[3]
+        instance.clip_rect[3] /= h
     }
     //calculate model
-    instance.model = instance.draw.model
     if instance.draw.is_sprite {
+        temp_trans := instance.model[3]
         instance.model[3] = {0, 0, 0, 1}
-        scale := linalg.matrix4_scale([3]f32{w, h, 1.0})
+        scale_w := w*instance.clip_rect[2]
+        scale_h := h*instance.clip_rect[3]
+        scale := linalg.matrix4_scale([3]f32{scale_w, scale_h, 1.0})
         instance.model *= scale
-        instance.model[3] = instance.draw.model[3]
+        instance.model[3] = temp_trans
     }
     //calculate bounding box
     bb := instance.mesh.bounding_box
@@ -203,7 +206,7 @@ calculate_mvp :: proc(instance: ^MeshRenderItem, cam: ^Camera) {
         return
     }
     view_model: matrix[4,4]f32
-    if instance.draw.is_billboard {
+    if instance.is_billboard {
         rotation_scale := cast(matrix[3,3]f32)(instance.model)
         view_model = cam.view * instance.model;
         trans := view_model[3] //save produced translation vector

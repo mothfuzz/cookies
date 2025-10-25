@@ -122,7 +122,7 @@ init :: proc() {
     //fmt.println("loading font...")
     unifont = graphics.make_font_from_file(#load("unifont.otf"), 32)
 
-    text_mat = graphics.make_material(unifont.texture, filtering=false, albedo_tint={1, 0, 1, 1})
+    text_mat = graphics.make_material(unifont.texture, filtering=false)
 }
 
 camera_pos: [3]f32 = {0, 0, 0}
@@ -206,11 +206,11 @@ draw :: proc(t: f64) {
     graphics.set_cameras({&cam, &cam2})
     scene.draw(&main_scene, t)
     graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
-    graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {64, 64, 128, 128})
+    graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {64, 64, 128, 128}, {1, 0, 0, 1})
     graphics.draw_mesh(quad, mat, transform.compute(&floor_trans))
     plus_one := floor_trans
     transform.translate(&plus_one, {0, 1, 0})
-    graphics.draw_mesh(quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'))
+    graphics.draw_mesh(quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'), albedo_tint={1, 0, 1, 1})
 
     offset: [2]f32
     offset.x = -screen_size.x/2
@@ -218,6 +218,11 @@ draw :: proc(t: f64) {
     graphics.ui_draw_rect({0, offset.y-48/2, screen_size.x, 48}, {0, 0, 0, 0.5})
     graphics.ui_draw_text(str[0:text_counter], unifont, offset, {0, 0, 0, 1})
     graphics.ui_draw_text(str[0:text_counter], unifont, offset+{1, -1}, {1, 1, 1, 1})
+
+
+    text_trans := transform.ORIGIN
+    transform.translate(&text_trans, {-16*3, 0, 1})
+    graphics.draw_text("Hello!!", unifont, transform.compute(&text_trans), {0, 1, 1, 1})
 }
 
 kill :: proc() {
@@ -234,6 +239,9 @@ kill :: proc() {
 }
 
 main :: proc() {
+
+
+
     fmt.println("HEWWO!!!")
     engine.boot(init, tick, draw, kill)
 }

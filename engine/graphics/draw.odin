@@ -7,7 +7,7 @@ import "core:fmt"
 
 MeshDraw :: struct {
     model: matrix[4,4]f32,
-    clip_rect: [4]f32,
+    using dynamic_material: DynamicMaterial,
     is_sprite: bool,
     is_billboard: bool,
 }
@@ -16,7 +16,9 @@ MeshDraw :: struct {
 //than we have the same texture on different meshes
 batches: map[Mesh]map[Material][dynamic]MeshDraw
 
-draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0, clip_rect: [4]f32 = 0, sprite: bool = false, billboard: bool = false) {
+draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0,
+                  clip_rect: [4]f32 = 0, albedo_tint: [4]f32 = 1,
+                  sprite: bool = false, billboard: bool = false) {
     model := model
     if !(mesh in batches) {
         batches[mesh] = {}
@@ -27,12 +29,14 @@ draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0, cl
         batch[material] = make([dynamic]MeshDraw, 0)
     }
     instances := &batch[material]
-    append(instances, MeshDraw{model, clip_rect, sprite, billboard})
+    append(instances, MeshDraw{model, {clip_rect, albedo_tint}, sprite, billboard})
 }
 
 
-draw_sprite :: proc(material: Material, model: matrix[4, 4]f32 = 0, clip_rect: [4]f32 = 0, billboard: bool = true) {
-    draw_mesh(quad_mesh, material, model, clip_rect, true, billboard)
+draw_sprite :: proc(material: Material, model: matrix[4, 4]f32 = 0,
+                    clip_rect: [4]f32 = 0, albedo_tint: [4]f32 = 1,
+                    billboard: bool = true) {
+    draw_mesh(quad_mesh, material, model, clip_rect, albedo_tint, true, billboard)
 }
 
 //0,0 is center, rect is -1:1 xywh, clip_rect is xywh, 0:w & 0:h of texture

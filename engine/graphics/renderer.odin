@@ -414,7 +414,7 @@ render :: proc(t: f64) {
                 bind_material(render_pass, 2, current_material)
             }
             calculate_mvp(instance, cam)
-            append(&instances, InstanceData{mvp=instance.mvp, clip_rect=instance.clip_rect})
+            append(&instances, InstanceData{mvp=instance.mvp, dynamic_material=instance.dynamic_material})
 
             //if next mesh is different, or there is no next mesh, draw the current batch
             switch {
