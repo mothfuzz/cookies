@@ -82,10 +82,10 @@ draw_text :: proc(text: string, font: Font, model: matrix[4,4]f32 = 1, color: [4
 
     if char_quad.size == 0 {
         char_quad = make_mesh([]Vertex{
-            {{-0.5, +0.5, 0}, {0, 0}, {1, 1, 1, 1}},
-            {{+0.5, +0.5, 0}, {1, 0}, {1, 1, 1, 1}},
-            {{+0.5, -0.5, 0}, {1, 1}, {1, 1, 1, 1}},
-            {{-0.5, -0.5, 0}, {0, 1}, {1, 1, 1, 1}},
+            {position={-0.5, +0.5, 0}, texcoord={0, 0}, color={1, 1, 1, 1}},
+            {position={+0.5, +0.5, 0}, texcoord={1, 0}, color={1, 1, 1, 1}},
+            {position={+0.5, -0.5, 0}, texcoord={1, 1}, color={1, 1, 1, 1}},
+            {position={-0.5, -0.5, 0}, texcoord={0, 1}, color={1, 1, 1, 1}},
         }, []u32{0, 1, 2, 0, 2, 3})
     }
 

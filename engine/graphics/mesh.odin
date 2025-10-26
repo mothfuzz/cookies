@@ -7,8 +7,12 @@ import "vendor:wgpu"
 
 Vertex :: struct {
     position: [3]f32,
+    normal: [3]f32,
+    tangent: [3]f32,
     texcoord: [2]f32,
     color: [4]f32,
+    bones: [4]f32,
+    weights: [4]f32,
 }
 
 Extents :: struct {
@@ -18,10 +22,15 @@ Extents :: struct {
 
 Mesh :: struct {
     size: u32,
-    //buffers
+    //buffers (currently at 8 - if we need more then we can interleave.)
     positions: wgpu.Buffer,
+    normals: wgpu.Buffer,
+    tangents: wgpu.Buffer,
     texcoords: wgpu.Buffer,
     colors: wgpu.Buffer,
+    bones: wgpu.Buffer,
+    weights: wgpu.Buffer,
+    //index buffer
     indices: wgpu.Buffer,
     //optimizations
     bounding_box: Extents,
@@ -48,8 +57,12 @@ make_mesh_from_slice :: proc(vertices: []Vertex, indices: []u32 = nil) -> (mesh:
 make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
     n := len(vertices)
     mesh.positions = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.position[0:n])
+    mesh.normals = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.normal[0:n])
+    mesh.tangents = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.tangent[0:n])
     mesh.texcoords = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.texcoord[0:n])
     mesh.colors = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.color[0:n])
+    mesh.bones = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.bones[0:n])
+    mesh.weights = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.weights[0:n])
     if indices != nil {
         mesh.indices = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Index, .CopyDst}}, indices)
         mesh.size = u32(len(indices))
@@ -82,8 +95,12 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mes
 }
 delete_mesh :: proc(mesh: Mesh) {
     wgpu.BufferDestroy(mesh.positions)
+    wgpu.BufferDestroy(mesh.normals)
+    wgpu.BufferDestroy(mesh.tangents)
     wgpu.BufferDestroy(mesh.texcoords)
     wgpu.BufferDestroy(mesh.colors)
+    wgpu.BufferDestroy(mesh.bones)
+    wgpu.BufferDestroy(mesh.weights)
     if mesh.indices != nil {
         wgpu.BufferDestroy(mesh.indices)
     }
@@ -97,27 +114,51 @@ position_attribute := wgpu.VertexBufferLayout{
     attributeCount = 1,
     attributes = &wgpu.VertexAttribute{format = .Float32x3, shaderLocation = 0},
 }
+normal_attribute := wgpu.VertexBufferLayout{
+    stepMode = .Vertex,
+    arrayStride = size_of([3]f32),
+    attributeCount = 1,
+    attributes = &wgpu.VertexAttribute{format = .Float32x3, shaderLocation = 1},
+}
+tangent_attribute := wgpu.VertexBufferLayout{
+    stepMode = .Vertex,
+    arrayStride = size_of([3]f32),
+    attributeCount = 1,
+    attributes = &wgpu.VertexAttribute{format = .Float32x3, shaderLocation = 2},
+}
 texcoord_attribute := wgpu.VertexBufferLayout{
     stepMode = .Vertex,
     arrayStride = size_of([2]f32),
     attributeCount = 1,
-    attributes = &wgpu.VertexAttribute{format = .Float32x2, shaderLocation = 1},
+    attributes = &wgpu.VertexAttribute{format = .Float32x2, shaderLocation = 3},
 }
 color_attribute := wgpu.VertexBufferLayout{
     stepMode = .Vertex,
     arrayStride = size_of([4]f32),
     attributeCount = 1,
-    attributes = &wgpu.VertexAttribute{format = .Float32x4, shaderLocation = 2},
+    attributes = &wgpu.VertexAttribute{format = .Float32x4, shaderLocation = 4},
+}
+bones_attribute := wgpu.VertexBufferLayout{
+    stepMode = .Vertex,
+    arrayStride = size_of([4]f32),
+    attributeCount = 1,
+    attributes = &wgpu.VertexAttribute{format = .Float32x4, shaderLocation = 5},
+}
+weights_attribute := wgpu.VertexBufferLayout{
+    stepMode = .Vertex,
+    arrayStride = size_of([4]f32),
+    attributeCount = 1,
+    attributes = &wgpu.VertexAttribute{format = .Float32x4, shaderLocation = 6},
 }
 
-instance_data_location: u32 = 3
+instance_data_location: u32 = 7
 instance_data_attributes := []wgpu.VertexAttribute{
-    {format = .Float32x4, offset = 0 * size_of([4]f32), shaderLocation = instance_data_location + 0},
-    {format = .Float32x4, offset = 1 * size_of([4]f32), shaderLocation = instance_data_location + 1},
-    {format = .Float32x4, offset = 2 * size_of([4]f32), shaderLocation = instance_data_location + 2},
-    {format = .Float32x4, offset = 3 * size_of([4]f32), shaderLocation = instance_data_location + 3},
-    {format = .Float32x4, offset = 4 * size_of([4]f32), shaderLocation = instance_data_location + 4},
-    {format = .Float32x4, offset = 5 * size_of([4]f32), shaderLocation = instance_data_location + 5},
+    {format = .Float32x4, offset = 0 * size_of([4]f32), shaderLocation = instance_data_location + 0}, //mvp1
+    {format = .Float32x4, offset = 1 * size_of([4]f32), shaderLocation = instance_data_location + 1}, //mvp2
+    {format = .Float32x4, offset = 2 * size_of([4]f32), shaderLocation = instance_data_location + 2}, //mvp3
+    {format = .Float32x4, offset = 3 * size_of([4]f32), shaderLocation = instance_data_location + 3}, //mvp4
+    {format = .Float32x4, offset = 4 * size_of([4]f32), shaderLocation = instance_data_location + 4}, //clip_rect
+    {format = .Float32x4, offset = 5 * size_of([4]f32), shaderLocation = instance_data_location + 5}, //albedo_tint
 }
 instance_data_attribute := wgpu.VertexBufferLayout{
     stepMode = .Instance,
@@ -125,9 +166,16 @@ instance_data_attribute := wgpu.VertexBufferLayout{
     attributeCount = len(instance_data_attributes),
     attributes = raw_data(instance_data_attributes),
 }
-
-//TODO: figure out why we don't just update the 'draw' directly instead of using copies of all the variables.
-//TODO: then add the clip_rect & finish the move from clip_rect -> dynamic_material
+vertex_buffer_layouts := []wgpu.VertexBufferLayout{
+    position_attribute,
+    normal_attribute,
+    tangent_attribute,
+    texcoord_attribute,
+    color_attribute,
+    bones_attribute,
+    weights_attribute,
+    instance_data_attribute,
+}
 
 //all data needed to render a single instance
 MeshRenderItem :: struct {
@@ -151,8 +199,12 @@ InstanceData :: struct {
 //this happens at an earlier stage than draw_instances i.e. multiple materials could be bound for one mesh
 bind_mesh :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh) {
     wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 0, mesh.positions, 0, wgpu.BufferGetSize(mesh.positions))
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 1, mesh.texcoords, 0, wgpu.BufferGetSize(mesh.texcoords))
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 2, mesh.colors, 0, wgpu.BufferGetSize(mesh.colors))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 1, mesh.normals, 0, wgpu.BufferGetSize(mesh.normals))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 2, mesh.tangents, 0, wgpu.BufferGetSize(mesh.tangents))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 3, mesh.texcoords, 0, wgpu.BufferGetSize(mesh.texcoords))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 4, mesh.colors, 0, wgpu.BufferGetSize(mesh.colors))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 5, mesh.bones, 0, wgpu.BufferGetSize(mesh.bones))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 6, mesh.weights, 0, wgpu.BufferGetSize(mesh.weights))
 }
 
 //calculates local mesh data
@@ -229,7 +281,7 @@ reset_mvps :: proc(instances: []MeshRenderItem) {
 @(private)
 draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, instances: []InstanceData) {
     instance_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, instances)
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 3, instance_buffer, 0, wgpu.BufferGetSize(instance_buffer))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, instance_data_location, instance_buffer, 0, wgpu.BufferGetSize(instance_buffer))
     wgpu.BufferRelease(instance_buffer)
 
     if mesh.indices != nil {

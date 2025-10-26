@@ -220,8 +220,8 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         vertex = {
             module = ren.shader,
             entryPoint = "vs_main",
-            bufferCount = len(vertex_buffers),
-            buffers = raw_data(vertex_buffers),
+            bufferCount = len(vertex_buffer_layouts),
+            buffers = raw_data(vertex_buffer_layouts),
         },
         fragment = &{
             module = ren.shader,

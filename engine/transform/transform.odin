@@ -166,10 +166,21 @@ set_orientation :: proc "contextless" (trans: ^Transform, orientation: [3]f32, i
         reset(trans)
     }
 }
+set_orientation_quaternion :: proc "contextless" (trans: ^Transform, orientation: quaternion128, interpolate: bool = false) {
+    trans.orientation = orientation
+    trans.dirty = true
+    if !interpolate {
+        reset(trans)
+    }
+}
 get_orientation :: proc "contextless" (trans: ^Transform) -> [3]f32 {
     t, r, s := extract(trans.prev_world_trans)
     x, y, z := linalg.euler_angles_from_quaternion(r, .XYZ)
     return {x, y, z}
+}
+get_orientation_quaternion :: proc "contextless" (trans: ^Transform) -> quaternion128 {
+    t, r, s := extract(trans.prev_world_trans)
+    return r
 }
 
 scale :: proc "contextless" (trans: ^Transform, scale: [3]f32) {

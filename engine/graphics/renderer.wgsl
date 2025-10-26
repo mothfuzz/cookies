@@ -14,14 +14,20 @@ struct Camera {
 
 struct Vertex {
     @location(0) position: vec3<f32>,
-    @location(1) texcoord: vec2<f32>,
-    @location(2) color: vec4<f32>,
-    @location(3) mvp_0: vec4<f32>,
-    @location(4) mvp_1: vec4<f32>,
-    @location(5) mvp_2: vec4<f32>,
-    @location(6) mvp_3: vec4<f32>,
-    @location(7) clip_rect: vec4<f32>,
-    @location(8) albedo_tint: vec4<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) tangent: vec3<f32>,
+    @location(3) texcoord: vec2<f32>,
+    @location(4) color: vec4<f32>,
+    @location(5) bones: vec4<f32>,
+    @location(6) weights: vec4<f32>,
+    @location(7) mvp_0: vec4<f32>,
+    @location(8) mvp_1: vec4<f32>,
+    @location(9) mvp_2: vec4<f32>,
+    @location(10) mvp_3: vec4<f32>,
+    @location(11) clip_rect: vec4<f32>,
+    @location(12) albedo_tint: vec4<f32>,
+    //@location(13) pbr_tint: vec3<f32>, //ambient, metallic, roughness
+    //@location(14) emmissive_tint: vec4<f32>, //rgb + intensity
 }
 
 struct VSOut {
