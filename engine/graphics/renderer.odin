@@ -186,7 +186,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         entryCount = len(material_layout_entries),
         entries = raw_data(material_layout_entries),
         //one entry for each texture in the material
-        //binding for: albedo, normal, pbr, and environment (for now)
+        //binding for: base_color, normal, pbr, and environment (for now)
     })
 
     bind_group_layouts := []wgpu.BindGroupLayout{uniform_layout, camera_layout, material_layout}

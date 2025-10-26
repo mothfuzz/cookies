@@ -31,7 +31,7 @@ make_font_from_file :: proc(filedata: []byte, font_size: uint, num_chars: uint =
         }
     }
     font.texture = make_texture_2D(image, {FONT_RES, FONT_RES})
-    font.material = make_material(albedo=font.texture, filtering=false)
+    font.material = make_material(base_color=font.texture, filtering=false)
     font.height = f32(font_size)
     return
 }

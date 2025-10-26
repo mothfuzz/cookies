@@ -10,7 +10,10 @@ struct Camera {
 @group(1) @binding(0) var<uniform> camera: Camera;
 
 @group(2) @binding(0) var smp: sampler;
-@group(2) @binding(1) var albedo: texture_2d<f32>;
+@group(2) @binding(1) var base_color: texture_2d<f32>;
+@group(2) @binding(2) var normal: texture_2d<f32>;
+@group(2) @binding(3) var pbr: texture_2d<f32>; //ambient roughness metallic
+@group(2) @binding(4) var emissive: texture_2d<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -25,7 +28,7 @@ struct Vertex {
     @location(9) mvp_2: vec4<f32>,
     @location(10) mvp_3: vec4<f32>,
     @location(11) clip_rect: vec4<f32>,
-    @location(12) albedo_tint: vec4<f32>,
+    @location(12) tint: vec4<f32>,
     //@location(13) pbr_tint: vec3<f32>, //ambient, metallic, roughness
     //@location(14) emmissive_tint: vec4<f32>, //rgb + intensity
 }
@@ -34,7 +37,7 @@ struct VSOut {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) @interpolate(perspective) texcoord: vec2<f32>,
-    @location(2) albedo_tint: vec4<f32>,
+    @location(2) tint: vec4<f32>,
 }
 
 @vertex
@@ -46,16 +49,16 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     let tex_factor = vertex.clip_rect.zw;
     v.texcoord = vertex.texcoord*tex_factor+tex_offset;
     v.color = vertex.color;
-    v.albedo_tint = vertex.albedo_tint;
+    v.tint = vertex.tint;
     return v;
 }
 
 @fragment
 fn fs_main(v: VSOut) -> @location(0) vec4<f32> {
-    let albedo = textureSample(albedo, smp, v.texcoord) * v.albedo_tint;
+    let base_color = textureSample(base_color, smp, v.texcoord) * v.tint;
     let screen_color = vec4<f32>(v.position.x/screen_size.x, v.position.y/screen_size.y, 1.0, 1.0);
     let color = mix(v.color, screen_color, screen_color_blend);
-    let final_color = albedo * color;
+    let final_color = base_color * color;
 
     if !(final_color.a > 0) {
         discard;

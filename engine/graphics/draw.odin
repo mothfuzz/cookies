@@ -17,7 +17,7 @@ MeshDraw :: struct {
 batches: map[Mesh]map[Material][dynamic]MeshDraw
 
 draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0,
-                  clip_rect: [4]f32 = 0, albedo_tint: [4]f32 = 1,
+                  clip_rect: [4]f32 = 0, tint: [4]f32 = 1,
                   sprite: bool = false, billboard: bool = false) {
     model := model
     if !(mesh in batches) {
@@ -29,14 +29,14 @@ draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0,
         batch[material] = make([dynamic]MeshDraw, 0)
     }
     instances := &batch[material]
-    append(instances, MeshDraw{model, {clip_rect, albedo_tint}, sprite, billboard})
+    append(instances, MeshDraw{model, {clip_rect, tint}, sprite, billboard})
 }
 
 
 draw_sprite :: proc(material: Material, model: matrix[4, 4]f32 = 0,
-                    clip_rect: [4]f32 = 0, albedo_tint: [4]f32 = 1,
+                    clip_rect: [4]f32 = 0, tint: [4]f32 = 1,
                     billboard: bool = true) {
-    draw_mesh(quad_mesh, material, model, clip_rect, albedo_tint, true, billboard)
+    draw_mesh(quad_mesh, material, model, clip_rect, tint, true, billboard)
 }
 
 //0,0 is center, rect is -1:1 xywh, clip_rect is xywh, 0:w & 0:h of texture

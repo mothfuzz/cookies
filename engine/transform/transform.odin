@@ -20,7 +20,7 @@ Transform :: struct {
     dirty: bool,
 }
 
-ORIGIN :: Transform{position=1, orientation=1, scale=1,
+ORIGIN :: Transform{position=0, orientation=1, scale=1,
                     prev_local_trans=1, prev_world_trans=1,
                     next_local_trans=1, next_world_trans=1}
 
@@ -34,6 +34,7 @@ link :: proc "contextless" (parent: ^Transform, child: ^Transform) {
         child.prev_sibling =  parent.last_child
     }
     parent.last_child = child
+    child.dirty = true
 }
 
 unlink :: proc "contextless" (node: ^Transform) {
@@ -59,28 +60,29 @@ unlink :: proc "contextless" (node: ^Transform) {
 //to compute a transform immediately and 'cancel' interpolation
 reset :: proc "contextless" (node: ^Transform) {
     node.dirty = true
-    update_root(node)
-    node.prev_local_trans = node.next_local_trans
-    node.prev_world_trans = node.next_world_trans
+    update_root(node, reset=true)
+    //node.prev_local_trans = node.next_local_trans
+    //node.prev_world_trans = node.next_world_trans
 }
 
-update_root :: proc "contextless" (node: ^Transform) {
+update_root :: proc "contextless" (node: ^Transform, reset: bool = false) {
     if node == nil {
         return
     }
     if node.parent != nil {
-        update_root(node.parent)
+        update_root(node.parent, reset)
     } else {
-        update(node)
+        update(node, reset=reset)
     }
 }
 
-update :: proc "contextless" (node: ^Transform, dirty: bool = false) {
+update :: proc "contextless" (node: ^Transform, dirty: bool = false, reset: bool = false) {
     if node == nil {
         return
     }
     dirty := dirty || node.dirty
     if dirty {
+        //fmt.println("recalculating trans:", node,"\n")
         node.prev_local_trans = node.next_local_trans
         node.prev_world_trans = node.next_world_trans
         node.next_local_trans = linalg.matrix4_from_trs(node.position, node.orientation, node.scale)
@@ -90,9 +92,13 @@ update :: proc "contextless" (node: ^Transform, dirty: bool = false) {
             node.next_world_trans = node.next_local_trans
         }
         node.dirty = false
-        update(node.next_sibling, dirty)
-        update(node.first_child, dirty)
     }
+    if reset {
+        node.prev_local_trans = node.next_local_trans
+        node.prev_world_trans = node.next_world_trans
+    }
+    update(node.next_sibling, dirty, reset)
+    update(node.first_child, dirty, reset)
 }
 extract :: proc "contextless" (m: matrix[4, 4]f32) -> (position: [3]f32, orientation: quaternion128, scale: [3]f32) {
     position = m[3].xyz

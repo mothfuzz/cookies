@@ -158,7 +158,7 @@ instance_data_attributes := []wgpu.VertexAttribute{
     {format = .Float32x4, offset = 2 * size_of([4]f32), shaderLocation = instance_data_location + 2}, //mvp3
     {format = .Float32x4, offset = 3 * size_of([4]f32), shaderLocation = instance_data_location + 3}, //mvp4
     {format = .Float32x4, offset = 4 * size_of([4]f32), shaderLocation = instance_data_location + 4}, //clip_rect
-    {format = .Float32x4, offset = 5 * size_of([4]f32), shaderLocation = instance_data_location + 5}, //albedo_tint
+    {format = .Float32x4, offset = 5 * size_of([4]f32), shaderLocation = instance_data_location + 5}, //tint
 }
 instance_data_attribute := wgpu.VertexBufferLayout{
     stepMode = .Instance,
@@ -213,8 +213,8 @@ precalcs :: proc(instance: ^MeshRenderItem) {
         return
     }
     //calculate clip_rect
-    w := f32(wgpu.TextureGetWidth(instance.material.albedo.image))
-    h := f32(wgpu.TextureGetHeight(instance.material.albedo.image))
+    w := f32(wgpu.TextureGetWidth(instance.material.base_color.image))
+    h := f32(wgpu.TextureGetHeight(instance.material.base_color.image))
     instance.clip_rect.x /= w
     instance.clip_rect.y /= h
     if instance.clip_rect[2] == 0 {

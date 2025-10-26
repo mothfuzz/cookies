@@ -102,7 +102,7 @@ init :: proc() {
 
     //player resources
     player_sprite = graphics.make_texture_from_image(#load("arena_game_player.png"))
-    player_mat = graphics.make_material(albedo=player_sprite, filtering=false)
+    player_mat = graphics.make_material(base_color=player_sprite, filtering=false)
     player.trans = transform.ORIGIN
     transform.set_scale(&player.trans, {2, 2, 1})
     player.hp = 10
@@ -110,11 +110,11 @@ init :: proc() {
 
     //bullet resources
     bullet_sprite = graphics.make_texture_from_image(#load("arena_game_bullet.png"))
-    bullet_mat = graphics.make_material(albedo=bullet_sprite, filtering=false)
+    bullet_mat = graphics.make_material(base_color=bullet_sprite, filtering=false)
 
     //enemy resources
     enemy_sprite = graphics.make_texture_from_image(#load("arena_game_enemy.png"))
-    enemy_mat = graphics.make_material(albedo=enemy_sprite, filtering=false)
+    enemy_mat = graphics.make_material(base_color=enemy_sprite, filtering=false)
 }
 
 update_player :: proc() {

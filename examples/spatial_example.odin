@@ -50,7 +50,7 @@ init :: proc() {
     graphics.set_camera(&cam)
 
     guy_tex = graphics.make_texture_from_image(#load("frasier-32.png"))
-    guy_mat = graphics.make_material(albedo = guy_tex)
+    guy_mat = graphics.make_material(base_color = guy_tex)
 
     guys = arena.make(arena.Arena(TheGuy))
 

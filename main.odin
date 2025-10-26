@@ -28,6 +28,8 @@ cam: graphics.Camera
 cam2: graphics.Camera
 unifont: graphics.Font
 
+emantaller: engine.Scene
+
 TestActor :: struct {
     i: i32,
     f: f32,
@@ -89,7 +91,7 @@ init :: proc() {
     //tex = graphics.make_texture_2D(img2, {1024, 1024})
     //delete(img2)
     tex = graphics.make_texture_2D(img, {4, 4})
-    mat = graphics.make_material(albedo=tex, filtering=false)
+    mat = graphics.make_material(base_color=tex, filtering=false)
 
 
     quad = graphics.make_mesh([]graphics.Vertex{
@@ -99,7 +101,7 @@ init :: proc() {
         {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
     }, {0, 1, 2, 0, 2, 3})
     tex2 = graphics.make_texture_from_image(#load("frasier.png"))
-    mat2 = graphics.make_material(albedo=tex2)
+    mat2 = graphics.make_material(base_color=tex2)
 
     transform.set_scale(&triangle_trans, {200, 200, 1})
 
@@ -116,13 +118,18 @@ init :: proc() {
     cam2 = graphics.make_camera({screen_size.x/2 - 1, 0, screen_size.x/2, screen_size.y})
     //cam = graphics.make_camera({0, 0, screen_size.x, screen_size.y})
     //cam2 = graphics.make_camera({0, 0, screen_size.x, screen_size.y})
-    graphics.look_at(&cam, {+5, 0, 0}, {0, 0, graphics.z_2d(&cam)})
-    graphics.look_at(&cam2, {-5, 0, 0}, {0, 0, graphics.z_2d(&cam2)})
+    graphics.look_at(&cam, {0, 0, 0}, {0, 0, graphics.z_2d(&cam)})
+    graphics.look_at(&cam2, {0, 0, 0}, {0, 0, graphics.z_2d(&cam2)})
 
     //fmt.println("loading font...")
     unifont = graphics.make_font_from_file(#load("unifont.otf"), 32)
 
     text_mat = graphics.make_material(unifont.texture, filtering=false)
+
+    engine.preload("emantaller.png", #load("emantaller.png"))
+    emantaller = engine.make_scene_from_file("emantaller.gltf", #load("emantaller.gltf"))
+    transform.set_scale(&emantaller.nodes[2].transform, {100, 100, 100})
+    transform.set_position(&emantaller.nodes[2].transform, {0, 0, -100})
 }
 
 camera_pos: [3]f32 = {0, 0, 0}
@@ -159,6 +166,12 @@ tick :: proc() {
         camera_pos.z += math.cos(camera_angle)*move_speed
         camera_pos.x -= math.sin(camera_angle)*move_speed
     }
+    if input.key_down(.Key_Space) {
+        camera_pos.y += move_speed
+    }
+    if input.key_down(.Key_LeftShift) {
+        camera_pos.y -= move_speed
+    }
     if input.key_down(.Key_Left) {
         camera_angle -= 0.1
     }
@@ -192,8 +205,13 @@ tick :: proc() {
     forward := [3]f32{camera_pos.x + math.cos(camera_angle)*graphics.z_2d(&cam),
                       camera_pos.y,
                       camera_pos.z + math.sin(camera_angle)*graphics.z_2d(&cam)}
-    graphics.look_to(&cam, {camera_pos.x+5, camera_pos.y, camera_pos.z}, forward)
-    graphics.look_to(&cam2, {camera_pos.x-5, camera_pos.y, camera_pos.z}, forward)
+    offset_x := math.sin(camera_angle) * 20
+    offset_z := math.cos(camera_angle) * 20
+    graphics.look_to(&cam, {camera_pos.x-offset_x, camera_pos.y, camera_pos.z+offset_z}, forward)
+    graphics.look_to(&cam2, {camera_pos.x+offset_x, camera_pos.y, camera_pos.z-offset_z}, forward)
+
+
+    transform.rotatey(&emantaller.active_layout.roots[0].transform, 0.01)
 }
 
 draw :: proc(t: f64) {
@@ -210,7 +228,7 @@ draw :: proc(t: f64) {
     graphics.draw_mesh(quad, mat, transform.compute(&floor_trans))
     plus_one := floor_trans
     transform.translate(&plus_one, {0, 1, 0})
-    graphics.draw_mesh(quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'), albedo_tint={1, 0, 1, 1})
+    graphics.draw_mesh(quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'), tint={1, 0, 1, 1})
 
     offset: [2]f32
     offset.x = -screen_size.x/2
@@ -219,10 +237,11 @@ draw :: proc(t: f64) {
     graphics.ui_draw_text(str[0:text_counter], unifont, offset, {0, 0, 0, 1})
     graphics.ui_draw_text(str[0:text_counter], unifont, offset+{1, -1}, {1, 1, 1, 1})
 
-
     text_trans := transform.ORIGIN
     transform.translate(&text_trans, {-16*3, 0, 1})
     graphics.draw_text("Hello!!", unifont, transform.compute(&text_trans), {0, 1, 1, 1})
+
+    engine.draw_scene(&emantaller, t)
 }
 
 kill :: proc() {
@@ -239,9 +258,6 @@ kill :: proc() {
 }
 
 main :: proc() {
-
-
-
     fmt.println("HEWWO!!!")
     engine.boot(init, tick, draw, kill)
 }

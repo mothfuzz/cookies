@@ -1,5 +1,7 @@
 package engine
 
+import "core:fmt"
+
 //bit of glue code so that these packages can work somewhat independently
 
 import "window"
@@ -23,3 +25,4 @@ tick_rate : uint = 125
 set_tick_rate :: proc(new_tick_rate: uint) {
     tick_rate = new_tick_rate
 }
+
