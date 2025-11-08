@@ -71,6 +71,7 @@ load :: proc(path: cstring) -> []u8 {
 
 import "graphics"
 import "transform"
+import "spatial"
 
 Node_Type :: union {
     ^graphics.Model,
@@ -93,7 +94,8 @@ Layout :: struct {
 Scene :: struct {
     //assets
     models: []graphics.Model, //'meshes'
-    meshes: []graphics.Mesh,
+    meshes: []graphics.Mesh, //'primitives'
+    colliders: []spatial.Tri_Mesh,
     textures: []graphics.Texture,
     materials: []graphics.Material,
     skeletons: []graphics.Skeleton, //'skins' //NOTE: when a mesh is animated, its local transform is ignored in favor of the root bone.
@@ -169,7 +171,7 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
 }
 
 @(private)
-load_mesh :: proc(primitive: cgltf.primitive) -> graphics.Mesh {
+load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: graphics.Mesh, collider: spatial.Tri_Mesh) {
     indices_len := cgltf.accessor_unpack_indices(primitive.indices, nil, 4, 0)
     indices := make([]u32, indices_len)
     if cgltf.accessor_unpack_indices(primitive.indices, raw_data(indices), 4, indices_len) < indices_len {
@@ -222,10 +224,14 @@ load_mesh :: proc(primitive: cgltf.primitive) -> graphics.Mesh {
             vertex.color = 1
         }
     }
-    return graphics.make_mesh_from_soa(vertices, indices)
+    mesh = graphics.make_mesh_from_soa(vertices, indices)
+    if make_tri_mesh {
+        collider = spatial.make_tri_mesh(vertices.position[0:len(vertices)], indices)
+    }
+    return
 }
 
-make_scene_from_file :: proc(filename: cstring, filedata: []u8) -> (scene: Scene) {
+make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: bool = false) -> (scene: Scene) {
 
     ctx := context
     opts := cgltf.options{
@@ -264,6 +270,9 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8) -> (scene: Scene
         total_meshes += len(mesh.primitives)
     }
     scene.meshes = make([]graphics.Mesh, total_meshes)
+    if make_tri_mesh {
+        scene.colliders = make([]spatial.Tri_Mesh, total_meshes)
+    }
     current_mesh := 0
     for mesh, i in data.meshes {
         model := &scene.models[i]
@@ -274,7 +283,11 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8) -> (scene: Scene
             material_index := cgltf.material_index(data, primitive.material)
             model.materials[j] = &scene.materials[material_index]
 
-            scene.meshes[current_mesh] = load_mesh(primitive)
+            mesh, collider := load_mesh(primitive, make_tri_mesh)
+            scene.meshes[current_mesh] = mesh
+            if make_tri_mesh {
+                scene.colliders[current_mesh] = collider
+            }
             model.meshes[j] = &scene.meshes[current_mesh]
             current_mesh += 1
         }
@@ -288,7 +301,6 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8) -> (scene: Scene
     for node, i in data.nodes {
         if node.parent != nil {
             p := cgltf.node_index(data, node.parent)
-            fmt.println("parent node:", p, ", child node:", i)
             transform.link(&scene.nodes[p].transform, &scene.nodes[i].transform) //this should work but if it doesn't I guess I'll fix it
         }
         if node.has_matrix {

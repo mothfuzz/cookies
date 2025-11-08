@@ -128,7 +128,6 @@ sphere_point :: proc(a: Sphere, b: Point) -> bool {
     return point_sphere(b, a)
 }
 
-
 aabb_aabb :: proc(a: Bounding_Box, b: Bounding_Box) -> bool {
     return a.max.x >= b.min.x &&
             a.max.y >= b.min.y &&

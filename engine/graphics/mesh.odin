@@ -34,6 +34,8 @@ Mesh :: struct {
     indices: wgpu.Buffer,
     //optimizations
     bounding_box: Extents,
+    bounding_center: [3]f32,
+    bounding_radius: f32,
 }
 
 /*make_mesh_from_array :: proc(vertices: [$i]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
@@ -91,6 +93,8 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mes
             mesh.bounding_box.mini.z = v.position.z
         }
     }
+    mesh.bounding_center = (mesh.bounding_box.mini + mesh.bounding_box.maxi)/2.0
+    mesh.bounding_radius = linalg.length(mesh.bounding_box.maxi - mesh.bounding_box.mini)/2.0
     return
 }
 delete_mesh :: proc(mesh: Mesh) {
@@ -184,6 +188,8 @@ MeshRenderItem :: struct {
     using draw: MeshDraw,
     //don't calculate these twice.
     bounding_box: [8][4]f32,
+    bounding_center: [4]f32,
+    bounding_radius: f32,
     //model: matrix[4,4]f32,
     local_calculated: bool,
     mvp: matrix[4,4]f32,
@@ -247,6 +253,12 @@ precalcs :: proc(instance: ^MeshRenderItem) {
         instance.bounding_box[i][3] = 1
         instance.bounding_box[i] = instance.model * instance.bounding_box[i]
     }
+    instance.bounding_center.xyz = instance.mesh.bounding_center
+    instance.bounding_center.w = 1
+    instance.bounding_center = instance.model * instance.bounding_center
+    //get largest scale factor
+    scale := [3]f32{linalg.length(instance.model[0].xyz), linalg.length(instance.model[1].xyz), linalg.length(instance.model[2].xyz)}
+    instance.bounding_radius = instance.mesh.bounding_radius * max(scale.x, scale.y, scale.z)
 
     instance.local_calculated = true
 }

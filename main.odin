@@ -11,6 +11,7 @@ import "engine/input"
 import "engine/scene"
 import "engine/graphics"
 import "engine/transform"
+import "engine/spatial"
 import "core:math"
 
 main_scene: scene.Scene = {name="Eve"}
@@ -127,9 +128,12 @@ init :: proc() {
     text_mat = graphics.make_material(unifont.texture, filtering=false)
 
     engine.preload("emantaller.png", #load("emantaller.png"))
-    emantaller = engine.make_scene_from_file("emantaller.gltf", #load("emantaller.gltf"))
-    transform.set_scale(&emantaller.nodes[2].transform, {100, 100, 100})
-    transform.set_position(&emantaller.nodes[2].transform, {0, 0, -100})
+    emantaller = engine.make_scene_from_file("emantaller.gltf", #load("emantaller.gltf"), true)
+    transform.set_scale(&emantaller.active_layout.roots[0].transform, {100, 100, 100})
+    transform.set_position(&emantaller.active_layout.roots[0].transform, {0, 0, -100})
+
+    spatial.transform_tri_mesh(&emantaller.colliders[0], transform.compute(&emantaller.active_layout.roots[0].transform))
+    fmt.println(emantaller.colliders[0])
 }
 
 camera_pos: [3]f32 = {0, 0, 0}

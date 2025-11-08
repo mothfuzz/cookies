@@ -235,7 +235,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         primitive = {
             topology = .TriangleList,
             cullMode = .None,
-            frontFace = .CW,
+            frontFace = .CCW,
         },
         depthStencil = &{
             format = .Depth24PlusStencil8,

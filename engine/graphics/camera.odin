@@ -98,13 +98,13 @@ get_viewport_size :: proc(cam: ^Camera) -> (width, height: f32) {
 }
 
 FOV :: 60.0
-NEAR :: 0.1
+NEAR :: 0.01
 FAR :: 2048.0*1024.0
 calculate_projection :: proc(cam: ^Camera) {
     width, height := get_viewport_size(cam)
     fov := f32(linalg.to_radians(FOV))
     //cam.projection = linalg.matrix4_perspective(fov, width/height, NEAR, FAR)
-    cam.projection = linalg.matrix4_infinite_perspective(fov, width/height, NEAR)
+   cam.projection = linalg.matrix4_infinite_perspective(fov, width/height, NEAR)
 }
 
 z_2d :: proc(cam: ^Camera) -> f32 {
@@ -114,64 +114,56 @@ z_2d :: proc(cam: ^Camera) -> f32 {
 
 calc_plane :: proc(p: [3]f32, n: [3]f32) -> (plane: [4]f32) {
     plane.xyz = linalg.normalize(n)
-    plane.w = -linalg.dot(plane.xyz, p)
+    plane.w = linalg.dot(plane.xyz, p)
     return
 }
 
+signed_dist :: proc(point: [3]f32, plane: [4]f32) -> f32 {
+    return linalg.dot(plane.xyz, point) - plane.w
+}
+
 point_in_plane :: proc(point: [3]f32, plane: [4]f32) -> f32 {
-    return plane.x * point.x + plane.y * point.y + plane.z * point.z + plane.w
+    return plane.x * point.x + plane.y * point.y + plane.z * point.z - plane.w
 }
 
 //assumes eye and center are already calculated.
 frustum_culling :: proc(cam: ^Camera, instances: []MeshRenderItem, inputs: []int) -> (survivors: [dynamic]int) {
     survivors = make([dynamic]int, 0)
-    //negative z is into the screen, so do this 'backwards'
-    forward := linalg.normalize(cam.center.xyz - cam.eye.xyz)
-    up: [3]f32 = {0, 1, 0}
-    right := linalg.normalize(linalg.cross(forward, up))
-    //frustum planes point inward, normal-side is passing
-    top_plane, bottom_plane, left_plane, right_plane, near_plane, far_plane: [4]f32 //normal + distance
-
-    //near and far are relatively easy
-    near_plane = calc_plane(cam.eye.xyz + NEAR * forward, forward)
-    far_plane = calc_plane(cam.eye.xyz + FAR * forward, -forward)
-
-    //all side planes are at an angle of half the vertical FOV
-    //horizontal FOV is just vertical FOV * aspect ratio
-    vertical := f32(FAR * linalg.tan(linalg.to_radians(FOV) * 0.5))
-    width, height := get_viewport_size(cam)
-    horizontal := vertical * (width / height)
-    far_forward := FAR * forward
-    right_plane = calc_plane(cam.eye.xyz, -linalg.cross(far_forward + right * horizontal, up))
-    left_plane = calc_plane(cam.eye.xyz, linalg.cross(far_forward - right * horizontal, up))
-    top_plane = calc_plane(cam.eye.xyz, linalg.cross(far_forward + up * vertical, right))
-    bottom_plane = calc_plane(cam.eye.xyz, -linalg.cross(far_forward - up * vertical, right))
-
-    planes := [?][4]f32{top_plane, bottom_plane, left_plane, right_plane, near_plane, far_plane}
-
     for i in inputs {
         instance := &instances[i]
         precalcs(instance)
-        passing := true
-        plane_check: for plane, i in planes {
-            point_passing := false
+        passing := false
+        //check bounding sphere first
+        test_point := cam.projection * cam.view * instance.bounding_center
+        r := instance.bounding_radius
+        if test_point.x+r >= -test_point.w &&
+            test_point.x-r <= test_point.w &&
+            test_point.y+r >= -test_point.w &&
+            test_point.y-r <= test_point.w &&
+            test_point.z+r >= 0 &&
+            test_point.z-r <= test_point.w {
+            passing = true
+        } else {
+            //check OBB
             point_check: for point in instance.bounding_box {
-                //if at least 1 point on the normal side of the plane, we good for this plane
-                if point_in_plane(point.xyz, plane) > 0 {
-                    point_passing = true
+                test_point := cam.projection * cam.view * point
+                if test_point.x >= -test_point.w &&
+                    test_point.x <= test_point.w &&
+                    test_point.y >= -test_point.w &&
+                    test_point.y <= test_point.w &&
+                    test_point.z >= 0 &&
+                    test_point.z <= test_point.w {
+                    passing = true
                     break point_check
                 }
             }
-            //must be normal to all planes to be considered in-frustum
-            if !point_passing {
-                passing = false
-                break plane_check
-            }
         }
+
         if passing {
             append(&survivors, i)
         }
     }
-    //fmt.println("survivors:", len(survivors))
+    fmt.println("inputs:", len(inputs))
+    fmt.println("survivors:", len(survivors))
     return
 }
