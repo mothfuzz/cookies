@@ -16,8 +16,8 @@ testmap: engine.Scene
 ball: engine.Scene
 ball_trans := transform.ORIGIN
 ball_velocity := [3]f32{0, 0, 0}
-Radius :: 1.0/8.0
-Ball_Max_Speed :: Radius * 0.8
+Radius :: 1.0/16.0
+Ball_Max_Speed :: Radius * 0.9
 Ball_Accel :: 0.01
 
 font: graphics.Font
@@ -35,7 +35,7 @@ init :: proc() {
     testmap = engine.make_scene_from_file("testmap.gltf", #load("testmap.gltf"), make_tri_mesh=true)
     ball = engine.make_scene_from_file("ball.gltf", #load("ball.gltf"))
     transform.set_position(&ball_trans, {0, 0.75, 0})
-    transform.set_scale(&ball_trans, Radius)
+    transform.set_scale(&ball_trans, Radius*2.0)
 
 }
 
