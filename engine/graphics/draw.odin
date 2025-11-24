@@ -41,8 +41,8 @@ draw_sprite :: proc(material: Material, model: matrix[4, 4]f32 = 0,
 
 //0,0 is center, rect is -1:1 xywh, clip_rect is xywh, 0:w & 0:h of texture
 ui_draw_rect :: proc(rect: [4]f32, color: [4]f32 = 1, texture: Texture = white_tex, clip_rect: [4]f32 = 0) {
-    sx := f32(screen_size.x)/2
-    sy := f32(screen_size.y)/2
+    sx := screen_uniforms.size.x/2
+    sy := screen_uniforms.size.y/2
     fill_rect := [4]f32{
         rect[0]/sx,
         rect[1]/sy,

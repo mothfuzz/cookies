@@ -61,8 +61,8 @@ ui_draw_text :: proc(text: string, font: Font, pos: [2]f32 = 0, color: [4]f32 = 
         stbtt.GetBakedQuad(raw_data(font.baked_chars), FONT_RES, FONT_RES, i32(c), &x, &y, &quad, true)
         w := quad.x1 - quad.x0
         h := quad.y1 - quad.y0
-        sx := f32(screen_size.x)/2
-        sy := f32(screen_size.y)/2
+        sx := screen_uniforms.size.x/2
+        sy := screen_uniforms.size.y/2
         fill_rect := [4]f32{
             (pos.x+quad.x0+w/2)/sx, (pos.y-font.height-quad.y0-h/2)/sy,
             w/sx, h/sy,

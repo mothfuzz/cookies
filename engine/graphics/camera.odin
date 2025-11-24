@@ -4,7 +4,7 @@ import "vendor:wgpu"
 import "core:math/linalg"
 import "core:fmt"
 
-CameraUniforms :: struct {
+Camera_Uniforms :: struct {
     eye: [4]f32,
     center: [4]f32,
     view: matrix[4,4]f32,
@@ -18,7 +18,7 @@ Camera :: struct {
     center_prev: [3]f32,
     center_next: [3]f32,
     viewport: [4]f32,
-    using uniforms: CameraUniforms,
+    using uniforms: Camera_Uniforms,
 }
 camera_buffer: wgpu.Buffer
 camera_layout_entries := []wgpu.BindGroupLayoutEntry{
@@ -31,9 +31,9 @@ camera_layout_entries := []wgpu.BindGroupLayoutEntry{
 camera_layout: wgpu.BindGroupLayout
 
 make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}) -> (cam: Camera) {
-    cam.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Uniform, .CopyDst}, size=size_of(CameraUniforms)})
+    cam.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Uniform, .CopyDst}, size=size_of(Camera_Uniforms)})
     bindings := []wgpu.BindGroupEntry{
-        {binding = 0, buffer = cam.buffer, size = size_of(CameraUniforms)},
+        {binding = 0, buffer = cam.buffer, size = size_of(Camera_Uniforms)},
     }
     cam.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
         layout = camera_layout,
@@ -52,7 +52,7 @@ bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: ^Camera
     cam.eye = {eye.x, eye.y, eye.z, 1.0}
     cam.center = {center.x, center.y, center.z, 1.0}
     cam.view = linalg.matrix4_look_at(cam.eye.xyz, cam.center.xyz, [3]f32{0, 1, 0})
-    wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &cam.uniforms, size_of(CameraUniforms))
+    wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &cam.uniforms, size_of(Camera_Uniforms))
     wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, cam.bind_group)
     x := cam.viewport.x
     y := cam.viewport.y
@@ -89,22 +89,25 @@ get_viewport_size :: proc(cam: ^Camera) -> (width, height: f32) {
     width = cam.viewport[2]
     height = cam.viewport[3]
     if width == 0 {
-        width = f32(screen_size.x)
+        width = screen_uniforms.size.x
     }
     if height == 0 {
-        height = f32(screen_size.y)
+        height = screen_uniforms.size.y
     }
     return
 }
 
 FOV :: 60.0
-NEAR :: 0.01
-FAR :: 2048.0*1024.0
 calculate_projection :: proc(cam: ^Camera) {
     width, height := get_viewport_size(cam)
     fov := f32(linalg.to_radians(FOV))
-    //cam.projection = linalg.matrix4_perspective(fov, width/height, NEAR, FAR)
-   cam.projection = linalg.matrix4_infinite_perspective(fov, width/height, NEAR)
+    near := screen_uniforms.size[2]
+    far := screen_uniforms.size[3]
+    if far == 0 {
+        cam.projection = linalg.matrix4_infinite_perspective(fov, width/height, near)
+    } else {
+        cam.projection = linalg.matrix4_perspective(fov, width/height, near, far)
+    }
 }
 
 z_2d :: proc(cam: ^Camera) -> f32 {

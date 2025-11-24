@@ -157,10 +157,10 @@ weights_attribute := wgpu.VertexBufferLayout{
 
 instance_data_location: u32 = 7
 instance_data_attributes := []wgpu.VertexAttribute{
-    {format = .Float32x4, offset = 0 * size_of([4]f32), shaderLocation = instance_data_location + 0}, //mvp1
-    {format = .Float32x4, offset = 1 * size_of([4]f32), shaderLocation = instance_data_location + 1}, //mvp2
-    {format = .Float32x4, offset = 2 * size_of([4]f32), shaderLocation = instance_data_location + 2}, //mvp3
-    {format = .Float32x4, offset = 3 * size_of([4]f32), shaderLocation = instance_data_location + 3}, //mvp4
+    {format = .Float32x4, offset = 0 * size_of([4]f32), shaderLocation = instance_data_location + 0}, //modelview
+    {format = .Float32x4, offset = 1 * size_of([4]f32), shaderLocation = instance_data_location + 1}, //modelview
+    {format = .Float32x4, offset = 2 * size_of([4]f32), shaderLocation = instance_data_location + 2}, //modelview
+    {format = .Float32x4, offset = 3 * size_of([4]f32), shaderLocation = instance_data_location + 3}, //modelview
     {format = .Float32x4, offset = 4 * size_of([4]f32), shaderLocation = instance_data_location + 4}, //clip_rect
     {format = .Float32x4, offset = 5 * size_of([4]f32), shaderLocation = instance_data_location + 5}, //tint
 }
@@ -192,13 +192,13 @@ MeshRenderItem :: struct {
     bounding_radius: f32,
     //model: matrix[4,4]f32,
     local_calculated: bool,
-    mvp: matrix[4,4]f32,
-    mvp_calculated: bool,
+    modelview: matrix[4,4]f32,
+    modelview_calculated: bool,
 }
 
 //data that actually gets passed to the GPU
 InstanceData :: struct {
-    mvp: matrix[4,4]f32,
+    modelview: matrix[4,4]f32,
     dynamic_material: DynamicMaterial,
 }
 
@@ -263,29 +263,27 @@ precalcs :: proc(instance: ^MeshRenderItem) {
     instance.local_calculated = true
 }
 
-//calculates world mesh data (aka the mvp)
+//calculates world mesh data (aka the modelview)
 //assumes local data already calculated
-calculate_mvp :: proc(instance: ^MeshRenderItem, cam: ^Camera) {
-    if instance.mvp_calculated {
+calculate_modelview :: proc(instance: ^MeshRenderItem, cam: ^Camera) {
+    if instance.modelview_calculated {
         return
     }
-    view_model: matrix[4,4]f32
     if instance.is_billboard {
         rotation_scale := cast(matrix[3,3]f32)(instance.model)
-        view_model = cam.view * instance.model;
-        trans := view_model[3] //save produced translation vector
-        view_model = cast(matrix[4,4]f32)(rotation_scale) //and then revert to untransformed scaling/rotation
-        view_model[3] = trans
+        instance.modelview = cam.view * instance.model;
+        trans := instance.modelview[3] //save produced translation vector
+        instance.modelview = cast(matrix[4,4]f32)(rotation_scale) //and then revert to untransformed scaling/rotation
+        instance.modelview[3] = trans
     } else {
-        view_model = cam.view * instance.model
+        instance.modelview = cam.view * instance.model
     }
-    instance.mvp = cam.projection * view_model
-    instance.mvp_calculated = true
+    instance.modelview_calculated = true
 }
 
-reset_mvps :: proc(instances: []MeshRenderItem) {
+reset_modelviews :: proc(instances: []MeshRenderItem) {
     for &instance in instances {
-        instance.mvp_calculated = false
+        instance.modelview_calculated = false
     }
 }
 

@@ -72,6 +72,10 @@ init :: proc() {
     window.set_size(uint(screen_size.x), uint(screen_size.y))
     engine.set_tick_rate(30)
 
+    graphics.set_background_color({0.8, 0.4, 0.6})
+    graphics.set_render_distance(2048.0+1024.0)
+    graphics.set_fog_distance(1024.0)
+
     for i := 0; i < 16; i += 1 {
         a := scene.spawn(&main_scene, TestActor{i=3, f=4}, {init=test_init, tick=test_tick, kill=test_kill}, "Joe")
         fmt.println(a)

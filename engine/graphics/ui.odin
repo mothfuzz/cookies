@@ -161,8 +161,8 @@ render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder
     })
 
     wgpu.RenderPassEncoderSetPipeline(render_pass, ui_pipeline)
-    wgpu.RenderPassEncoderSetViewport(render_pass, 0, 0, f32(screen_size.x), f32(screen_size.y), 0, 1)
-    wgpu.RenderPassEncoderSetScissorRect(render_pass, 0, 0, screen_size.x, screen_size.y)
+    wgpu.RenderPassEncoderSetViewport(render_pass, 0, 0, screen_uniforms.size.x, screen_uniforms.size.y, 0, 1)
+    wgpu.RenderPassEncoderSetScissorRect(render_pass, 0, 0, u32(screen_uniforms.size.x), u32(screen_uniforms.size.y))
 
     //fmt.println("rendering ui batch...")
     for tex, &batch in ui_batches {

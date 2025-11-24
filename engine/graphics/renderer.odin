@@ -24,6 +24,36 @@ Renderer :: struct {
 }
 ren: Renderer
 
+Screen_Uniforms :: struct {
+    size: [4]f32,
+    color: [4]f32,
+}
+screen_uniforms: Screen_Uniforms = {
+    size={0, 0, 0.1, 0},
+}
+screen_uniforms_buffer: wgpu.Buffer
+uniform_bind_group: wgpu.BindGroup
+
+set_background_color :: proc(color: [3]f32) {
+    screen_uniforms.color.rgb = linalg.vector4_srgb_to_linear([4]f32{color.r, color.g, color.b, 1.0}).rgb
+}
+get_background_color :: proc() -> [3]f32 {
+    c := screen_uniforms.color.rgb
+    return linalg.vector4_linear_to_srgb([4]f32{c.r, c.g, c.b, 1.0}).rgb
+}
+
+set_render_distance :: proc(far: f32) {
+    screen_uniforms.size[3] = far
+}
+
+get_screen_size :: proc() -> [2]f32 {
+    return screen_uniforms.size.xy
+}
+
+set_fog_distance :: proc(fog_start: f32) {
+    screen_uniforms.color[3] = fog_start
+}
+
 with_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
     //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
     #partial switch format {
@@ -49,10 +79,9 @@ without_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
 
 tex_format: wgpu.TextureFormat
 view_format: wgpu.TextureFormat
-screen_size: [2]u32
 configure_surface :: proc(size: [2]uint = 0) {
     if size != 0 {
-        screen_size = {u32(size.x), u32(size.y)}
+        screen_uniforms.size.xy = {f32(size.x), f32(size.y)}
         for cam in cameras {
             calculate_projection(cam)
         }
@@ -84,8 +113,8 @@ configure_surface :: proc(size: [2]uint = 0) {
         format = tex_format,
         viewFormatCount = 1,
         viewFormats = &view_format,
-        width = screen_size.x,
-        height = screen_size.y,
+        width = u32(screen_uniforms.size.x),
+        height = u32(screen_uniforms.size.y),
         presentMode = presentMode,
         alphaMode = .Opaque,
     }
@@ -126,9 +155,6 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
     wgpu.AdapterRequestDevice(ren.adapter, nil, {callback = request_device, userdata1=userdata1})
 }
 
-screen_size_buffer: wgpu.Buffer
-screen_color_blend_buffer: wgpu.Buffer
-uniform_bind_group: wgpu.BindGroup
 
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
     context = (^runtime.Context)(userdata1)^
@@ -161,15 +187,9 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
 
     //bind group layouts
     uniform_layout_entries := []wgpu.BindGroupLayoutEntry{
-        //screen_size
+        //screen_uniforms
         wgpu.BindGroupLayoutEntry{
             binding = 0,
-            visibility = {.Vertex, .Fragment},
-            buffer = {type=.Uniform},
-        },
-        //screen_color_blend
-        wgpu.BindGroupLayoutEntry{
-            binding = 1,
             visibility = {.Vertex, .Fragment},
             buffer = {type=.Uniform},
         },
@@ -196,11 +216,9 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     })
 
     //create uniform buffers/bind group up front
-    screen_size_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of([2]f32)})
-    screen_color_blend_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of(f32)})
+    screen_uniforms_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of(Screen_Uniforms)})
     bindings := []wgpu.BindGroupEntry{
-        {binding = 0, buffer = screen_size_buffer, size = size_of([2]f32)},
-        {binding = 1, buffer = screen_color_blend_buffer, size = size_of(f32)},
+        {binding = 0, buffer = screen_uniforms_buffer, size = size_of(Screen_Uniforms)},
     }
     uniform_bind_group = wgpu.DeviceCreateBindGroup(device, &{
         layout = uniform_layout,
@@ -259,7 +277,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
 
 ctx: runtime.Context
 init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
-    screen_size = {u32(size.x), u32(size.y)}
+    screen_uniforms.size.xy = {f32(size.x), f32(size.y)}
     ren.instance = wgpu.CreateInstance(nil)
     if ren.instance == nil {
         panic("WebGPU not supported.")
@@ -295,11 +313,6 @@ set_cameras :: proc(cams: []^Camera) {
     copy(cameras, cams)
 }
 
-background_color: [3]f32 = {0.4, 0.6, 0.9}
-set_background_color :: proc(color: [3]f32) {
-    background_color = color
-}
-
 render :: proc(t: f64) {
     if !ren.ready {
         return
@@ -325,10 +338,6 @@ render :: proc(t: f64) {
     command_encoder := wgpu.DeviceCreateCommandEncoder(ren.device, nil)
     defer wgpu.CommandEncoderRelease(command_encoder)
 
-    screen_size := [2]f32{f32(screen_size.x), f32(screen_size.y)}
-    blend_factor := f32(0.0)
-    wgpu.QueueWriteBuffer(ren.queue, screen_size_buffer, 0, raw_data(&screen_size), size_of([2]f32))
-    wgpu.QueueWriteBuffer(ren.queue, screen_color_blend_buffer, 0, &blend_factor, size_of(f32))
 
     clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
         colorAttachmentCount = 1,
@@ -338,9 +347,9 @@ render :: proc(t: f64) {
             loadOp = .Clear,
             storeOp = .Store,
             depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = linalg.vector4_srgb_to_linear([4]f64{f64(background_color.r),
-                                                              f64(background_color.g),
-                                                              f64(background_color.b), 1.0}),
+            clearValue = [4]f64{f64(screen_uniforms.color.r),
+                                f64(screen_uniforms.color.g),
+                                f64(screen_uniforms.color.b), 1.0},
         },
         depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
             view = ren.depth_view,
@@ -371,6 +380,12 @@ render :: proc(t: f64) {
 
     //draw loop
     for cam in cameras {
+        screen_uniforms_temp := screen_uniforms
+        cam_width, cam_height := get_viewport_size(cam)
+        screen_uniforms_temp.size.x = cam_width
+        screen_uniforms_temp.size.y = cam_height
+        wgpu.QueueWriteBuffer(ren.queue, screen_uniforms_buffer, 0, &screen_uniforms_temp, size_of(Screen_Uniforms))
+
         render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
             colorAttachmentCount = 1,
             colorAttachments = &wgpu.RenderPassColorAttachment{
@@ -393,7 +408,7 @@ render :: proc(t: f64) {
         wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
         bind_camera(render_pass, 1, cam, t) //view produced here
 
-        reset_mvps(all_meshes[:])
+        reset_modelviews(all_meshes[:])
         indices := frustum_culling(cam, all_meshes[:], all_indices[:])
         defer delete(indices)
 
@@ -413,8 +428,8 @@ render :: proc(t: f64) {
                 current_material = instance.material
                 bind_material(render_pass, 2, current_material)
             }
-            calculate_mvp(instance, cam)
-            append(&instances, InstanceData{mvp=instance.mvp, dynamic_material=instance.dynamic_material})
+            calculate_modelview(instance, cam)
+            append(&instances, InstanceData{modelview=instance.modelview, dynamic_material=instance.dynamic_material})
 
             //if next mesh is different, or there is no next mesh, draw the current batch
             switch {
