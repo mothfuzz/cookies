@@ -86,7 +86,7 @@ draw_text :: proc(text: string, font: Font, model: matrix[4,4]f32 = 1, color: [4
             {position={+0.5, +0.5, 0}, texcoord={1, 0}, color={1, 1, 1, 1}},
             {position={+0.5, -0.5, 0}, texcoord={1, 1}, color={1, 1, 1, 1}},
             {position={-0.5, -0.5, 0}, texcoord={0, 1}, color={1, 1, 1, 1}},
-        }, []u32{0, 1, 2, 0, 2, 3})
+        }, []u32{2, 1, 0, 3, 2, 0})
     }
 
     x: f32

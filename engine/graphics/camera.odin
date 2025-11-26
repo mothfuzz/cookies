@@ -166,7 +166,7 @@ frustum_culling :: proc(cam: ^Camera, instances: []MeshRenderItem, inputs: []int
             append(&survivors, i)
         }
     }
-    fmt.println("inputs:", len(inputs))
-    fmt.println("survivors:", len(survivors))
+    //fmt.println("inputs:", len(inputs))
+    //fmt.println("survivors:", len(survivors))
     return
 }

@@ -58,6 +58,15 @@ make_mesh_from_slice :: proc(vertices: []Vertex, indices: []u32 = nil) -> (mesh:
 }
 make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
     n := len(vertices)
+    if vertices.normal[0] == 0 {
+        fmt.println("No normals, calculating...")
+        calculate_normals(vertices.position[0:n], indices, vertices.normal[0:n])
+    }
+    if vertices.tangent[0] == 0 {
+        fmt.println("No tangents, calculating...")
+        n := len(vertices)
+        calculate_tangents(vertices.position[0:n], vertices.normal[0:n], vertices.texcoord[0:n], indices, vertices.tangent[0:n])
+    }
     mesh.positions = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.position[0:n])
     mesh.normals = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.normal[0:n])
     mesh.tangents = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.tangent[0:n])
@@ -97,6 +106,64 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mes
     mesh.bounding_radius = linalg.length(mesh.bounding_box.maxi - mesh.bounding_box.mini)/2.0
     return
 }
+
+calculate_normals :: proc(vertices: [][3]f32, indices: []u32, out_normals: [][3]f32) {
+    indices := indices
+    if indices == nil || len(indices) == 0 {
+        indices = make([]u32, len(vertices))
+        for i in 0..<len(vertices) {
+            indices[i] = u32(i)
+        }
+    }
+    for i := 0; i+2 < len(indices); i += 3  {
+        ai := indices[i+0]
+        bi := indices[i+1]
+        ci := indices[i+2]
+        a := vertices[ai]
+        b := vertices[bi]
+        c := vertices[ci]
+        ba := b - a
+        ca := c - a
+        //keep track of accumulated direction for each influencing vertex
+        //assumes counter-clockwise face winding
+        out_normals[ai] += linalg.cross(ba, ca)
+        out_normals[bi] += linalg.cross(ba, ca)
+        out_normals[ci] += linalg.cross(ba, ca)
+    }
+    for &normal in out_normals {
+        normal = linalg.normalize(normal) //normalize to average all the vertex influences
+    }
+}
+
+calculate_tangents :: proc(vertices: [][3]f32, normals: [][3]f32, texcoords: [][2]f32, indices: []u32, out_tangents: [][3]f32) {
+    indices := indices
+    if indices == nil || len(indices) == 0 {
+        indices = make([]u32, len(vertices))
+        for i in 0..<len(vertices) {
+            indices[i] = u32(i)
+        }
+    }
+    for i := 0; i+2 < len(indices); i += 3 {
+        ai := indices[i+0]
+        bi := indices[i+1]
+        ci := indices[i+2]
+        pos_ba := vertices[bi] - vertices[ai]
+        pos_ca := vertices[ci] - vertices[ai]
+        tex_ba := texcoords[bi] - texcoords[ai]
+        tex_ca := texcoords[ci] - texcoords[ai]
+
+        tangent := [3]f32{}
+        f := 1.0 / (tex_ba.x * tex_ca.y - tex_ca.x * tex_ba.y)
+        tangent.x = f * (tex_ca.y * pos_ba.x - tex_ba.y * pos_ca.x)
+        tangent.y = f * (tex_ca.y * pos_ba.y - tex_ba.y * pos_ca.y)
+        tangent.z = f * (tex_ca.y * pos_ba.z - tex_ba.y * pos_ca.z)
+
+        out_tangents[ai] = tangent
+        out_tangents[bi] = tangent
+        out_tangents[ci] = tangent
+    }
+}
+
 delete_mesh :: proc(mesh: Mesh) {
     wgpu.BufferDestroy(mesh.positions)
     wgpu.BufferDestroy(mesh.normals)

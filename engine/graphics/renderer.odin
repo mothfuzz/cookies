@@ -25,8 +25,8 @@ Renderer :: struct {
 ren: Renderer
 
 Screen_Uniforms :: struct {
-    size: [4]f32,
-    color: [4]f32,
+    size: [4]f32, //width, height, near, far
+    color: [4]f32, //rgb + fog start
 }
 screen_uniforms: Screen_Uniforms = {
     size={0, 0, 0.1, 0},
@@ -208,8 +208,12 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         //one entry for each texture in the material
         //binding for: base_color, normal, pbr, and environment (for now)
     })
+    lights_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
+        entryCount = len(lights_layout_entries),
+        entries = raw_data(lights_layout_entries),
+    })
 
-    bind_group_layouts := []wgpu.BindGroupLayout{uniform_layout, camera_layout, material_layout}
+    bind_group_layouts := []wgpu.BindGroupLayout{uniform_layout, camera_layout, material_layout, lights_layout}
     ren.layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
         bindGroupLayoutCount = len(bind_group_layouts),
         bindGroupLayouts = raw_data(bind_group_layouts),
@@ -384,6 +388,9 @@ render :: proc(t: f64) {
         cam_width, cam_height := get_viewport_size(cam)
         screen_uniforms_temp.size.x = cam_width
         screen_uniforms_temp.size.y = cam_height
+        if screen_uniforms_temp.color.rgb == 0 {
+            screen_uniforms_temp.color.rgb = 1
+        }
         wgpu.QueueWriteBuffer(ren.queue, screen_uniforms_buffer, 0, &screen_uniforms_temp, size_of(Screen_Uniforms))
 
         render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
@@ -407,6 +414,7 @@ render :: proc(t: f64) {
         wgpu.RenderPassEncoderSetPipeline(render_pass, ren.pipeline)
         wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
         bind_camera(render_pass, 1, cam, t) //view produced here
+        bind_lights(render_pass, 3, cam)
 
         reset_modelviews(all_meshes[:])
         indices := frustum_culling(cam, all_meshes[:], all_indices[:])
@@ -452,6 +460,7 @@ render :: proc(t: f64) {
         wgpu.RenderPassEncoderEnd(render_pass)
         wgpu.RenderPassEncoderRelease(render_pass)
     }
+    clear_lights()
 
     render_ui(screen, command_encoder)
 

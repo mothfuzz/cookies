@@ -29,6 +29,9 @@ cam: graphics.Camera
 cam2: graphics.Camera
 unifont: graphics.Font
 
+my_light: graphics.Point_Light
+sun_light: graphics.Directional_Light
+
 emantaller: engine.Scene
 
 TestActor :: struct {
@@ -104,7 +107,7 @@ init :: proc() {
         {position={+0.5, +0.5, 0.0}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
         {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
         {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
-    }, {0, 1, 2, 0, 2, 3})
+    }, {2, 1, 0, 3, 2, 0})
     tex2 = graphics.make_texture_from_image(#load("frasier.png"))
     mat2 = graphics.make_material(base_color=tex2)
 
@@ -138,6 +141,9 @@ init :: proc() {
 
     spatial.transform_tri_mesh(&emantaller.colliders[0], transform.compute(&emantaller.active_layout.roots[0].transform))
     fmt.println(emantaller.colliders[0])
+
+    my_light = graphics.make_point_light({0, -160, 10}, 64, {1, 1, 0, 1})
+    sun_light = graphics.make_directional_light({-0.5, -0.5, 0}, {1, 1, 1, 0.1})
 }
 
 camera_pos: [3]f32 = {0, 0, 0}
@@ -250,6 +256,9 @@ draw :: proc(t: f64) {
     graphics.draw_text("Hello!!", unifont, transform.compute(&text_trans), {0, 1, 1, 1})
 
     engine.draw_scene(&emantaller, t)
+
+    graphics.draw_point_light(my_light)
+    graphics.draw_directional_light(sun_light)
 }
 
 kill :: proc() {
