@@ -34,6 +34,11 @@ sun_light: graphics.Directional_Light
 
 emantaller: engine.Scene
 
+brick_color: graphics.Texture
+brick_norm: graphics.Texture
+brick_pbr: graphics.Texture
+brick_mat: graphics.Material
+
 TestActor :: struct {
     i: i32,
     f: f32,
@@ -77,7 +82,7 @@ init :: proc() {
 
     graphics.set_background_color({0.8, 0.4, 0.6})
     graphics.set_render_distance(2048.0+1024.0)
-    graphics.set_fog_distance(1024.0)
+    graphics.set_fog_distance(2048.0)
 
     for i := 0; i < 16; i += 1 {
         a := scene.spawn(&main_scene, TestActor{i=3, f=4}, {init=test_init, tick=test_tick, kill=test_kill}, "Joe")
@@ -108,16 +113,16 @@ init :: proc() {
         {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
         {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
     }, {2, 1, 0, 3, 2, 0})
-    tex2 = graphics.make_texture_from_image(#load("frasier.png"))
+    tex2 = graphics.make_texture_from_image(#load("resources/frasier.png"))
     mat2 = graphics.make_material(base_color=tex2)
 
-    transform.set_scale(&triangle_trans, {200, 200, 1})
+    transform.set_scale(&triangle_trans, 200)
 
     transform.set_position(&quad_trans, {0, f32(100+128/2)/200, 0})
-    transform.set_scale(&quad_trans, {1.0/200, 1.0/200, 1})
+    transform.set_scale(&quad_trans, 1.0/200)
 
     transform.set_position(&floor_trans, {0, -320, -320})
-    transform.set_scale(&floor_trans, {640*4, 640*4, 1})
+    transform.set_scale(&floor_trans, 640*4)
     transform.rotatex(&floor_trans, -0.5 * math.PI)
 
     transform.link(&triangle_trans, &quad_trans)
@@ -130,24 +135,32 @@ init :: proc() {
     graphics.look_at(&cam2, {0, 0, 0}, {0, 0, graphics.z_2d(&cam2)})
 
     //fmt.println("loading font...")
-    unifont = graphics.make_font_from_file(#load("unifont.otf"), 32)
+    unifont = graphics.make_font_from_file(#load("resources/unifont.otf"), 32)
 
     text_mat = graphics.make_material(unifont.texture, filtering=false)
 
-    engine.preload("emantaller.png", #load("emantaller.png"))
-    emantaller = engine.make_scene_from_file("emantaller.gltf", #load("emantaller.gltf"), true)
+    engine.preload("emantaller.png", #load("resources/emantaller.png"))
+    emantaller = engine.make_scene_from_file("emantaller.gltf", #load("resources/emantaller.gltf"), true)
     transform.set_scale(&emantaller.active_layout.roots[0].transform, {100, 100, 100})
     transform.set_position(&emantaller.active_layout.roots[0].transform, {0, 0, -100})
 
     spatial.transform_tri_mesh(&emantaller.colliders[0], transform.compute(&emantaller.active_layout.roots[0].transform))
     fmt.println(emantaller.colliders[0])
 
-    my_light = graphics.make_point_light({0, -160, 10}, 64, {1, 1, 0, 1})
-    sun_light = graphics.make_directional_light({-0.5, -0.5, 0}, {1, 1, 1, 0.1})
+    my_light = graphics.make_point_light({0, -160, -320}, 600, {1, 1, 0, 1})
+    sun_light = graphics.make_directional_light({-0.5, -0.5, 0}, {1, 1, 1, 0.0})
+
+    brick_color = graphics.make_texture_from_image(#load("resources/brick4/basecolor.jpg"))
+    brick_norm = graphics.make_texture_from_image(#load("resources/brick4/normal.jpg"), true)
+    brick_ambient := #load("resources/brick4/ambient.jpg")
+    brick_roughness := #load("resources/brick4/roughness.jpg")
+    brick_pbr = graphics.make_pbr_texture_from_images(ambient=brick_ambient, roughness=brick_roughness)
+    brick_mat = graphics.make_material(brick_color, brick_norm, brick_pbr)
 }
 
 camera_pos: [3]f32 = {0, 0, 0}
 camera_angle: f32 = 270*math.PI/180.0
+camera_pitch: f32 = 0
 move_speed: f32 = 25
 
 str := "yippeeeeee!!!!!!!!!!!!!!"
@@ -192,6 +205,12 @@ tick :: proc() {
     if input.key_down(.Key_Right) {
         camera_angle += 0.1
     }
+    if input.key_down(.Key_Up) {
+        camera_pitch += move_speed
+    }
+    if input.key_down(.Key_Down) {
+        camera_pitch -= move_speed
+    }
     if input.key_pressed(.Key_Space) {
         fmt.println("JUMP:", accumulator)
     }
@@ -217,7 +236,7 @@ tick :: proc() {
     transform.rotatez(&quad_trans, -0.01)
 
     forward := [3]f32{camera_pos.x + math.cos(camera_angle)*graphics.z_2d(&cam),
-                      camera_pos.y,
+                      camera_pos.y + camera_pitch,
                       camera_pos.z + math.sin(camera_angle)*graphics.z_2d(&cam)}
     offset_x := math.sin(camera_angle) * 20
     offset_z := math.cos(camera_angle) * 20
@@ -237,11 +256,11 @@ draw :: proc(t: f64) {
 
     graphics.set_cameras({&cam, &cam2})
     scene.draw(&main_scene, t)
-    graphics.draw_mesh(triangle, mat, transform.smooth(&triangle_trans, t))
+    graphics.draw_mesh(triangle, brick_mat, transform.smooth(&triangle_trans, t))
     graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {64, 64, 128, 128}, {1, 0, 0, 1})
-    graphics.draw_mesh(quad, mat, transform.compute(&floor_trans))
+    graphics.draw_mesh(quad, brick_mat, transform.compute(&floor_trans))
     plus_one := floor_trans
-    transform.translate(&plus_one, {0, 1, 0})
+    transform.translate(&plus_one, {0, 2, 0})
     graphics.draw_mesh(quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'), tint={1, 0, 1, 1})
 
     offset: [2]f32
@@ -272,6 +291,11 @@ kill :: proc() {
     graphics.delete_camera(cam)
     graphics.delete_camera(cam2)
     graphics.delete_font(unifont)
+
+    graphics.delete_material(brick_mat)
+    graphics.delete_texture(brick_color)
+    graphics.delete_texture(brick_norm)
+    graphics.delete_texture(brick_pbr)
 }
 
 main :: proc() {

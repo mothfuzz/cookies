@@ -67,15 +67,14 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     var v: VSOut;
     let modelview = mat4x4<f32>(vertex.modelview_0, vertex.modelview_1, vertex.modelview_2, vertex.modelview_3);
     v.position = modelview * vec4<f32>(vertex.position, 1.0);
-    v.normal = (modelview * vec4<f32>(vertex.normal, 0.0)).xyz;
-    v.tangent = (modelview * vec4<f32>(vertex.tangent, 0.0)).xyz;
+    v.normal = normalize((modelview * vec4<f32>(vertex.normal, 0.0)).xyz);
+    v.tangent = normalize((modelview * vec4<f32>(vertex.tangent, 0.0)).xyz);
     v.out_position = camera.projection * v.position;
     let tex_offset = vertex.clip_rect.xy;
     let tex_factor = vertex.clip_rect.zw;
     v.texcoord = vertex.texcoord*tex_factor+tex_offset;
     v.color = vertex.color;
     v.tint = vertex.tint;
-    //v.world_position =
     return v;
 }
 
@@ -93,21 +92,29 @@ fn fs_main(v: VSOut) -> @location(0) vec4<f32> {
     var lights: bool = true;
     if arrayLength(&point_lights) == 1 && point_lights[0].color.a == 0 &&
         arrayLength(&directional_lights) == 1 && directional_lights[0].color.a == 0 {
+        //if all lights are default lights, render fullbright
         lights = false;
     }
 
     if lights {
-        var light = vec3<f32>(0.1, 0.1, 0.1); //initial ambient value
+        //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
+        let tangent_to_view = mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal);
+        //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
+        let n = normalize(tangent_to_view * (textureSample(normal, smp, v.texcoord).rgb * 2.0 - 1.0));
+        //let n = normalize(v.normal);
+
+        var light = vec3<f32>(0.0, 0.0, 0.0); //initial ambient value
         for (var i: u32 = 0; i < arrayLength(&point_lights); i++) {
             let l = normalize(point_lights[i].position.xyz - v.position.xyz);
-            let n = normalize(v.normal);
-            let influence = max(dot(n, l), 0.0);
-            light += point_lights[i].color.rgb * point_lights[i].color.a * influence;
+
+            //if distance(v.position.xyz, point_lights[i].position.xyz) < point_lights[i].position.w {
+                let influence = clamp(dot(n, l), 0.0, 1.0);
+                light += point_lights[i].color.rgb * point_lights[i].color.a * influence;
+            //}
         }
         for (var i: u32 = 0; i < arrayLength(&directional_lights); i++) {
             let l = normalize(directional_lights[i].direction.xyz);
-            let n = normalize(v.normal);
-            let influence = max(dot(n, l), 0.0);
+            let influence = clamp(dot(n, l), 0.0, 1.0);
             light += directional_lights[i].color.rgb * directional_lights[i].color.a * influence;
         }
         final_color *= vec4<f32>(light, 1.0);

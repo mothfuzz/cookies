@@ -92,7 +92,7 @@ make_mips :: proc(input: []u32, size: [2]uint, include_original: bool = false) -
     return
 }
 
-make_texture_2D :: proc(input: []u32, size: [2]uint) -> (tex: Texture) {
+make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (tex: Texture) {
     //create texture & write all mips, including original
     mips := make_mips(input, size, true)
     defer delete(mips)
@@ -104,7 +104,7 @@ make_texture_2D :: proc(input: []u32, size: [2]uint) -> (tex: Texture) {
             height = u32(size.y),
             depthOrArrayLayers = 1,
         },
-        format = .RGBA8UnormSrgb,
+        format = linear?.RGBA8Unorm:.RGBA8UnormSrgb,
         mipLevelCount = u32(len(mips)),
         sampleCount = 1,
     })
@@ -141,18 +141,94 @@ delete_texture :: proc(tex: Texture) {
     wgpu.TextureViewRelease(tex.view)
 }
 
-//inherently 2D
-make_texture_from_image :: proc(image: []byte) -> (tex: Texture) {
-    x, y, channels: i32
-    img: [^]byte = stbi.load_from_memory(raw_data(image), i32(len(image)), &x, &y, &channels, 4)
-    img_u32 := make([]u32, x*y)
+pixels_byte_to_word :: proc(in_pixels: [^]byte, x, y: i32) -> (out_pixels: []u32) {
+    out_pixels = make([]u32, x*y)
     for i in 0..<int(x*y) {
         for b in 0..<4 {
-            img_u32[i] |= u32(img[i*4+b]) << uint(b*8)
+            out_pixels[i] |= u32(in_pixels[i*4+b]) << uint(b*8)
         }
     }
-    tex = make_texture_2D(img_u32, {uint(x), uint(y)})
+    return
+}
+
+//inherently 2D
+make_texture_from_image :: proc(image: []byte, linear: bool = false) -> (tex: Texture) {
+    x, y, channels: i32
+    img: [^]byte = stbi.load_from_memory(raw_data(image), i32(len(image)), &x, &y, &channels, 4)
+    img_u32 := pixels_byte_to_word(img, x, y)
+    tex = make_texture_2D(img_u32, {uint(x), uint(y)}, linear)
     stbi.image_free(img)
     delete(img_u32)
+    return
+}
+
+make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = nil, metallic: []byte = nil) -> (tex: Texture) {
+
+    ax, ay, achannels: i32
+    ambient_u32: []u32
+    defer delete(ambient_u32)
+    if ambient != nil {
+        ambient: [^]byte = stbi.load_from_memory(raw_data(ambient), i32(len(ambient)), &ax, &ay, &achannels, 4)
+        ambient_u32 = pixels_byte_to_word(ambient, ax, ay)
+        stbi.image_free(ambient)
+    } else {
+        ambient_u32 = make([]u32, 1)
+        ambient_u32[0] = 0xffffffff
+        ax, ay = 1, 1
+    }
+
+    rx, ry, rchannels: i32
+    roughness_u32: []u32
+    defer delete(roughness_u32)
+    if roughness != nil {
+        roughness: [^]byte = stbi.load_from_memory(raw_data(roughness), i32(len(roughness)), &rx, &ry, &rchannels, 4)
+        roughness_u32 = pixels_byte_to_word(roughness, rx, ry)
+        stbi.image_free(roughness)
+    } else {
+        roughness_u32 = make([]u32, 1)
+        roughness_u32[0] = 0xff000000
+        rx, ry = 1, 1
+    }
+
+    mx, my, mchannels: i32
+    metallic_u32: []u32
+    defer delete(metallic_u32)
+    if metallic != nil {
+        metallic: [^]byte = stbi.load_from_memory(raw_data(metallic), i32(len(metallic)), &mx, &my, &mchannels, 4)
+        metallic_u32 = pixels_byte_to_word(metallic, mx, my)
+        stbi.image_free(metallic)
+    } else {
+        metallic_u32 = make([]u32, 1)
+        metallic_u32[0] = 0xff000000
+        mx, my = 1,1
+    }
+
+    x := max(ax, rx, mx)
+    y := max(ay, ry, my)
+
+    ambient_final := make_scaled_image_bilinear(ambient_u32, {uint(ax), uint(ay)}, {uint(x), uint(y)})
+    defer delete(ambient_final)
+    roughness_final := make_scaled_image_bilinear(roughness_u32, {uint(rx), uint(ry)}, {uint(x), uint(y)})
+    defer delete(roughness_final)
+    metallic_final := make_scaled_image_bilinear(metallic_u32, {uint(mx), uint(my)}, {uint(x), uint(y)})
+    defer delete(metallic_final)
+
+    final_texture := make([]u32, x*y)
+    defer delete(final_texture)
+
+    //combine them...
+    for i in 0..<x*y {
+        //format: 0xAABBGGRR
+        //ambient (R), roughness (G), metallic (B), alpha is 1
+        //1 hex digit (nibble) = half a byte = 4 bits.
+        //2 hex digits = 1 byte = 8 bits
+        final_texture[i] |= 0xff000000
+        final_texture[i] |= (metallic_final[i] & 0xff) << (2*8)
+        final_texture[i] |= (roughness_final[i] & 0xff) << (1*8)
+        final_texture[i] |= (ambient_final[i] & 0xff) << (0*8)
+    }
+
+    tex = make_texture_2D(final_texture, {uint(x), uint(y)}, true)
+
     return
 }

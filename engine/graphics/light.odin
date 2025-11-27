@@ -153,7 +153,8 @@ bind_lights :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: ^Camera
     //convert to view-space
     for &pl, i in point_light_uniforms {
         pl.position.xyz = (cam.view * vecpos(point_lights[i].position)).xyz
-        pl.color = point_lights[i].color;
+        pl.position.w = point_lights[i].radius
+        pl.color = point_lights[i].color
     }
     current_point_lights_buffer = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Storage}}, point_light_uniforms[:])
 
@@ -161,8 +162,9 @@ bind_lights :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: ^Camera
     defer delete(directional_light_uniforms)
     //convert to view-space
     for &dl, i in directional_light_uniforms {
-        dl.direction.xyz = (cam.view * vecdir(directional_lights[i].direction)).xyz
-        dl.direction.y = -dl.direction.y
+        dir := directional_lights[i].direction
+        dir.y = -dir.y
+        dl.direction.xyz = linalg.normalize((cam.view * vecdir(dir)).xyz)
         dl.color = directional_lights[i].color;
     }
     current_directional_lights_buffer = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Storage}}, directional_light_uniforms[:])

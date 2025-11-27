@@ -26,11 +26,15 @@ init :: proc() {
     window.set_size(Screen_Width, Screen_Height)
     engine.set_tick_rate(30)
 
+    graphics.set_background_color({0.5, 0.25, 0.5})
+    graphics.set_render_distance(10.0)
+    graphics.set_fog_distance(5.0)
+
     cam = graphics.make_camera({0, 0, Screen_Width, Screen_Height})
     graphics.look_at(&cam, {0, 1, 1}, {0, 0, -1})
     graphics.set_camera(&cam)
 
-    font = graphics.make_font_from_file(#load("../unifont.otf"), 16)
+    font = graphics.make_font_from_file(#load("../resources/unifont.otf"), 16)
 
     testmap = engine.make_scene_from_file("testmap.gltf", #load("testmap.gltf"), make_tri_mesh=true)
     ball = engine.make_scene_from_file("ball.gltf", #load("ball.gltf"))

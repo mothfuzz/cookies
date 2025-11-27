@@ -7,7 +7,7 @@ import "../engine/graphics"
 frasier: graphics.Texture
 
 init :: proc() {
-    frasier = graphics.make_texture_from_image(#load("../frasier.png"))
+    frasier = graphics.make_texture_from_image(#load("../resources/frasier.png"))
     window.set_size(500, 500)
 }
 

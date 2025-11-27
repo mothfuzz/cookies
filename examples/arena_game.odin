@@ -96,7 +96,7 @@ init :: proc() {
     graphics.set_viewport(&cam, {0, 0, Screen_Width, Screen_Height})
     graphics.set_camera(&cam)
 
-    unifont := #load("../unifont.otf")
+    unifont := #load("../resources/unifont.otf")
     big_font = graphics.make_font_from_file(unifont, Big_Font_Size*2)
     regular_font = graphics.make_font_from_file(unifont, Regular_Font_Size*2)
 
