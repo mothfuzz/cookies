@@ -34,6 +34,14 @@ struct DirectionalLight {
 }
 @group(3) @binding(1) var<storage, read> directional_lights: array<DirectionalLight>;
 
+struct SpotLight {
+    position: vec4<f32>,//xyz+inner angle
+    direction: vec4<f32>,//xyz+outer angle
+    color: vec4<f32>,
+    view_to_shadow: mat4x4<f32>,
+}
+@group(3) @binding(2) var<storage, read> spot_lights: array<SpotLight>;
+
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -78,11 +86,17 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     return v;
 }
 
+fn calculate_influence(n: vec3<f32>, l: vec3<f32>, v: vec3<f32>) -> f32 {
+    let diffuse = max(dot(n, l), 0.0);
+    let specular = pow(max(dot(v, reflect(-l, n)), 0.0), 256.0);
+    return diffuse + specular;
+}
+
 @fragment
-fn fs_main(v: VSOut) -> @location(0) vec4<f32> {
-    let base_color = textureSample(base_color, smp, v.texcoord) * v.tint;
-    let screen_color = vec4<f32>(v.position.x/screen.size.x, v.position.y/screen.size.y, 1.0, 1.0);
-    let color = mix(v.color, screen_color, 0.0);
+fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
+    let base_color = textureSample(base_color, smp, in.texcoord) * in.tint;
+    let screen_color = vec4<f32>(in.position.x/screen.size.x, in.position.y/screen.size.y, 1.0, 1.0);
+    let color = mix(in.color, screen_color, 0.0);
     var final_color = base_color * color;
 
     if !(final_color.a > 0) {
@@ -98,24 +112,38 @@ fn fs_main(v: VSOut) -> @location(0) vec4<f32> {
 
     if lights {
         //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
-        let tangent_to_view = mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal);
+        let tangent_to_view = mat3x3<f32>(in.tangent, normalize(cross(in.normal, in.tangent)), in.normal);
         //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
-        let n = normalize(tangent_to_view * (textureSample(normal, smp, v.texcoord).rgb * 2.0 - 1.0));
+        let n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
         //let n = normalize(v.normal);
+        let v = normalize(-in.position.xyz); //already in view space
 
-        var light = vec3<f32>(0.0, 0.0, 0.0); //initial ambient value
+        var light = vec3<f32>(0.2, 0.2, 0.2); //initial ambient value
         for (var i: u32 = 0; i < arrayLength(&point_lights); i++) {
-            let l = normalize(point_lights[i].position.xyz - v.position.xyz);
+            let l = normalize(point_lights[i].position.xyz - in.position.xyz);
 
-            //if distance(v.position.xyz, point_lights[i].position.xyz) < point_lights[i].position.w {
-                let influence = clamp(dot(n, l), 0.0, 1.0);
-                light += point_lights[i].color.rgb * point_lights[i].color.a * influence;
-            //}
+            let d = distance(in.position.xyz, point_lights[i].position.xyz);
+            let r = point_lights[i].position.w;
+            if d < r {
+                let attenuation = smoothstep(r, 0.0, d);
+                let influence = calculate_influence(n, l, v);
+                light += point_lights[i].color.rgb * point_lights[i].color.a * influence * attenuation;
+            }
         }
         for (var i: u32 = 0; i < arrayLength(&directional_lights); i++) {
-            let l = normalize(directional_lights[i].direction.xyz);
-            let influence = clamp(dot(n, l), 0.0, 1.0);
+            let l = normalize(-directional_lights[i].direction.xyz);
+            let influence = calculate_influence(n, l, v);
             light += directional_lights[i].color.rgb * directional_lights[i].color.a * influence;
+        }
+        for (var i: u32 = 0; i < arrayLength(&spot_lights); i++) {
+            let l = normalize(spot_lights[i].position.xyz - in.position.xyz);
+            let theta = dot(l, normalize(-spot_lights[i].direction.xyz));
+            let inner_cutoff = spot_lights[i].position.w;
+            let outer_cutoff = spot_lights[i].direction.w;
+            let epsilon = inner_cutoff - outer_cutoff;
+            let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
+            let influence = calculate_influence(n, l, v) * falloff;
+            light += spot_lights[i].color.rgb * spot_lights[i].color.a * influence;
         }
         final_color *= vec4<f32>(light, 1.0);
     }
@@ -127,7 +155,7 @@ fn fs_main(v: VSOut) -> @location(0) vec4<f32> {
     if fog_min == 0.0 {
         fog_min = (far - near)*0.5; //fog starts at halfway by default
     }
-    let dist = abs(v.position.z / v.position.w);
+    let dist = abs(in.position.z / in.position.w);
     let fog_factor = clamp((fog_max - dist) / (fog_max - fog_min), 0, 1);
     var fog_color = vec4<f32>(screen.color.rgb, final_color.a);
     final_color = mix(fog_color, final_color, fog_factor);

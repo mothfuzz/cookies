@@ -16,6 +16,11 @@ Loaded_File :: struct {
 loaded_files: map[cstring]Loaded_File
 loaded_paths: map[rawptr]cstring
 
+unload_files :: proc() {
+    delete(loaded_files)
+    delete(loaded_paths)
+}
+
 check :: proc() {
     if loaded_files == nil {
         loaded_files = make(map[cstring]Loaded_File)
@@ -174,11 +179,13 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
 load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: graphics.Mesh, collider: spatial.Tri_Mesh) {
     indices_len := cgltf.accessor_unpack_indices(primitive.indices, nil, 4, 0)
     indices := make([]u32, indices_len)
+    defer delete(indices)
     if cgltf.accessor_unpack_indices(primitive.indices, raw_data(indices), 4, indices_len) < indices_len {
         fmt.eprintln("failed to load all indices!")
     }
     fmt.println(indices)
     vertices: #soa[]graphics.Vertex = nil
+    defer delete(vertices)
     default_colors := true
     for attribute in primitive.attributes {
         size := cgltf.accessor_unpack_floats(attribute.data, nil, 0)
@@ -379,4 +386,41 @@ draw_scene :: proc(scene: ^Scene, t: f64) {
     for node in scene.active_layout.roots {
         draw_node(node, t)
     }
+}
+
+delete_scene :: proc(scene: ^Scene) {
+    for &texture in scene.textures {
+        graphics.delete_texture(texture)
+    }
+    delete(scene.textures)
+    for &mesh in scene.meshes {
+        graphics.delete_mesh(mesh)
+    }
+    delete(scene.meshes)
+    for &material in scene.materials {
+        graphics.delete_material(material)
+    }
+    delete(scene.materials)
+    for &model in scene.models {
+        delete(model.meshes)
+        delete(model.materials)
+    }
+    delete(scene.models)
+    for &tri_mesh in scene.colliders {
+        spatial.delete_tri_mesh(tri_mesh)
+    }
+    delete(scene.colliders)
+    for &camera in scene.cameras {
+        graphics.delete_camera(camera)
+    }
+    //TODO when skeletal animation is implemented
+    //delete(scene.skeletons)
+    //delete(scene.animations)
+    delete(scene.cameras)
+    delete(scene.lights)
+    for &layout in scene.layouts {
+        delete(layout.roots)
+    }
+    delete(scene.layouts)
+    delete(scene.nodes)
 }

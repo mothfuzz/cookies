@@ -40,11 +40,16 @@ destroy :: proc(s: ^Scene) {
     if s.pool != nil {
         thread.pool_finish(s.pool)
         thread.pool_destroy(s.pool)
+        free(s.pool)
     }
+    delete_post_office(s)
     delete(s.ids)
     for id, actor in s.actors {
         free(actor.data)
     }
+    delete(s.actors)
+    delete(s.spawns)
+    delete(s.kills)
 }
 
 when ODIN_OS == .JS {

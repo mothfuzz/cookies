@@ -31,6 +31,7 @@ unifont: graphics.Font
 
 my_light: graphics.Point_Light
 sun_light: graphics.Directional_Light
+spot_light: graphics.Spot_Light
 
 emantaller: engine.Scene
 
@@ -148,7 +149,8 @@ init :: proc() {
     fmt.println(emantaller.colliders[0])
 
     my_light = graphics.make_point_light({0, -160, -320}, 600, {1, 1, 0, 1})
-    sun_light = graphics.make_directional_light({-0.5, -0.5, 0}, {1, 1, 1, 0.0})
+    sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 0.25})
+    spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, math.to_radians_f32(45), math.to_radians_f32(60), {0, 0, 1, 1})
 
     brick_color = graphics.make_texture_from_image(#load("resources/brick4/basecolor.jpg"))
     brick_norm = graphics.make_texture_from_image(#load("resources/brick4/normal.jpg"), true)
@@ -278,6 +280,7 @@ draw :: proc(t: f64) {
 
     graphics.draw_point_light(my_light)
     graphics.draw_directional_light(sun_light)
+    graphics.draw_spot_light(spot_light)
 }
 
 kill :: proc() {
@@ -296,9 +299,31 @@ kill :: proc() {
     graphics.delete_texture(brick_color)
     graphics.delete_texture(brick_norm)
     graphics.delete_texture(brick_pbr)
+
+    engine.delete_scene(&emantaller)
+    engine.unload_files()
 }
 
+import "core:mem"
 main :: proc() {
+    track: mem.Tracking_Allocator
+    mem.tracking_allocator_init(&track, context.allocator)
+    context.allocator = mem.tracking_allocator(&track)
+
     fmt.println("HEWWO!!!")
     engine.boot(init, tick, draw, kill)
+
+    if len(track.allocation_map) > 0 {
+        fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+        for _, entry in track.allocation_map {
+            fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+        }
+    }
+    if len(track.bad_free_array) > 0 {
+        fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+        for entry in track.bad_free_array {
+            fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+        }
+    }
+    mem.tracking_allocator_destroy(&track)
 }

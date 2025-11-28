@@ -40,6 +40,24 @@ Post_Office :: struct {
     unsubscribes: [dynamic]Unsubscribe,
 }
 
+delete_post_office :: proc(po: ^Post_Office) {
+    for event_type, &route in po.routes {
+        for a, &mailbox in route {
+            delete(mailbox.queue)
+            delete(mailbox.inbox)
+            free(mailbox)
+        }
+        delete(route)
+    }
+    delete(po.routes)
+    for a, &subscriptions in po.subscriptions {
+        delete(subscriptions)
+    }
+    delete(po.subscriptions)
+    delete(po.subscribes)
+    delete(po.unsubscribes)
+}
+
 //supports both direct sending of messages AND pubsub
 
 get_event_type :: proc($E: typeid) -> (typename: string, ok: bool) {
@@ -95,6 +113,8 @@ process_subscriptions :: proc(po: ^Post_Office) {
     for subscribe in po.subscribes {
         route := po.routes[subscribe.event_type] or_else map[ActorId]^Mailbox{}
         if mailbox, ok := route[subscribe.id]; ok {
+            delete(mailbox.queue)
+            delete(mailbox.inbox)
             free(mailbox)
         }
         m := new(Mailbox)
@@ -117,6 +137,7 @@ process_subscriptions :: proc(po: ^Post_Office) {
                 free(mailbox)
             }
             delete_key(route, unsubscribe.id)
+            delete(route^)
         }
         if subscription, ok := &po.subscriptions[unsubscribe.id]; ok {
             delete_key(subscription, unsubscribe.event_type)

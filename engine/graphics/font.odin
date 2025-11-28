@@ -36,6 +36,7 @@ make_font_from_file :: proc(filedata: []byte, font_size: uint, num_chars: uint =
     return
 }
 delete_font :: proc(font: Font) {
+    delete(font.baked_chars)
     delete_material(font.material)
     delete_texture(font.texture)
 }

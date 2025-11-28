@@ -16,6 +16,16 @@ MeshDraw :: struct {
 //than we have the same texture on different meshes
 batches: map[Mesh]map[Material][dynamic]MeshDraw
 
+delete_batches :: proc() {
+    for mesh, &batch in batches {
+        for material, &instances in batch {
+            delete(instances)
+        }
+        delete(batch)
+    }
+    delete(batches)
+}
+
 draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0,
                   clip_rect: [4]f32 = 0, tint: [4]f32 = 1,
                   sprite: bool = false, billboard: bool = false) {

@@ -292,6 +292,10 @@ init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
 }
 
 quit :: proc() {
+    delete_batches()
+    delete_ui_batches()
+    delete_lights()
+    delete(cameras)
     delete_defaults()
     wgpu.RenderPipelineRelease(ren.pipeline)
     wgpu.PipelineLayoutRelease(ren.layout)

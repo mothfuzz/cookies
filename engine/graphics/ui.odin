@@ -117,6 +117,14 @@ UiInstanceData :: struct {
 ui_batches: map[Texture]UiBatch
 z_index: f32 = 0 //so things are rendered in-order
 
+delete_ui_batches :: proc() {
+    for texture, &batch in ui_batches {
+        wgpu.BindGroupRelease(batch.bind_group)
+        delete(batch.instances)
+    }
+    delete(ui_batches)
+}
+
 //base function for all UI drawing.
 //assumes fill_rect is normalized screen space xywh -1:+1 & clip_rect is texcoord space xywh 0:1...
 draw_ui :: proc(fill_rect: [4]f32, color: [4]f32, texture: Texture, clip_rect: [4]f32) {
