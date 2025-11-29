@@ -4,7 +4,7 @@ odin build . -out:bin\cookies.exe
 
 for %%a in ("examples\*.odin") do (
     echo compiling example: %%a
-    odin build %%a -out:bin\%%~na.exe -file
+    odin build %%a -out:bin\%%~na.exe -file -o:speed
 )
 
 for /f "delims=" %%i in ('odin.exe root') do set "ODIN_ROOT=%%i"

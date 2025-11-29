@@ -11,7 +11,7 @@ odin build . -out:bin\cookies.wasm -target:js_wasm32 -extra-linker-flags:"--expo
 
 for %%a in ("examples\*.odin") do (
     echo compiling example: %%a
-    odin build %%a -out:bin\%%~na.wasm -file -target:js_wasm32 -extra-linker-flags:"--export-table --import-memory --initial-memory=%INITIAL_MEMORY_BYTES% --max-memory=%MAX_MEMORY_BYTES%"
+    odin build %%a -out:bin\%%~na.wasm -file -target:js_wasm32 -extra-linker-flags:"--export-table --import-memory --initial-memory=%INITIAL_MEMORY_BYTES% --max-memory=%MAX_MEMORY_BYTES%" -o:speed
 )
 
 for /f "delims=" %%i in ('odin.exe root') do set "ODIN_ROOT=%%i"
