@@ -86,10 +86,54 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     return v;
 }
 
-fn calculate_influence(n: vec3<f32>, l: vec3<f32>, v: vec3<f32>) -> f32 {
+fn calculate_influence_phong(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>) -> vec3<f32> {
     let diffuse = max(dot(n, l), 0.0);
     let specular = pow(max(dot(v, reflect(-l, n)), 0.0), 256.0);
-    return diffuse + specular;
+    return (diffuse + specular)*radiance;
+}
+
+const PI = radians(180.0);
+fn fresnel_schlick_reflectance(cos_theta: f32, base_reflectance: vec3<f32>) -> vec3<f32> {
+    return base_reflectance + (1.0 - base_reflectance) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
+}
+fn normal_distribution_ggx(n: vec3<f32>, h: vec3<f32>, roughness: f32) -> f32 {
+    let a = roughness * roughness;
+    let a2 = a*a;
+    let nh = max(dot(n, h), 0.0);
+    let factor = (nh*nh * (a2 - 1.0) + 1.0);
+    return a2 / (PI * factor * factor);
+}
+fn geometry_attenuation_ggx_schlick(cos_angle: f32, roughness: f32) -> f32 {
+    let r = roughness + 1.0;
+    let k = (r * r) / 8.0;
+    return cos_angle / (cos_angle * (1.0 - k) + k);
+}
+fn geometry_attenuation_smith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32) -> f32 {
+    //a microfacet has blocked the light from hitting another microfacet
+    let shadowing = geometry_attenuation_ggx_schlick(max(dot(n, v), 0.0), roughness);
+    //a microfacet has blocked the light from coming back to the viewer
+    let masking = geometry_attenuation_ggx_schlick(max(dot(n, l), 0.0), roughness);
+
+    return shadowing * masking;
+}
+fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>, base_color: vec3<f32>, roughness: f32, metallic: f32) -> vec3<f32> {
+    let h = normalize(v + l);
+    let cos_theta = max(dot(h, v), 0.0);
+    var base_reflectance = vec3<f32>(0.04); //base dielectric reflectance
+    base_reflectance = mix(base_reflectance, base_color, metallic);
+    let reflectance = fresnel_schlick_reflectance(cos_theta, base_reflectance);
+
+    let normal_distribution = normal_distribution_ggx(n, h, roughness);
+    let geometry_attenuation = geometry_attenuation_smith(n, v, l, roughness);
+
+    let numerator = normal_distribution * geometry_attenuation * reflectance;
+    let denominator = 4.0 * max(dot(n, v), 0.0) * max(dot(n, l), 0.0) + 0.0001; //extra epsilon to prevent divide-by-zero
+    let specular = numerator / denominator;
+
+    let diffuse_ratio = (1.0 - metallic) * (vec3<f32>(1.0) - reflectance);
+    let diffuse = diffuse_ratio * base_color / PI;
+
+    return (diffuse + specular) * radiance * max(dot(n, l), 0.0);
 }
 
 @fragment
@@ -105,12 +149,18 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 
     var lights: bool = true;
     if arrayLength(&point_lights) == 1 && point_lights[0].color.a == 0 &&
-        arrayLength(&directional_lights) == 1 && directional_lights[0].color.a == 0 {
+        arrayLength(&directional_lights) == 1 && directional_lights[0].color.a == 0 &&
+        arrayLength(&spot_lights) == 1 && spot_lights[0].color.a == 0 {
         //if all lights are default lights, render fullbright
         lights = false;
     }
 
     if lights {
+        let pbr = textureSample(pbr, smp, in.texcoord);// * in.pbr_tint;
+        let ambient_occlusion = pbr.r;
+        let roughness = pbr.g;
+        let metallic = pbr.b;
+
         //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
         let tangent_to_view = mat3x3<f32>(in.tangent, normalize(cross(in.normal, in.tangent)), in.normal);
         //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
@@ -118,7 +168,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         //let n = normalize(v.normal);
         let v = normalize(-in.position.xyz); //already in view space
 
-        var light = vec3<f32>(0.2, 0.2, 0.2); //initial ambient value
+        var light = vec3<f32>(0.03) * final_color.rgb * ambient_occlusion; //initial ambient value
         for (var i: u32 = 0; i < arrayLength(&point_lights); i++) {
             let l = normalize(point_lights[i].position.xyz - in.position.xyz);
 
@@ -126,14 +176,17 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             let r = point_lights[i].position.w;
             if d < r {
                 let attenuation = smoothstep(r, 0.0, d);
-                let influence = calculate_influence(n, l, v);
-                light += point_lights[i].color.rgb * point_lights[i].color.a * influence * attenuation;
+                let radiance = point_lights[i].color.rgb * point_lights[i].color.a * attenuation;
+                //let attenuation = 1.0 / (d*d);
+                //light += calculate_influence_phong(n, v, l, radiance);
+                light += calculate_influence_pbr(n, v, l, radiance, final_color.rgb, roughness, metallic);
             }
         }
         for (var i: u32 = 0; i < arrayLength(&directional_lights); i++) {
             let l = normalize(-directional_lights[i].direction.xyz);
-            let influence = calculate_influence(n, l, v);
-            light += directional_lights[i].color.rgb * directional_lights[i].color.a * influence;
+            let radiance = directional_lights[i].color.rgb * directional_lights[i].color.a;
+            //light += calculate_influence_phong(n, v, l, radiance);
+            light += calculate_influence_pbr(n, v, l, radiance, final_color.rgb, roughness, metallic);
         }
         for (var i: u32 = 0; i < arrayLength(&spot_lights); i++) {
             let l = normalize(spot_lights[i].position.xyz - in.position.xyz);
@@ -142,10 +195,15 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             let outer_cutoff = spot_lights[i].direction.w;
             let epsilon = inner_cutoff - outer_cutoff;
             let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
-            let influence = calculate_influence(n, l, v) * falloff;
-            light += spot_lights[i].color.rgb * spot_lights[i].color.a * influence;
+            let radiance = spot_lights[i].color.rgb * spot_lights[i].color.a * falloff;
+            //light += calculate_influence_phong(n, v, l, radiance);
+            light += calculate_influence_pbr(n, v, l, radiance, final_color.rgb, roughness, metallic);
         }
-        final_color *= vec4<f32>(light, 1.0);
+
+        //reinhard tonemap for PBR
+        //light = light / (light + vec3<f32>(1.0));
+        //light = pow(light, vec3<f32>(1.0/2.2));
+        final_color = vec4<f32>(light, 1.0);
     }
 
     let near = select(screen.size[2], 0.1, screen.size[2] == 0);

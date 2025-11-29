@@ -186,7 +186,7 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
         stbi.image_free(roughness)
     } else {
         roughness_u32 = make([]u32, 1)
-        roughness_u32[0] = 0xff000000
+        roughness_u32[0] = 0xff808080
         rx, ry = 1, 1
     }
 

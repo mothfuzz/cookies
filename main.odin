@@ -40,6 +40,11 @@ brick_norm: graphics.Texture
 brick_pbr: graphics.Texture
 brick_mat: graphics.Material
 
+metal_color: graphics.Texture
+metal_norm: graphics.Texture
+metal_pbr: graphics.Texture
+metal_mat: graphics.Material
+
 TestActor :: struct {
     i: i32,
     f: f32,
@@ -149,7 +154,7 @@ init :: proc() {
     fmt.println(emantaller.colliders[0])
 
     my_light = graphics.make_point_light({0, -160, -320}, 600, {1, 1, 0, 1})
-    sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 0.25})
+    sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 1})
     spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, math.to_radians_f32(45), math.to_radians_f32(60), {0, 0, 1, 1})
 
     brick_color = graphics.make_texture_from_image(#load("resources/brick4/basecolor.jpg"))
@@ -158,6 +163,13 @@ init :: proc() {
     brick_roughness := #load("resources/brick4/roughness.jpg")
     brick_pbr = graphics.make_pbr_texture_from_images(ambient=brick_ambient, roughness=brick_roughness)
     brick_mat = graphics.make_material(brick_color, brick_norm, brick_pbr)
+
+    metal_color = graphics.make_texture_from_image(#load("resources/metal41b/basecolor.jpg"))
+    metal_norm = graphics.make_texture_from_image(#load("resources/metal41b/normal.jpg"), true)
+    metal_metallic := #load("resources/metal41b/metallic.jpg")
+    metal_roughness := #load("resources/metal41b/roughness.jpg")
+    metal_pbr = graphics.make_pbr_texture_from_images(metallic=metal_metallic, roughness=metal_roughness)
+    metal_mat = graphics.make_material(metal_color, metal_norm, metal_pbr)
 }
 
 camera_pos: [3]f32 = {0, 0, 0}
@@ -260,10 +272,10 @@ draw :: proc(t: f64) {
     scene.draw(&main_scene, t)
     graphics.draw_mesh(triangle, brick_mat, transform.smooth(&triangle_trans, t))
     graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {64, 64, 128, 128}, {1, 0, 0, 1})
-    graphics.draw_mesh(quad, brick_mat, transform.compute(&floor_trans))
+    graphics.draw_mesh(quad, metal_mat, transform.compute(&floor_trans))
     plus_one := floor_trans
     transform.translate(&plus_one, {0, 2, 0})
-    graphics.draw_mesh(quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'), tint={1, 0, 1, 1})
+    //graphics.draw_mesh(quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'), tint={1, 0, 1, 1})
 
     offset: [2]f32
     offset.x = -screen_size.x/2
