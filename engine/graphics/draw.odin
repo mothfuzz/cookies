@@ -14,32 +14,69 @@ MeshDraw :: struct {
 
 //more often do we have the same mesh with different textures
 //than we have the same texture on different meshes
-batches: map[Mesh]map[Material][dynamic]MeshDraw
+solid_batches: map[Mesh]map[Material][dynamic]MeshDraw
+trans_batches: map[Mesh]map[Material][dynamic]MeshDraw
+
+clear_batches :: proc() {
+    for mesh, &batch in solid_batches {
+        for material, &instances in batch {
+            clear(&instances)
+        }
+    }
+    for mesh, &batch in trans_batches {
+        for material, &instances in batch {
+            clear(&instances)
+        }
+    }
+}
 
 delete_batches :: proc() {
-    for mesh, &batch in batches {
+    for mesh, &batch in solid_batches {
         for material, &instances in batch {
             delete(instances)
         }
         delete(batch)
     }
-    delete(batches)
+    delete(solid_batches)
+    for mesh, &batch in trans_batches {
+        for material, &instances in batch {
+            delete(instances)
+        }
+        delete(batch)
+    }
+    delete(trans_batches)
 }
 
 draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0,
                   clip_rect: [4]f32 = 0, tint: [4]f32 = 1,
                   sprite: bool = false, billboard: bool = false) {
     model := model
-    if !(mesh in batches) {
-        batches[mesh] = {}
+    batch: ^map[Material][dynamic]MeshDraw
+    if mesh.transparent || material.base_color.transparent || (tint.a < 1 && tint.a > 0) {
+        if !(mesh in trans_batches) {
+            trans_batches[mesh] = {}
+        }
+        batch = &trans_batches[mesh]
+        if !(material in batch) {
+            //create instance buffer
+            batch[material] = make([dynamic]MeshDraw, 0)
+        }
+        instances := &batch[material]
+        append(instances, MeshDraw{model, {clip_rect, tint}, sprite, billboard})
     }
-    batch := &batches[mesh]
-    if !(material in batch) {
-        //create instance buffer
-        batch[material] = make([dynamic]MeshDraw, 0)
+    if mesh.solid && material.base_color.solid && tint.a == 1.0 {
+        //fmt.println("transparent draw")
+        if !(mesh in solid_batches) {
+            solid_batches[mesh] = {}
+        }
+        batch = &solid_batches[mesh]
+        if !(material in batch) {
+            //create instance buffer
+            batch[material] = make([dynamic]MeshDraw, 0)
+        }
+        instances := &batch[material]
+        append(instances, MeshDraw{model, {clip_rect, tint}, sprite, billboard})
     }
-    instances := &batch[material]
-    append(instances, MeshDraw{model, {clip_rect, tint}, sprite, billboard})
 }
 
 

@@ -96,9 +96,9 @@ init :: proc() {
     }
 
     triangle = graphics.make_mesh([]graphics.Vertex{
-        {position={+0.0, +0.5, 0.0}, texcoord={0.5, 0.0}, color={1, 0, 0, 1}},
-        {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={0, 1, 0, 1}},
-        {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={0, 0, 1, 1}},
+        {position={+0.0, +0.5, 0.0}, texcoord={0.5, 0.0}, color={1, 0, 0, 0.9}},
+        {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={0, 1, 0, 0.8}},
+        {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={0, 0, 1, 0.7}},
     }, {0, 1, 2})
     img := []u32{
         0xffffffff, 0xff0000ff, 0xffffffff, 0xff000000,
@@ -271,7 +271,7 @@ draw :: proc(t: f64) {
     graphics.set_cameras({&cam, &cam2})
     scene.draw(&main_scene, t)
     graphics.draw_mesh(triangle, brick_mat, transform.smooth(&triangle_trans, t))
-    graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {64, 64, 128, 128}, {1, 0, 0, 1})
+    graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {64, 64, 128, 128}, {1, 0, 0, 0.9}) //frasier
     graphics.draw_mesh(quad, metal_mat, transform.compute(&floor_trans))
     plus_one := floor_trans
     transform.translate(&plus_one, {0, 2, 0})
@@ -290,9 +290,9 @@ draw :: proc(t: f64) {
 
     engine.draw_scene(&emantaller, t)
 
-    graphics.draw_point_light(my_light)
-    graphics.draw_directional_light(sun_light)
-    graphics.draw_spot_light(spot_light)
+    //graphics.draw_point_light(my_light)
+    //graphics.draw_directional_light(sun_light)
+    //graphics.draw_spot_light(spot_light)
 }
 
 kill :: proc() {

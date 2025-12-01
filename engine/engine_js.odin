@@ -38,6 +38,7 @@ step :: proc "c" (delta_time: f64) -> bool {
             user_init()
         }
         graphics.configure_surface(window.get_size())
+        graphics.configure_render_targets()
         initialized = true
         return true
     }
@@ -81,6 +82,7 @@ step :: proc "c" (delta_time: f64) -> bool {
 
 resize_event :: proc(e: js.Event) {
     graphics.configure_surface(window.get_size())
+    graphics.configure_render_targets()
     /*for hook in resize_hooks {
         hook()
     }*/

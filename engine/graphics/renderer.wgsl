@@ -136,17 +136,24 @@ fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: v
     return (diffuse + specular) * radiance * max(dot(n, l), 0.0);
 }
 
-@fragment
-fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
-    let base_color = textureSample(base_color, smp, in.texcoord) * in.tint;
-    let screen_color = vec4<f32>(in.position.x/screen.size.x, in.position.y/screen.size.y, 1.0, 1.0);
-    let color = mix(in.color, screen_color, 0.0);
-    var final_color = base_color * color;
-
-    if !(final_color.a > 0) {
-        discard;
+fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
+    var final_color = in_color;
+    let near = select(screen.size[2], 0.1, screen.size[2] == 0);
+    let far = select(screen.size[3], 2048.0, screen.size[3] == 0);
+    let fog_max = far;
+    var fog_min = screen.color[3];
+    if fog_min == 0.0 {
+        fog_min = (far - near)*0.5; //fog starts at halfway by default
     }
+    let dist = abs(in_position.z / in_position.w);
+    let fog_factor = clamp((fog_max - dist) / (fog_max - fog_min), 0, 1);
+    var fog_color = vec4<f32>(screen.color.rgb, final_color.a);
+    final_color = mix(fog_color, final_color, fog_factor);
+    return final_color;
+}
 
+fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
+    var final_color = in_color;
     var lights: bool = true;
     if arrayLength(&point_lights) == 1 && point_lights[0].color.a == 0 &&
         arrayLength(&directional_lights) == 1 && directional_lights[0].color.a == 0 &&
@@ -205,18 +212,47 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         //light = pow(light, vec3<f32>(1.0/2.2));
         final_color = vec4<f32>(light, 1.0);
     }
-
-    let near = select(screen.size[2], 0.1, screen.size[2] == 0);
-    let far = select(screen.size[3], 2048.0, screen.size[3] == 0);
-    let fog_max = far;
-    var fog_min = screen.color[3];
-    if fog_min == 0.0 {
-        fog_min = (far - near)*0.5; //fog starts at halfway by default
-    }
-    let dist = abs(in.position.z / in.position.w);
-    let fog_factor = clamp((fog_max - dist) / (fog_max - fog_min), 0, 1);
-    var fog_color = vec4<f32>(screen.color.rgb, final_color.a);
-    final_color = mix(fog_color, final_color, fog_factor);
-
     return final_color;
+}
+
+
+struct TransOut {
+    @location(0) accum: vec4<f32>,
+    @location(1) revealage: f32,
+}
+
+@fragment
+fn solid_main(in: VSOut) -> @location(0) vec4<f32> {
+    let base_color = textureSample(base_color, smp, in.texcoord) * in.tint;
+    let screen_color = vec4<f32>(in.position.x/screen.size.x, in.position.y/screen.size.y, 1.0, 1.0);
+    let color = mix(in.color, screen_color, 0.0);
+    var final_color = base_color * color;
+    if final_color.a < 0.9 {
+        discard;
+    }
+    final_color = apply_lights(in, final_color);
+    final_color = apply_fog(in.position, final_color);
+    return final_color;
+}
+
+@fragment
+fn trans_main(in: VSOut) -> TransOut {
+    var out: TransOut;
+    let base_color = textureSample(base_color, smp, in.texcoord) * in.tint * in.color;
+    if !(base_color.a > 0) && !(base_color.a < 1) {
+        discard;
+    }
+    var final_color = base_color;
+    final_color = apply_lights(in, final_color);
+    final_color = apply_fog(in.position, final_color);
+    final_color.a = base_color.a;
+
+    let most_color = max(max(final_color.r, final_color.g), final_color.b);
+    let weight = max(min(1.0, most_color * final_color.a), final_color.a) *
+        clamp(0.03 / (1e-5 + pow(in.position.z / 200, 4.0)), 1e-2, 3e3);
+
+    out.accum = vec4<f32>(final_color.rgb * final_color.a, final_color.a) * weight;
+    out.revealage = final_color.a;
+
+    return out;
 }

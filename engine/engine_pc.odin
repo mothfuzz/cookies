@@ -46,6 +46,7 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
             }
             if e.type == .WINDOW_RESIZED {
                 graphics.configure_surface(window.get_size())
+                graphics.configure_render_targets()
                 /*for hook in resize_hooks {
                     hook()
                 }*/

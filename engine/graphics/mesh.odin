@@ -36,6 +36,8 @@ Mesh :: struct {
     bounding_box: Extents,
     bounding_center: [3]f32,
     bounding_radius: f32,
+    transparent: bool, //at least one vertex alpha 0 < a < 1
+    solid: bool, //at least one vertex alpha a = 1
 }
 
 /*make_mesh_from_array :: proc(vertices: [$i]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
@@ -83,6 +85,12 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mes
     mesh.bounding_box.mini = math.INF_F32
     mesh.bounding_box.maxi = math.NEG_INF_F32
     for v in vertices {
+        if v.color.a > 0.0 && v.color.a < 1.0 {
+            mesh.transparent = true
+        }
+        if v.color.a == 1.0 {
+            mesh.solid = true
+        }
         if v.position.x > mesh.bounding_box.maxi.x {
             mesh.bounding_box.maxi.x = v.position.x
         }

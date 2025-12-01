@@ -150,6 +150,7 @@ draw_ui :: proc(fill_rect: [4]f32, color: [4]f32, texture: Texture, clip_rect: [
 
 render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder) {
     render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+        label = "ui",
         colorAttachmentCount = 1,
         colorAttachments = &wgpu.RenderPassColorAttachment{
             view = ren.msaa_view,
@@ -159,7 +160,7 @@ render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder
             depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
         },
         depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-            view = ren.depth_view,
+            view = ren.depth_buffer.view,
             depthLoadOp = .Clear,
             depthStoreOp = .Store,
             stencilLoadOp = .Load,
