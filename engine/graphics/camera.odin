@@ -135,38 +135,62 @@ frustum_culling :: proc(cam: ^Camera, instances: []MeshRenderItem, inputs: []int
     for i in inputs {
         instance := &instances[i]
         precalcs(instance)
-        passing := false
-        //check bounding sphere first
-        test_point := cam.projection * cam.view * instance.bounding_center
-        r := instance.bounding_radius
-        if test_point.x+r >= -test_point.w &&
-            test_point.x-r <= test_point.w &&
-            test_point.y+r >= -test_point.w &&
-            test_point.y-r <= test_point.w &&
-            test_point.z+r >= 0 &&
-            test_point.z-r <= test_point.w {
-            passing = true
+
+        //need to check if all planes are passing (i.e. at least one point is inside)
+        passing: [6]bool = false
+        if instance.draw.is_billboard {
+            //sphere check for billboards (as they move around erratically)
+            test_point := cam.projection * cam.view * instance.bounding_center
+            d := instance.bounding_radius * 2
+            if test_point.x+d >= -test_point.w {
+                passing[0] = true
+            }
+            if test_point.x-d <= test_point.w {
+                passing[1] = true
+            }
+            if test_point.y+d >= -test_point.w {
+                passing[2] = true
+            }
+            if test_point.y-d <= test_point.w {
+                passing[3] = true
+            }
+            if test_point.z+d >= 0 {
+                passing[4] = true
+            }
+            if test_point.z-d <= test_point.w {
+                passing[5] = true
+            }
         } else {
-            //check OBB
-            point_check: for point in instance.bounding_box {
+            //OBB check for meshes
+            for point in instance.bounding_box {
                 test_point := cam.projection * cam.view * point
-                if test_point.x >= -test_point.w &&
-                    test_point.x <= test_point.w &&
-                    test_point.y >= -test_point.w &&
-                    test_point.y <= test_point.w &&
-                    test_point.z >= 0 &&
-                    test_point.z <= test_point.w {
-                    passing = true
-                    break point_check
+                if test_point.x >= -test_point.w {
+                    passing[0] = true
+                }
+                if test_point.x <= test_point.w {
+                    passing[1] = true
+                }
+                if test_point.y >= -test_point.w {
+                    passing[2] = true
+                }
+                if test_point.y <= test_point.w {
+                    passing[3] = true
+                }
+                if test_point.z >= 0 {
+                    passing[4] = true
+                }
+                if test_point.z <= test_point.w {
+                    passing[5] = true
                 }
             }
         }
-
-        if passing {
+        //if inside_this_plane[n] == false, then all points were outside that plane.
+        all_passing: bool = passing[0] && passing[1] && passing[2] && passing[3] && passing[4] && passing[5]
+        if all_passing {
             append(&survivors, i)
         }
     }
-    //fmt.println("inputs:", len(inputs))
-    //fmt.println("survivors:", len(survivors))
+    fmt.println("inputs:", len(inputs))
+    fmt.println("survivors:", len(survivors))
     return
 }
