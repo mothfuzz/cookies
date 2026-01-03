@@ -137,8 +137,8 @@ init :: proc() {
     cam2 = graphics.make_camera({screen_size.x/2 - 1, 0, screen_size.x/2, screen_size.y})
     //cam = graphics.make_camera({0, 0, screen_size.x, screen_size.y})
     //cam2 = graphics.make_camera({0, 0, screen_size.x, screen_size.y})
-    graphics.look_at(&cam, {0, 0, 0}, {0, 0, graphics.z_2d(&cam)})
-    graphics.look_at(&cam2, {0, 0, 0}, {0, 0, graphics.z_2d(&cam2)})
+    graphics.look_at(&cam, {0, 0, 0}, {0, 0, -graphics.z_2d(&cam)})
+    graphics.look_at(&cam2, {0, 0, 0}, {0, 0, -graphics.z_2d(&cam2)})
 
     //fmt.println("loading font...")
     unifont = graphics.make_font_from_file(#load("resources/unifont.otf"), 32)
@@ -173,7 +173,7 @@ init :: proc() {
 }
 
 camera_pos: [3]f32 = {0, 0, 0}
-camera_angle: f32 = 270*math.PI/180.0
+camera_angle: f32 = 90*math.PI/180.0
 camera_pitch: f32 = 0
 move_speed: f32 = 25
 
@@ -192,20 +192,20 @@ tick :: proc() {
         text_counter += 1
     }
     if input.key_down(.Key_W) {
-        camera_pos.z += math.sin(camera_angle)*move_speed
+        camera_pos.z -= math.sin(camera_angle)*move_speed
         camera_pos.x += math.cos(camera_angle)*move_speed
     }
     if input.key_down(.Key_S) {
-        camera_pos.z -= math.sin(camera_angle)*move_speed
+        camera_pos.z += math.sin(camera_angle)*move_speed
         camera_pos.x -= math.cos(camera_angle)*move_speed
     }
     if input.key_down(.Key_A) {
         camera_pos.z -= math.cos(camera_angle)*move_speed
-        camera_pos.x += math.sin(camera_angle)*move_speed
+        camera_pos.x -= math.sin(camera_angle)*move_speed
     }
     if input.key_down(.Key_D) {
         camera_pos.z += math.cos(camera_angle)*move_speed
-        camera_pos.x -= math.sin(camera_angle)*move_speed
+        camera_pos.x += math.sin(camera_angle)*move_speed
     }
     if input.key_down(.Key_Space) {
         camera_pos.y += move_speed
@@ -214,10 +214,10 @@ tick :: proc() {
         camera_pos.y -= move_speed
     }
     if input.key_down(.Key_Left) {
-        camera_angle -= 0.1
+        camera_angle += 0.1
     }
     if input.key_down(.Key_Right) {
-        camera_angle += 0.1
+        camera_angle -= 0.1
     }
     if input.key_down(.Key_Up) {
         camera_pitch += move_speed
@@ -251,11 +251,11 @@ tick :: proc() {
 
     forward := [3]f32{camera_pos.x + math.cos(camera_angle)*graphics.z_2d(&cam),
                       camera_pos.y + camera_pitch,
-                      camera_pos.z + math.sin(camera_angle)*graphics.z_2d(&cam)}
-    offset_x := math.sin(camera_angle) * 20
-    offset_z := math.cos(camera_angle) * 20
-    graphics.look_to(&cam, {camera_pos.x-offset_x, camera_pos.y, camera_pos.z+offset_z}, forward)
-    graphics.look_to(&cam2, {camera_pos.x+offset_x, camera_pos.y, camera_pos.z-offset_z}, forward)
+                      camera_pos.z - math.sin(camera_angle)*graphics.z_2d(&cam)}
+    offset_x := math.sin(camera_angle) * 50
+    offset_z := math.cos(camera_angle) * 50
+    graphics.look_to(&cam, {camera_pos.x-offset_x, camera_pos.y, camera_pos.z-offset_z}, forward)
+    graphics.look_to(&cam2, {camera_pos.x+offset_x, camera_pos.y, camera_pos.z+offset_z}, forward)
 
 
     transform.rotatey(&emantaller.active_layout.roots[0].transform, 0.01)

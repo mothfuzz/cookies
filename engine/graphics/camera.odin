@@ -115,20 +115,6 @@ z_2d :: proc(cam: ^Camera) -> f32 {
     return linalg.sqrt(linalg.pow(height, 2) - linalg.pow(height/2.0, 2))
 }
 
-calc_plane :: proc(p: [3]f32, n: [3]f32) -> (plane: [4]f32) {
-    plane.xyz = linalg.normalize(n)
-    plane.w = linalg.dot(plane.xyz, p)
-    return
-}
-
-signed_dist :: proc(point: [3]f32, plane: [4]f32) -> f32 {
-    return linalg.dot(plane.xyz, point) - plane.w
-}
-
-point_in_plane :: proc(point: [3]f32, plane: [4]f32) -> f32 {
-    return plane.x * point.x + plane.y * point.y + plane.z * point.z - plane.w
-}
-
 //assumes eye and center are already calculated.
 frustum_culling :: proc(cam: ^Camera, instances: []MeshRenderItem, inputs: []int) -> (survivors: [dynamic]int) {
     survivors = make([dynamic]int, 0)
@@ -138,50 +124,26 @@ frustum_culling :: proc(cam: ^Camera, instances: []MeshRenderItem, inputs: []int
 
         //need to check if all planes are passing (i.e. at least one point is inside)
         passing: [6]bool = false
-        if instance.draw.is_billboard {
-            //sphere check for billboards (as they move around erratically)
-            test_point := cam.projection * cam.view * instance.bounding_center
-            d := instance.bounding_radius * 2
-            if test_point.x+d >= -test_point.w {
+        //OBB check for meshes
+        for point in instance.bounding_box {
+            test_point := cam.projection * cam.view * point
+            if test_point.x >= -test_point.w {
                 passing[0] = true
             }
-            if test_point.x-d <= test_point.w {
+            if test_point.x <= test_point.w {
                 passing[1] = true
             }
-            if test_point.y+d >= -test_point.w {
+            if test_point.y >= -test_point.w {
                 passing[2] = true
             }
-            if test_point.y-d <= test_point.w {
+            if test_point.y <= test_point.w {
                 passing[3] = true
             }
-            if test_point.z+d >= 0 {
+            if test_point.z >= -test_point.w {
                 passing[4] = true
             }
-            if test_point.z-d <= test_point.w {
+            if test_point.z <= test_point.w {
                 passing[5] = true
-            }
-        } else {
-            //OBB check for meshes
-            for point in instance.bounding_box {
-                test_point := cam.projection * cam.view * point
-                if test_point.x >= -test_point.w {
-                    passing[0] = true
-                }
-                if test_point.x <= test_point.w {
-                    passing[1] = true
-                }
-                if test_point.y >= -test_point.w {
-                    passing[2] = true
-                }
-                if test_point.y <= test_point.w {
-                    passing[3] = true
-                }
-                if test_point.z >= 0 {
-                    passing[4] = true
-                }
-                if test_point.z <= test_point.w {
-                    passing[5] = true
-                }
             }
         }
         //if inside_this_plane[n] == false, then all points were outside that plane.
@@ -190,7 +152,7 @@ frustum_culling :: proc(cam: ^Camera, instances: []MeshRenderItem, inputs: []int
             append(&survivors, i)
         }
     }
-    fmt.println("inputs:", len(inputs))
-    fmt.println("survivors:", len(survivors))
+    //fmt.println("inputs:", len(inputs))
+    //fmt.println("survivors:", len(survivors))
     return
 }

@@ -314,12 +314,21 @@ precalcs :: proc(instance: ^MeshRenderItem) {
         instance.model[3] = {0, 0, 0, 1}
         scale_w := w*instance.clip_rect[2]
         scale_h := h*instance.clip_rect[3]
-        scale := linalg.matrix4_scale([3]f32{scale_w, scale_h, 1.0})
+        scale_z := f32(1.0)
+        if instance.draw.is_billboard {
+            //since billboards face the camera, we want them to be thick from all angles
+            scale_z = max(scale_w, scale_h)
+        }
+        scale := linalg.matrix4_scale([3]f32{scale_w, scale_h, scale_z})
         instance.model *= scale
         instance.model[3] = temp_trans
     }
     //calculate bounding box
     bb := instance.mesh.bounding_box
+    if instance.is_billboard && bb.mini.z == 0 && bb.maxi.z == 0 { //give it some thickness
+        bb.mini.z = min(bb.mini.x, bb.mini.y)
+        bb.maxi.z = max(bb.maxi.x, bb.maxi.y)
+    }
     for i in 0..<8 {
         for j in 0..<3 {
             //convert extents to individual points (using 3-digit binary)
