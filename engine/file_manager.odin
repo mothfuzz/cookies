@@ -64,8 +64,8 @@ load :: proc(path: cstring) -> []u8 {
     if path in loaded_files {
         return loaded_files[path].data
     }
-    data, ok := os.read_entire_file(string(path))
-    if !ok {
+    data, err := os.read_entire_file(string(path), context.allocator)
+    if err != nil {
         fmt.eprintln("failed to read file:", path)
         return nil
     }

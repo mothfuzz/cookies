@@ -5,10 +5,11 @@ import "../engine/window"
 import "../engine/input"
 import "../engine/graphics"
 import "../engine/transform"
-import "../engine/arena"
+//import "../engine/arena"
 import "core:fmt"
 import "core:math/linalg"
 import "core:math/rand"
+import hm "core:container/handle_map"
 
 /*
 BOX VS SPHERES (title displayed in window)
@@ -38,18 +39,20 @@ Player :: struct {
     trans: transform.Transform,
 }
 Bullet :: struct {
+    handle: hm.Handle16,
     trans: transform.Transform,
     trajectory: f32,
 }
 
 Enemy :: struct {
+    handle: hm.Handle16,
     trans: transform.Transform,
     trajectory: f32,
 }
 
 player: Player
-enemies: arena.Arena(Enemy)
-bullets: arena.Arena(Bullet)
+enemies: hm.Dynamic_Handle_Map(Enemy, hm.Handle16)
+bullets: hm.Dynamic_Handle_Map(Bullet, hm.Handle16)
 
 //graphics
 player_sprite: graphics.Texture
@@ -115,6 +118,10 @@ init :: proc() {
     //enemy resources
     enemy_sprite = graphics.make_texture_from_image(#load("arena_game_enemy.png"))
     enemy_mat = graphics.make_material(base_color=enemy_sprite, filtering=false)
+
+    //maps
+    hm.dynamic_init(&enemies, context.allocator)
+    hm.dynamic_init(&bullets, context.allocator)
 }
 
 update_player :: proc() {
@@ -157,7 +164,7 @@ update_player :: proc() {
     if input.mouse_pressed(.Left) {
         new_trans := transform.ORIGIN
         transform.set_position(&new_trans, player_pos)
-        arena.insert(&bullets, Bullet{trans=new_trans, trajectory=angle})
+        _ = hm.add(&bullets, Bullet{trans=new_trans, trajectory=angle})
     }
 
 }
@@ -172,7 +179,7 @@ spawn_enemy :: proc() {
     transform.set_position(&new_trans, {x, y, 0})
     transform.set_scale(&new_trans, {4, 4, 0})
 
-    arena.insert(&enemies, Enemy{trans=new_trans})
+    _ = hm.add(&enemies, Enemy{trans=new_trans})
 }
 
 update_enemies :: proc() {
@@ -182,8 +189,8 @@ update_enemies :: proc() {
         spawn_enemy()
     }
 
-    it: arena.Iterator
-    for handle, enemy in arena.iter(&enemies, &it) {
+    it := hm.iterator_make(&enemies)
+    for enemy, handle in hm.iterate(&it) {
         player_pos := transform.get_position(&player.trans)
         enemy_pos := transform.get_position(&enemy.trans)
         player_vec := player_pos.xy - enemy_pos.xy
@@ -205,19 +212,19 @@ update_enemies :: proc() {
         }
         for p in player_points {
             if (p.x - e.x)*(p.x - e.x) + (p.y - e.y)*(p.y - e.y) < r*r {
-                arena.remove(&enemies, handle)
+                hm.remove(&enemies, handle)
                 player.hp -= 1
                 break
             }
         }
 
         //for each bullet, just check the bullet's center point
-        bit: arena.Iterator
-        for bhandle, bullet in arena.iter(&bullets, &bit) {
+        bit := hm.iterator_make(&bullets)
+        for bullet, bhandle in hm.iterate(&bit) {
             b := transform.get_position(&bullet.trans).xy
             if (b.x - e.x)*(b.x - e.x) + (b.y - e.y)*(b.y - e.y) < r*r {
-                arena.remove(&enemies, handle)
-                arena.remove(&bullets, bhandle)
+                hm.remove(&enemies, handle)
+                hm.remove(&bullets, bhandle)
                 player.score += 1
                 break
             }
@@ -226,8 +233,8 @@ update_enemies :: proc() {
 }
 
 update_bullets :: proc() {
-    it: arena.Iterator
-    for handle, bullet in arena.iter(&bullets, &it) {
+    it := hm.iterator_make(&bullets)
+    for bullet, handle in hm.iterate(&it) {
         x := linalg.cos(bullet.trajectory)*Bullet_Speed
         y := linalg.sin(bullet.trajectory)*Bullet_Speed
         transform.translate(&bullet.trans, {x, y, 0})
@@ -236,7 +243,7 @@ update_bullets :: proc() {
             bullet_pos.x < -Screen_Width/2 ||
             bullet_pos.y > Screen_Height/2 ||
             bullet_pos.y < -Screen_Height/2 {
-                arena.remove(&bullets, handle)
+                hm.remove(&bullets, handle)
             }
     }
 }
@@ -296,15 +303,15 @@ draw_player :: proc(t: f64) {
 }
 
 draw_bullets :: proc(t: f64) {
-    it: arena.Iterator
-    for handle, bullet in arena.iter(&bullets, &it) {
+    it := hm.iterator_make(&bullets)
+    for bullet, handle in hm.iterate(&it) {
         graphics.draw_sprite(bullet_mat, transform.smooth(&bullet.trans, t))
     }
 }
 
 draw_enemies :: proc(t: f64) {
-    it: arena.Iterator
-    for handle, enemy in arena.iter(&enemies, &it) {
+    it := hm.iterator_make(&enemies)
+    for enemy, handle in hm.iterate(&it) {
         transform.smooth(&enemy.trans, t)
         pos := transform.get_position(&enemy.trans)
         for i in 0..<16 {
@@ -341,10 +348,10 @@ draw :: proc(t: f64) {
         graphics.ui_draw_text(hp_str, regular_font, {-Screen_Width/2, Screen_Height/2 - rs*2}, {1, 1, 1, 1})
 
         if debug_enabled {
-            live_bullets_str := fmt.tprintf("live bullets: %d", arena.len(&bullets))
+            live_bullets_str := fmt.tprintf("live bullets: %d", hm.len(bullets))
             graphics.ui_draw_text(live_bullets_str, regular_font, {-Screen_Width/2, -Screen_Height/2 + rs*3}, {1, 1, 1, 1})
 
-            live_enemies_str := fmt.tprintf("live enemies: %d", arena.len(&enemies))
+            live_enemies_str := fmt.tprintf("live enemies: %d", hm.len(enemies))
             graphics.ui_draw_text(live_enemies_str, regular_font, {-Screen_Width/2, -Screen_Height/2 + rs*5}, {1, 1, 1, 1})
         }
 
@@ -371,8 +378,8 @@ draw :: proc(t: f64) {
 }
 
 kill :: proc() {
-    arena.delete(&enemies)
-    arena.delete(&bullets)
+    hm.dynamic_destroy(&enemies)
+    hm.dynamic_destroy(&bullets)
     graphics.delete_font(big_font)
     graphics.delete_font(regular_font)
     graphics.delete_camera(cam)

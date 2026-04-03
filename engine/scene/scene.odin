@@ -22,7 +22,7 @@ Actor :: struct {
     name: string,
 }
 
-Scene :: struct #no_copy {
+Scene :: struct {
     actors: map[ActorId]Actor,
     baseid: ActorId,
     spawns: [dynamic]Actor,
@@ -85,7 +85,7 @@ when ODIN_OS == .JS {
 }
 
 num_workers :: proc() -> int {
-    return os.processor_core_count() - 1
+    return os.get_processor_core_count() - 1
 }
 
 update_ids :: proc(s: ^Scene) {

@@ -26,7 +26,7 @@ interpolator: time.Tick = {}
 step :: proc "c" (delta_time: f64) -> bool {
     context = main_context
     if !graphics.ren.ready {
-        time.tick_lap_time(&interpolator)
+        _ = time.tick_lap_time(&interpolator)
         return true
     }
 
@@ -56,7 +56,7 @@ step :: proc "c" (delta_time: f64) -> bool {
     }
     accumulator += delta_time
     for ; accumulator > 0; accumulator -= 1.0/f64(tick_rate) {
-        time.tick_lap_time(&interpolator)
+        _ = time.tick_lap_time(&interpolator)
         /*for hook in pre_tick_hooks {
             hook()
         }*/

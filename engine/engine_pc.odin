@@ -37,7 +37,7 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
     then := sdl3.GetTicks()
     accumulator: f64 = 0
     interpolator: time.Tick = {}
-    time.tick_lap_time(&interpolator)
+    _ = time.tick_lap_time(&interpolator)
     main_loop: for {
         e: sdl3.Event
         for sdl3.PollEvent(&e) {
@@ -97,7 +97,7 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
         accumulator += f64(now - then)
         then = now //when will then be now? soon.
         for ; accumulator > 0; accumulator -= 1000.0/f64(tick_rate) {
-            time.tick_lap_time(&interpolator)
+            _ = time.tick_lap_time(&interpolator)
             /*for hook in pre_tick_hooks {
                 hook()
             }*/

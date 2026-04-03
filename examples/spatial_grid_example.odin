@@ -1,7 +1,6 @@
 package main
 
 import "../engine"
-import "../engine/arena"
 import "../engine/transform"
 import "../engine/spatial"
 
@@ -11,13 +10,17 @@ import "../engine/input"
 
 import "core:math"
 import "core:math/rand"
+import "core:container/handle_map"
 
 import "core:fmt"
 
 Screen_Width :: 400
 Screen_Height :: 400
 
+Handle :: handle_map.Handle16
+
 TheGuy :: struct {
+    handle: Handle,
     trans: transform.Transform,
     hitbox: spatial.Bounding_Box,
     colliding: bool,
@@ -37,8 +40,8 @@ make_guy :: proc() -> (guy: TheGuy) {
     return
 }
 
-guys: arena.Arena(TheGuy)
-guy_grid := spatial.init(spatial.Grid(arena.Handle, 16))
+guys: handle_map.Dynamic_Handle_Map(TheGuy, Handle)
+guy_grid := spatial.init(spatial.Grid(Handle, 16))
 
 init :: proc() {
 
@@ -49,30 +52,32 @@ init :: proc() {
     graphics.look_at(&cam, {0, 0, graphics.z_2d(&cam)}, {0, 0, 0})
     graphics.set_camera(&cam)
 
+    graphics.set_background_color({0, 0, 1})
+
     guy_tex = graphics.make_texture_from_image(#load("frasier-32.png"))
     guy_mat = graphics.make_material(base_color = guy_tex)
 
-    guys = arena.make(arena.Arena(TheGuy))
-
+    handle_map.dynamic_init(&guys, context.allocator)
+    
     for i in 0..<10 {
-        g := arena.insert(&guys, make_guy())
-        guy := arena.get(&guys, g)
+        g := handle_map.add(&guys, make_guy())
+        guy := handle_map.get(&guys, g)
         spatial.insert(&guy_grid, g, guy.hitbox)
     }
 }
 
 cleanup :: proc() {
-    arena.delete(&guys)
     spatial.clear(&guy_grid)
-
+    handle_map.dynamic_destroy(&guys)
+    
     graphics.delete_material(guy_mat)
     graphics.delete_texture(guy_tex)
     graphics.delete_camera(cam)
 }
 
 update_guys :: proc() {
-    it: arena.Iterator
-    for handle, guy in arena.iter(&guys, &it) {
+    it := handle_map.iterator_make(&guys)
+    for guy, handle in handle_map.iterate(&it) {
         transform.rotatez(&guy.trans, 0.005 * math.TAU)
         spatial.update(&guy_grid, handle, transform.compute(&guy.trans))
         guy.colliding = false
@@ -86,11 +91,11 @@ update_guys :: proc() {
 }
 
 calculate_collisions :: proc() {
-    it: arena.Iterator
-    for handle_a in arena.iter(&guys, &it) {
+    it := handle_map.iterator_make(&guys)
+    for _, handle_a in handle_map.iterate(&it) {
         for handle_b in spatial.overlapping(&guy_grid, handle_a) {
-            guy_a := arena.get(&guys, handle_a)
-            guy_b := arena.get(&guys, handle_b)
+            guy_a := handle_map.get(&guys, handle_a)
+            guy_b := handle_map.get(&guys, handle_b)
 
             guy_a.colliding = true
             guy_b.colliding = true
@@ -99,8 +104,8 @@ calculate_collisions :: proc() {
 }
 
 draw_guys :: proc(t: f64) {
-    it: arena.Iterator
-    for handle, guy in arena.iter(&guys, &it) {
+    it := handle_map.iterator_make(&guys)
+    for guy, handle in handle_map.iterate(&it) {
         trans := transform.smooth(&guy.trans, t)
         hitbox := spatial.transform(guy.hitbox, trans)
         position := (hitbox.min + hitbox.max)/2
