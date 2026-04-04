@@ -1,7 +1,6 @@
 package scene
 
 import "core:fmt"
-import "core:os"
 import "core:thread"
 import "core:sync"
 
@@ -50,42 +49,6 @@ destroy :: proc(s: ^Scene) {
     delete(s.actors)
     delete(s.spawns)
     delete(s.kills)
-}
-
-when ODIN_OS == .JS {
-    spawn :: proc(s: ^Scene, t: $T, methods: ActorMethods, name: string="") -> ActorId {
-        data := new(T)
-        data^ = t
-        s.baseid += 1
-        append(&s.spawns, Actor{s.baseid, data, methods, s, name})
-        return s.baseid
-    }
-} else {
-    spawn :: proc(s: ^Scene, t: $T, methods: ActorMethods, name: string="") -> ActorId {
-        if sync.mutex_guard(&s.spawn_mutex) {
-            data := new(T)
-            data^ = t
-            s.baseid += 1
-            append(&s.spawns, Actor{s.baseid, data, methods, s, name})
-        }
-        return s.baseid
-    }
-}
-
-when ODIN_OS == .JS {
-    kill :: proc(s: ^Scene, id: ActorId) {
-        append(&s.kills, id)
-    }
-} else {
-    kill :: proc(s: ^Scene, id: ActorId) {
-        if sync.mutex_guard(&s.kill_mutex) {
-            append(&s.kills, id)
-        }
-    }
-}
-
-num_workers :: proc() -> int {
-    return os.get_processor_core_count() - 1
 }
 
 update_ids :: proc(s: ^Scene) {

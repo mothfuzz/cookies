@@ -6,7 +6,6 @@ import "vendor:cgltf"
 import "core:strings"
 import "core:encoding/base64"
 import "core:slice"
-import "core:os"
 
 Loaded_File :: struct {
     data: []u8,
@@ -59,13 +58,14 @@ preload :: proc(path: cstring, file: []u8) {
     loaded_paths[raw_data(file)] = path
 }
 
+
 load :: proc(path: cstring) -> []u8 {
     check()
     if path in loaded_files {
         return loaded_files[path].data
     }
-    data, err := os.read_entire_file(string(path), context.allocator)
-    if err != nil {
+    data := read_from_disk(path)
+    if data == nil {
         fmt.eprintln("failed to read file:", path)
         return nil
     }
