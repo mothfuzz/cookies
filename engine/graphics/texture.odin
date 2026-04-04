@@ -1,13 +1,7 @@
 package graphics
 
 import "vendor:wgpu"
-//import stbi "vendor:stb/image"
-import "core:image"
-import _ "core:image/png"
-import _ "core:image/jpeg"
-import _ "core:image/tga"
-import _ "core:image/bmp"
-import "core:bytes"
+import stbi "vendor:stb/image"
 import "core:math"
 import "core:fmt"
 
@@ -214,21 +208,14 @@ pixels_byte_to_word :: proc(in_pixels: []byte, x, y: uint) -> (out_pixels: []u32
 
 @(private)
 load_data_2d :: proc(img: []byte) -> (img_u32: []u32, x, y: uint) {
-    options := image.Options{
-        .alpha_add_if_missing,
-        //.return_metadata, 
-        //.alpha_premultiply,
-    }
-    img, err := image.load(img, options)
-    //fmt.println("image type:", img.which)
-    if err != nil {
-        fmt.eprintln("error loading image:", err)
-        return nil, 0, 0
-    }
-    x = uint(img.width)
-    y = uint(img.height)
-    img_u32 = pixels_byte_to_word(bytes.buffer_to_bytes(&img.pixels), x, y)
-    image.destroy(img)
+    imgx, imgy, imgc: i32
+    img := stbi.load_from_memory(raw_data(img), i32(len(img)), &imgx, &imgy, &imgc, 4)
+
+    x = uint(imgx)
+    y = uint(imgy)
+    img_u32 = pixels_byte_to_word(img[:x*y*4], x, y)
+    stbi.image_free(img)
+    
     return
 }
 
