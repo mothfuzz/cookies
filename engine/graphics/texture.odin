@@ -1,7 +1,13 @@
 package graphics
 
 import "vendor:wgpu"
-import stbi "vendor:stb/image"
+//import stbi "vendor:stb/image"
+import "core:image"
+import _ "core:image/png"
+import _ "core:image/jpeg"
+import _ "core:image/tga"
+import _ "core:image/bmp"
+import "core:bytes"
 import "core:math"
 import "core:fmt"
 
@@ -126,7 +132,8 @@ make_mips :: proc(input: []u32, size: [2]uint, include_original: bool = false) -
             break;
         }
         fmt.println("generating:", mip_size)
-        append(&mips, make_scaled_image_bilinear(input, size, mip_size))
+        append(&mips, make_scaled_image_bilinear(mips[len(mips)-1], mip_size*2, mip_size))
+        fmt.println("generated:", mip_size)
     }
     return
 }
@@ -192,7 +199,10 @@ delete_texture :: proc(tex: Texture) {
     }
 }
 
-pixels_byte_to_word :: proc(in_pixels: [^]byte, x, y: i32) -> (out_pixels: []u32) {
+pixels_byte_to_word :: proc(in_pixels: []byte, x, y: uint) -> (out_pixels: []u32) {
+    //fmt.println("len(in_pixels): ", len(in_pixels))
+    //fmt.println("x:", x)
+    //fmt.println("y:", y)
     out_pixels = make([]u32, x*y)
     for i in 0..<int(x*y) {
         for b in 0..<4 {
@@ -202,52 +212,63 @@ pixels_byte_to_word :: proc(in_pixels: [^]byte, x, y: i32) -> (out_pixels: []u32
     return
 }
 
+@(private)
+load_data_2d :: proc(img: []byte) -> (img_u32: []u32, x, y: uint) {
+    options := image.Options{
+        .alpha_add_if_missing,
+        //.return_metadata, 
+        //.alpha_premultiply,
+    }
+    img, err := image.load(img, options)
+    //fmt.println("image type:", img.which)
+    if err != nil {
+        fmt.eprintln("error loading image:", err)
+        return nil, 0, 0
+    }
+    x = uint(img.width)
+    y = uint(img.height)
+    img_u32 = pixels_byte_to_word(bytes.buffer_to_bytes(&img.pixels), x, y)
+    image.destroy(img)
+    return
+}
+
 //inherently 2D
-make_texture_from_image :: proc(image: []byte, linear: bool = false) -> (tex: Texture) {
-    x, y, channels: i32
-    img: [^]byte = stbi.load_from_memory(raw_data(image), i32(len(image)), &x, &y, &channels, 4)
-    img_u32 := pixels_byte_to_word(img, x, y)
-    tex = make_texture_2D(img_u32, {uint(x), uint(y)}, linear)
-    stbi.image_free(img)
+make_texture_from_image :: proc(img: []byte, linear: bool = false) -> (tex: Texture) {
+    img_u32, x, y := load_data_2d(img)
+    tex = make_texture_2D(img_u32, {x, y}, linear)
     delete(img_u32)
     return
 }
 
 make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = nil, metallic: []byte = nil) -> (tex: Texture) {
 
-    ax, ay, achannels: i32
+    ax, ay: uint
     ambient_u32: []u32
     defer delete(ambient_u32)
     if ambient != nil {
-        ambient: [^]byte = stbi.load_from_memory(raw_data(ambient), i32(len(ambient)), &ax, &ay, &achannels, 4)
-        ambient_u32 = pixels_byte_to_word(ambient, ax, ay)
-        stbi.image_free(ambient)
+        ambient_u32, ax, ay = load_data_2d(ambient)
     } else {
         ambient_u32 = make([]u32, 1)
         ambient_u32[0] = 0xffffffff
         ax, ay = 1, 1
     }
 
-    rx, ry, rchannels: i32
+    rx, ry: uint
     roughness_u32: []u32
     defer delete(roughness_u32)
     if roughness != nil {
-        roughness: [^]byte = stbi.load_from_memory(raw_data(roughness), i32(len(roughness)), &rx, &ry, &rchannels, 4)
-        roughness_u32 = pixels_byte_to_word(roughness, rx, ry)
-        stbi.image_free(roughness)
+        roughness_u32, rx, ry = load_data_2d(roughness)
     } else {
         roughness_u32 = make([]u32, 1)
         roughness_u32[0] = 0xff808080
         rx, ry = 1, 1
     }
 
-    mx, my, mchannels: i32
+    mx, my: uint
     metallic_u32: []u32
     defer delete(metallic_u32)
     if metallic != nil {
-        metallic: [^]byte = stbi.load_from_memory(raw_data(metallic), i32(len(metallic)), &mx, &my, &mchannels, 4)
-        metallic_u32 = pixels_byte_to_word(metallic, mx, my)
-        stbi.image_free(metallic)
+        metallic_u32, mx, my = load_data_2d(metallic)
     } else {
         metallic_u32 = make([]u32, 1)
         metallic_u32[0] = 0xff000000
