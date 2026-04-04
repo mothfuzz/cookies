@@ -20,6 +20,8 @@ Radius :: 1.0/16.0
 Ball_Max_Speed :: Radius * 0.9
 Ball_Accel :: 0.01
 
+dir_light: graphics.Directional_Light
+
 font: graphics.Font
 
 init :: proc() {
@@ -40,6 +42,8 @@ init :: proc() {
     ball = engine.make_scene_from_file("ball.gltf", #load("ball.gltf"))
     transform.set_position(&ball_trans, {0, 0.75, 0})
     transform.set_scale(&ball_trans, Radius*2.0)
+
+    dir_light = graphics.make_directional_light({-0.1, -0.7, -0.2}, {1, 1, 1, 3}, false)
 
 }
 
@@ -105,6 +109,7 @@ tick :: proc() {
 }
 
 draw :: proc(t: f64) {
+    graphics.draw_directional_light(dir_light)
     graphics.draw_mesh(ball.meshes[0], ball.materials[0], transform.smooth(&ball_trans, t))
     engine.draw_scene(&testmap, t)
     graphics.ui_draw_text("WASD to move ball", font, {-Screen_Width/2+2, Screen_Height/2}, 1)
