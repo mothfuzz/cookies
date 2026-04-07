@@ -397,11 +397,11 @@ draw_node :: proc(node: ^Node, t: f64) {
     }
     //draw immediate sibling (will trigger subsequent draws)
     if node.transform.next_sibling != nil {
-        render_node(node_from_transform(node.transform.next_sibling), t)
+        draw_node(node_from_transform(node.transform.next_sibling), t)
     }
     //draw first child (will trigger subsequent draws)
     if node.transform.first_child != nil {
-        render_node(node_from_transform(node.transform.first_child), t)
+        draw_node(node_from_transform(node.transform.first_child), t)
     }
 }
 draw_scene :: proc(scene: ^Scene, t: f64) {
