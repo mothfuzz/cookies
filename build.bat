@@ -1,10 +1,10 @@
 @echo off
 echo compiling main...
-odin build . -out:bin\cookies.exe
+odin build . -out:bin\cookies.exe -collection:cookies=src
 
 for %%a in ("examples\*.odin") do (
     echo compiling example: %%a
-    odin build %%a -out:bin\%%~na.exe -file -o:speed
+    odin build %%a -out:bin\%%~na.exe -file -o:speed -collection:cookies=src
 )
 
 for /f "delims=" %%i in ('odin.exe root') do set "ODIN_ROOT=%%i"

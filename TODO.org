@@ -1,0 +1,11 @@
+#+title: Todo
+
+- expose "lib" package which re-imports all functionality so we don't have a dozen imports per project (a 'prelude' to use rust terms)
+- use this lib package as an API surface, expose dynamic loading via .dll/.so/whatever.
+- once you have dynamic loading, add scripting system
+
+- skeletal animation needs to be completed.
+- shadow mapping & translucent/colored shadows for directional lights
+  - point & spot lights can come later
+
+- 3D audio

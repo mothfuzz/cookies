@@ -5,10 +5,10 @@ import "base:runtime"
 import "core:time"
 import "core:sys/wasm/js"
 
-import "window"
-import "graphics"
-import "input"
-import "audio"
+import "cookies:window"
+import "cookies:graphics"
+import "cookies:input"
+import "cookies:audio"
 
 main_context: runtime.Context
 

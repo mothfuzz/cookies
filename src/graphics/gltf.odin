@@ -1,4 +1,4 @@
-package engine
+package graphics
 
 import "core:fmt"
 import "base:runtime"
@@ -74,17 +74,17 @@ load :: proc(path: cstring) -> []u8 {
     return data
 }
 
-import "graphics"
-import "transform"
-import "spatial"
+import "cookies:transform"
+import "cookies:spatial"
 
 Node_Type :: union {
-    ^graphics.Model,
-    ^graphics.Camera,
-    ^graphics.Light,
+    ^Model,
+    ^Camera,
+    ^Light,
 }
 
 Node :: struct {
+    name: string,
     transform: transform.Transform,
     has_renderable: bool,
     type: Node_Type,
@@ -98,15 +98,15 @@ Layout :: struct {
 
 Scene :: struct {
     //assets
-    models: []graphics.Model, //'meshes'
-    meshes: []graphics.Mesh, //'primitives'
+    models: []Model, //'meshes'
+    meshes: []Mesh, //'primitives'
     colliders: []spatial.Tri_Mesh,
-    textures: []graphics.Texture,
-    materials: []graphics.Material,
-    skeletons: []graphics.Skeleton, //'skins' //NOTE: when a mesh is animated, its local transform is ignored in favor of the root bone.
-    animations: []graphics.Animation,
-    cameras: []graphics.Camera,
-    lights: []graphics.Light,
+    textures: []Texture,
+    materials: []Material,
+    //skeletons: []Skeleton, //'skins'
+    //animations: []Animation,
+    cameras: []Camera,
+    lights: []Light,
     //actual scene
     name: string,
     nodes: []Node,
@@ -115,7 +115,7 @@ Scene :: struct {
 }
 
 @(private)
-load_image :: proc(opts: cgltf.options, image: cgltf.image) -> graphics.Texture {
+load_image :: proc(opts: cgltf.options, image: cgltf.image) -> Texture {
         //load textures
         if prefix, ok := strings.substring(string(image.uri), 0, 5); ok {
             if prefix == "data:" {
@@ -125,24 +125,24 @@ load_image :: proc(opts: cgltf.options, image: cgltf.image) -> graphics.Texture 
                 img_base64_cstring := strings.clone_to_cstring(img_base64)
                 img_data, res := cgltf.load_buffer_base64(opts, uint(img_size), img_base64_cstring)
                 delete(img_base64_cstring)
-                return graphics.make_texture_from_image(slice.bytes_from_ptr(img_data, img_size))
+                return make_texture_from_image(slice.bytes_from_ptr(img_data, img_size))
             }
         }
         //load texture from buffer
         if image.buffer_view != nil {
             buffer_data := slice.bytes_from_ptr(image.buffer_view.buffer.data, int(image.buffer_view.buffer.size))
             img_data := buffer_data[image.buffer_view.offset:image.buffer_view.size]
-            return graphics.make_texture_from_image(img_data)
+            return make_texture_from_image(img_data)
         }
         //lastly but not leastly... it's a file. use the file manager
-        return graphics.make_texture_from_image(load(image.uri))
+        return make_texture_from_image(load(image.uri))
 }
 
 @(private)
-load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material) -> graphics.Material {
+load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material) -> Material {
     filtering := true
     tiling := [2]bool{false, false}
-    base_color_tex: graphics.Texture = graphics.white_tex
+    base_color_tex: Texture = white_tex
     if material.pbr_metallic_roughness.base_color_texture.texture != nil {
         base_color_index := cgltf.image_index(data, material.pbr_metallic_roughness.base_color_texture.texture.image_)
         base_color_tex = scene.textures[base_color_index]
@@ -153,30 +153,30 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
         tiling[1] = sampler.wrap_t != .clamp_to_edge
     }
 
-    normal_tex: graphics.Texture = graphics.normal_tex
+    normal_tex: Texture = normal_tex
     if material.normal_texture.texture != nil {
         normal_index := cgltf.image_index(data, material.normal_texture.texture.image_)
         normal_tex = scene.textures[normal_index]
 
     }
 
-    pbr_tex: graphics.Texture = graphics.white_tex
+    pbr_tex: Texture = white_tex
     if material.pbr_metallic_roughness.metallic_roughness_texture.texture != nil {
         pbr_index := cgltf.image_index(data, material.pbr_metallic_roughness.metallic_roughness_texture.texture.image_)
         pbr_tex = scene.textures[pbr_index]
     }
 
-    emissive_tex: graphics.Texture = graphics.black_tex
+    emissive_tex: Texture = black_tex
     if material.emissive_texture.texture != nil {
         emissive_index := cgltf.image_index(data, material.emissive_texture.texture.image_)
         emissive_tex = scene.textures[emissive_index]
     }
 
-    return graphics.make_material(base_color_tex, normal_tex, pbr_tex, emissive_tex, filtering, tiling)
+    return make_material(base_color_tex, normal_tex, pbr_tex, emissive_tex, filtering, tiling)
 }
 
 @(private)
-load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: graphics.Mesh, collider: spatial.Tri_Mesh) {
+load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: Mesh, collider: spatial.Tri_Mesh) {
     indices_len := cgltf.accessor_unpack_indices(primitive.indices, nil, 4, 0)
     indices := make([]u32, indices_len)
     defer delete(indices)
@@ -184,13 +184,13 @@ load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: gra
         fmt.eprintln("failed to load all indices!")
     }
     fmt.println(indices)
-    vertices: #soa[]graphics.Vertex = nil
+    vertices: #soa[]Vertex = nil
     defer delete(vertices)
     default_colors := true
     for attribute in primitive.attributes {
         size := cgltf.accessor_unpack_floats(attribute.data, nil, 0)
         if vertices == nil {
-            vertices = make(#soa[]graphics.Vertex, size)
+            vertices = make(#soa[]Vertex, size)
         }
         switch attribute.type {
         case .position:
@@ -231,12 +231,29 @@ load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: gra
             vertex.color = 1
         }
     }
-    mesh = graphics.make_mesh_from_soa(vertices, indices)
+    mesh = make_mesh_from_soa(vertices, indices)
     if make_tri_mesh {
         collider = spatial.make_tri_mesh(vertices.position[0:len(vertices)], indices)
     }
     return
 }
+
+/*@(private)
+load_skeleton :: proc(skin: cgltf.skin) -> (sk: Skeleton) {
+    size_f32 := cgltf.accessor_unpack_floats(skin.inverse_bind_matrices, nil, 0)
+    floats := make([]f32, size_f32)
+    
+    if cgltf.accessor_unpack_floats(skin.inverse_bind_matrices, raw_data(floats), size_f32) < size_f32 {
+        fmt.eprintln("failed to load all inverse bind matrices!")
+    }
+
+    sk.inv_bind = mem.slice_data_cast([]matrix[4,4]f32, floats)
+
+    sk.bones = make([]Bone, len(sk.inv_bind))
+    //how do get bones???
+    
+    return
+}*/
 
 make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: bool = false) -> (scene: Scene) {
 
@@ -261,30 +278,30 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
     //TODO: load lights...
     //TODO: load cameras...
 
-    scene.textures = make([]graphics.Texture, len(data.images))
+    scene.textures = make([]Texture, len(data.images))
     for image, i in data.images {
         scene.textures[i] = load_image(opts, image)
     }
 
-    scene.materials = make([]graphics.Material, len(data.materials))
+    scene.materials = make([]Material, len(data.materials))
     for material, i in data.materials {
         scene.materials[i] = load_material(data, &scene, material)
     }
 
-    scene.models = make([]graphics.Model, len(data.meshes))
+    scene.models = make([]Model, len(data.meshes))
     total_meshes := 0
     for mesh in data.meshes {
         total_meshes += len(mesh.primitives)
     }
-    scene.meshes = make([]graphics.Mesh, total_meshes)
+    scene.meshes = make([]Mesh, total_meshes)
     if make_tri_mesh {
         scene.colliders = make([]spatial.Tri_Mesh, total_meshes)
     }
     current_mesh := 0
     for mesh, i in data.meshes {
         model := &scene.models[i]
-        model.meshes = make([]^graphics.Mesh, len(mesh.primitives))
-        model.materials = make([]^graphics.Material, len(mesh.primitives))
+        model.meshes = make([]^Mesh, len(mesh.primitives))
+        model.materials = make([]^Material, len(mesh.primitives))
         for primitive, j in mesh.primitives {
 
             material_index := cgltf.material_index(data, primitive.material)
@@ -299,6 +316,11 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
             current_mesh += 1
         }
     }
+
+    //scene.skeletons = make([]Skeleton, len(data.skins))
+    //for skin, i in data.skins {
+        //scene.skeletons[i] = load_skeleton(skin)
+    //}
 
     //load scene
     scene.nodes = make([]Node, len(data.nodes))
@@ -363,42 +385,47 @@ node_from_transform :: proc(trans: ^transform.Transform) -> ^Node {
     return cast(^Node)(uintptr(trans) - offset_of(Node, transform))
 }
 
-draw_node :: proc(node: ^Node, t: f64) {
+render_node :: proc(node: ^Node, t: f64) {
     //draw self
     if node.has_renderable {
-        if model, ok := node.type.(^graphics.Model); ok {
-            graphics.draw_model(model^, transform.smooth(&node.transform, t))
-            //graphics.draw_model(model^, transform.compute(&node.transform))
+        if model, ok := node.type.(^Model); ok {
+            draw_model(model^, transform.smooth(&node.transform, t))
+            //draw_model(model^, transform.compute(&node.transform))
         }
         //TODO: light
         //TODO: camera...?
     }
     //draw immediate sibling (will trigger subsequent draws)
     if node.transform.next_sibling != nil {
-        draw_node(node_from_transform(node.transform.next_sibling), t)
+        render_node(node_from_transform(node.transform.next_sibling), t)
     }
     //draw first child (will trigger subsequent draws)
     if node.transform.first_child != nil {
-        draw_node(node_from_transform(node.transform.first_child), t)
+        render_node(node_from_transform(node.transform.first_child), t)
     }
 }
 draw_scene :: proc(scene: ^Scene, t: f64) {
     for node in scene.active_layout.roots {
-        draw_node(node, t)
+        render_node(node, t)
     }
+}
+
+draw_instance :: proc(scene: ^Scene, t: f64, trans: matrix[4,4]f32 = 1, anim: Animation_State) {
+    // TODO
+    draw_scene(scene, t)
 }
 
 delete_scene :: proc(scene: ^Scene) {
     for &texture in scene.textures {
-        graphics.delete_texture(texture)
+        delete_texture(texture)
     }
     delete(scene.textures)
     for &mesh in scene.meshes {
-        graphics.delete_mesh(mesh)
+        delete_mesh(mesh)
     }
     delete(scene.meshes)
     for &material in scene.materials {
-        graphics.delete_material(material)
+        delete_material(material)
     }
     delete(scene.materials)
     for &model in scene.models {
@@ -411,16 +438,25 @@ delete_scene :: proc(scene: ^Scene) {
     }
     delete(scene.colliders)
     for &camera in scene.cameras {
-        graphics.delete_camera(camera)
+        delete_camera(camera)
     }
-    //TODO when skeletal animation is implemented
-    //delete(scene.skeletons)
-    //delete(scene.animations)
-    delete(scene.cameras)
-    delete(scene.lights)
+
+    /*for &skeleton in scene.skeletons {
+        delete_skeleton(skeleton)
+    }
+    delete(scene.skeletons)
+    for &animation in scene.animations {
+        delete_animation(animation)
+    }
+    delete(scene.animations)*/
+
+    //delete(scene.cameras)
+    //delete(scene.lights)
+
     for &layout in scene.layouts {
         delete(layout.roots)
     }
     delete(scene.layouts)
+
     delete(scene.nodes)
 }

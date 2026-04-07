@@ -1,9 +1,9 @@
 package main
 
 import "core:fmt"
-import "../engine"
-import "../engine/window"
-import "../engine/transform"
+import "cookies:engine"
+import "cookies:window"
+import "cookies:transform"
 
 parent: transform.Transform = transform.ORIGIN
 trans: transform.Transform = transform.ORIGIN

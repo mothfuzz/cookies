@@ -1,6 +1,6 @@
 #+build !js
 
-package engine
+package graphics
 
 import "core:fmt"
 import "core:os"

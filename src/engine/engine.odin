@@ -1,12 +1,10 @@
 package engine
 
-import "core:fmt"
-
 //bit of glue code so that these packages can work somewhat independently
 
-import "window"
-import "input"
-import "audio"
+//import "cookies:window"
+//import "cookies:input"
+//import "cookies:audio"
 
 @(init)
 init_dylib :: proc "contextless" () {

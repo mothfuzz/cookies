@@ -1,18 +1,15 @@
 package main
 
-import "../engine"
-import "../engine/transform"
-import "../engine/spatial"
-
-import "../engine/graphics"
-import "../engine/window"
-import "../engine/input"
+import "cookies:engine"
+import "cookies:transform"
+import "cookies:spatial"
+import "cookies:graphics"
+import "cookies:window"
+import "cookies:input"
 
 import "core:math"
 import "core:math/rand"
 import "core:container/handle_map"
-
-import "core:fmt"
 
 Screen_Width :: 400
 Screen_Height :: 400

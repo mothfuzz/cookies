@@ -1,13 +1,13 @@
 package graphics
 
-import "core:math/linalg"
+/*import "core:math/linalg"
 
 Bone :: struct {
     translation: [3]f32,
     rotation: quaternion128,
     scaling: [3]f32,
 
-    id: int,
+    //id: int,
     children: []int,
 }
 Keyframe :: struct {
@@ -26,12 +26,31 @@ Animation :: struct {
     keyframes: []Keyframe, //per bone
 }
 
+// TODO: move most of this into file_manager.odin... we need to support both vertex animation and node animation
+// and since glTF uses nodes for both we don't wanna just reimplement it
+
+delete_animation :: proc(a: Animation) {
+    delete(a.keyframes)
+}
+
 Skeleton :: struct {
     bones: []Bone,
+    inv_bind: []matrix[4,4]f32,
     root_bone: int,
     bone_labels: map[string]int,
     animations: []Animation,
     animation_labels: map[string]int,
+}
+
+delete_skeleton :: proc(sk: Skeleton) {
+    delete(sk.bones)
+    delete(sk.inv_bind)
+    delete(sk.bone_labels)
+    for &a in sk.animations {
+        delete_animation(a)
+    }
+    delete(sk.animations)
+    delete(sk.animation_labels)
 }
 
 CurrentFrame :: struct {
@@ -123,9 +142,9 @@ animate_bone :: proc(a: ^Animator, bone_index: int, parent_world_trans: matrix[4
 }
 
 animate_bones :: proc(a: ^Animator, seconds_since_last_frame: f64, global_trans: matrix[4,4]f32 = 1) -> (bones: []matrix[4,4]f32) {
-    b := make([]matrix[4,4]f32, len(a.sk.bones), context.temp_allocator)
+    bones = make([]matrix[4,4]f32, len(a.sk.bones), context.temp_allocator)
 
-    animate_bone(a, a.sk.root_bone, global_trans, &b)
+    animate_bone(a, a.sk.root_bone, global_trans, &bones)
 
     duration := a.sk.animations[a.now_playing].duration
     if a.current_time >= duration {
@@ -137,5 +156,10 @@ animate_bones :: proc(a: ^Animator, seconds_since_last_frame: f64, global_trans:
     }
     a.current_time += seconds_since_last_frame * a.speed_factor
 
-    return b
-}
+    //multiply with inverse bind matrices before sending off
+    for &b, i in bones {
+        b *= a.sk.inv_bind[i]
+    }
+
+    return
+}*/

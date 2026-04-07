@@ -2,16 +2,16 @@ package main
 
 //example starter project
 //can be run in one line with:
-//odin run . -out:bin/cookies.exe
+//odin run . -out:bin/cookies.exe -collection:cookies=src
 
+import "cookies:engine"
+import "cookies:window"
+import "cookies:input"
+import "cookies:scene"
+import "cookies:graphics"
+import "cookies:transform"
+import "cookies:spatial"
 import "core:fmt"
-import "engine"
-import "engine/window"
-import "engine/input"
-import "engine/scene"
-import "engine/graphics"
-import "engine/transform"
-import "engine/spatial"
 import "core:math"
 
 main_scene: scene.Scene = {name="Eve"}
@@ -33,7 +33,7 @@ my_light: graphics.Point_Light
 sun_light: graphics.Directional_Light
 spot_light: graphics.Spot_Light
 
-emantaller: engine.Scene
+emantaller: graphics.Scene
 
 brick_color: graphics.Texture
 brick_norm: graphics.Texture
@@ -84,7 +84,6 @@ screen_size: [2]f32 = {640, 400}
 
 init :: proc() {
     window.set_size(uint(screen_size.x), uint(screen_size.y))
-    engine.set_tick_rate(30)
 
     graphics.set_background_color({0.8, 0.4, 0.6})
     graphics.set_render_distance(2048.0+1024.0)
@@ -145,8 +144,8 @@ init :: proc() {
 
     text_mat = graphics.make_material(unifont.texture, filtering=false)
 
-    engine.preload("emantaller.png", #load("resources/emantaller.png"))
-    emantaller = engine.make_scene_from_file("emantaller.gltf", #load("resources/emantaller.gltf"), true)
+    graphics.preload("emantaller.png", #load("resources/emantaller.png"))
+    emantaller = graphics.make_scene_from_file("emantaller.gltf", #load("resources/emantaller.gltf"), true)
     transform.set_scale(&emantaller.active_layout.roots[0].transform, {100, 100, 100})
     transform.set_position(&emantaller.active_layout.roots[0].transform, {0, 0, -100})
 
@@ -288,7 +287,7 @@ draw :: proc(t: f64) {
     transform.translate(&text_trans, {-16*3, 0, 1})
     graphics.draw_text("Hello!!", unifont, transform.compute(&text_trans), {0, 1, 1, 1})
 
-    engine.draw_scene(&emantaller, t)
+    graphics.draw_scene(&emantaller, t)
 
     //graphics.draw_point_light(my_light)
     //graphics.draw_directional_light(sun_light)
@@ -312,8 +311,8 @@ kill :: proc() {
     graphics.delete_texture(brick_norm)
     graphics.delete_texture(brick_pbr)
 
-    engine.delete_scene(&emantaller)
-    engine.unload_files()
+    graphics.delete_scene(&emantaller)
+    graphics.unload_files()
 }
 
 import "core:mem"
@@ -323,6 +322,7 @@ main :: proc() {
     context.allocator = mem.tracking_allocator(&track)
 
     fmt.println("HEWWO!!!")
+    engine.set_tick_rate(30)
     engine.boot(init, tick, draw, kill)
 
     if len(track.allocation_map) > 0 {

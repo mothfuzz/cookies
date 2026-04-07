@@ -1,8 +1,8 @@
 package main
 
-import "../engine"
-import "../engine/window"
-import "../engine/graphics"
+import "cookies:engine"
+import "cookies:window"
+import "cookies:graphics"
 
 frasier: graphics.Texture
 

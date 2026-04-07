@@ -1,9 +1,9 @@
 package main
 
-import "../engine"
-import "../engine/window"
-import "../engine/input"
-import "../engine/audio"
+import "cookies:engine"
+import "cookies:window"
+import "cookies:input"
+import "cookies:audio"
 
 import "core:fmt"
 

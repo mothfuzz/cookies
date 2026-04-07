@@ -1,11 +1,10 @@
 package main
 
-import "../engine"
-import "../engine/window"
-import "../engine/input"
-import "../engine/graphics"
-import "../engine/transform"
-//import "../engine/arena"
+import "cookies:engine"
+import "cookies:window"
+import "cookies:input"
+import "cookies:graphics"
+import "cookies:transform"
 import "core:fmt"
 import "core:math/linalg"
 import "core:math/rand"

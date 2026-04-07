@@ -70,11 +70,34 @@ struct VSOut {
     @location(5) tint: vec4<f32>,
 }
 
+fn ident() -> mat4x4<f32> {
+    return mat4x4<f32>(
+        vec4<f32>(1.0, 0.0, 0.0, 0.0),
+        vec4<f32>(0.0, 1.0, 0.0, 0.0),
+        vec4<f32>(0.0, 0.0, 1.0, 0.0),
+        vec4<f32>(0.0, 0.0, 0.0, 1.0),
+    );
+}
+
+fn calculate_bones(vertex: Vertex) -> mat4x4<f32> {
+    if(all(vertex.weights == vec4<f32>(0.0))) {
+        return ident();
+    }
+    let inv_bind = ident();
+    let animation = array<mat4x4<f32>, 4>(ident(), ident(), ident(), ident());
+    let bone1 = animation[i32(vertex.bones.x)] * vertex.weights.x;
+    let bone2 = animation[i32(vertex.bones.y)] * vertex.weights.y;
+    let bone3 = animation[i32(vertex.bones.z)] * vertex.weights.z;
+    let bone4 = animation[i32(vertex.bones.w)] * vertex.weights.w;
+    return bone1 * bone2 * bone3 * bone4;
+}
+
 @vertex
 fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VSOut {
     var v: VSOut;
     let modelview = mat4x4<f32>(vertex.modelview_0, vertex.modelview_1, vertex.modelview_2, vertex.modelview_3);
-    v.position = modelview * vec4<f32>(vertex.position, 1.0);
+    let bones = calculate_bones(vertex);
+    v.position = modelview * bones * vec4<f32>(vertex.position, 1.0);
     v.normal = normalize((modelview * vec4<f32>(vertex.normal, 0.0)).xyz);
     v.tangent = normalize((modelview * vec4<f32>(vertex.tangent, 0.0)).xyz);
     v.out_position = camera.projection * v.position;
@@ -216,11 +239,6 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
 }
 
 
-struct TransOut {
-    @location(0) accum: vec4<f32>,
-    @location(1) revealage: f32,
-}
-
 @fragment
 fn solid_main(in: VSOut) -> @location(0) vec4<f32> {
     let base_color = textureSample(base_color, smp, in.texcoord) * in.tint;
@@ -233,6 +251,11 @@ fn solid_main(in: VSOut) -> @location(0) vec4<f32> {
     final_color = apply_lights(in, final_color);
     final_color = apply_fog(in.position, final_color);
     return final_color;
+}
+
+struct TransOut {
+    @location(0) accum: vec4<f32>,
+    @location(1) revealage: f32,
 }
 
 @fragment

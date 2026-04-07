@@ -1,7 +1,5 @@
 package graphics
 
-import "core:fmt"
-
 //'top level' draw functions go here
 //draw_mesh, draw_sprite, draw_ui, draw_lines, draw_line_strip, draw_line_loop
 

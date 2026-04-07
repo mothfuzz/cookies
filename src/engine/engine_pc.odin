@@ -5,10 +5,10 @@ import "core:fmt"
 import "core:time"
 import "vendor:sdl3"
 
-import "window"
-import "graphics"
-import "input"
-import "audio"
+import "cookies:window"
+import "cookies:graphics"
+import "cookies:input"
+import "cookies:audio"
 
 boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
     success := sdl3.Init({.VIDEO, .AUDIO})

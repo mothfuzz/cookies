@@ -49,7 +49,6 @@ calc :: proc(tri: ^Tri) {
 }
 
 import "base:runtime"
-import "core:fmt"
 make_tri_mesh :: proc(vertices: [][3]f32, indices: []u32 = nil, allocator: runtime.Allocator = context.allocator) -> (tm: Tri_Mesh) {
     tm.tris = make([dynamic]Tri, len(indices)/3, allocator)[:]
     tm.extents[0] = math.INF_F32//+infinity, -infinity
@@ -111,7 +110,6 @@ tri_line :: proc(o: [3]f32, p: [3]f32, tri: Tri) -> bool {
     return true
 }
 
-//TODO: make a little demo project and test this out.
 move :: proc(input_position: [3]f32, input_radius: f32, input_velocity: [3]f32, all_meshes: []Tri_Mesh) -> (output_velocity: [3]f32) {
     output_velocity = input_velocity
     for mesh in all_meshes {

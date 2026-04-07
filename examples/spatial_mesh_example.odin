@@ -1,19 +1,19 @@
 package main
 
-import "../engine"
-import "../engine/graphics"
-import "../engine/window"
-import "../engine/input"
+import "cookies:engine"
+import "cookies:graphics"
+import "cookies:window"
+import "cookies:input"
 
-import "../engine/transform"
-import "../engine/spatial"
+import "cookies:transform"
+import "cookies:spatial"
 
 Screen_Width :: 640
 Screen_Height :: 400
 
 cam: graphics.Camera
-testmap: engine.Scene
-ball: engine.Scene
+testmap: graphics.Scene
+ball: graphics.Scene
 ball_trans := transform.ORIGIN
 ball_velocity := [3]f32{0, 0, 0}
 Radius :: 1.0/16.0
@@ -38,8 +38,8 @@ init :: proc() {
 
     font = graphics.make_font_from_file(#load("../resources/unifont.otf"), 16)
 
-    testmap = engine.make_scene_from_file("testmap.gltf", #load("testmap.gltf"), make_tri_mesh=true)
-    ball = engine.make_scene_from_file("ball.gltf", #load("ball.gltf"))
+    testmap = graphics.make_scene_from_file("testmap.gltf", #load("testmap.gltf"), make_tri_mesh=true)
+    ball = graphics.make_scene_from_file("ball.gltf", #load("ball.gltf"))
     transform.set_position(&ball_trans, {0, 0.75, 0})
     transform.set_scale(&ball_trans, Radius*2.0)
 
@@ -111,7 +111,7 @@ tick :: proc() {
 draw :: proc(t: f64) {
     graphics.draw_directional_light(dir_light)
     graphics.draw_mesh(ball.meshes[0], ball.materials[0], transform.smooth(&ball_trans, t))
-    engine.draw_scene(&testmap, t)
+    graphics.draw_scene(&testmap, t)
     graphics.ui_draw_text("WASD to move ball", font, {-Screen_Width/2+2, Screen_Height/2}, 1)
     graphics.ui_draw_text("Arrow keys to move camera", font, {-Screen_Width/2+2, Screen_Height/2-18}, 1)
 }
