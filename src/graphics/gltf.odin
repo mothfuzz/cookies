@@ -385,7 +385,7 @@ node_from_transform :: proc(trans: ^transform.Transform) -> ^Node {
     return cast(^Node)(uintptr(trans) - offset_of(Node, transform))
 }
 
-render_node :: proc(node: ^Node, t: f64) {
+draw_node :: proc(node: ^Node, t: f64) {
     //draw self
     if node.has_renderable {
         if model, ok := node.type.(^Model); ok {
@@ -406,7 +406,7 @@ render_node :: proc(node: ^Node, t: f64) {
 }
 draw_scene :: proc(scene: ^Scene, t: f64) {
     for node in scene.active_layout.roots {
-        render_node(node, t)
+        draw_node(node, t)
     }
 }
 
