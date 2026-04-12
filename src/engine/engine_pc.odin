@@ -89,8 +89,8 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
             }
             if e.type == .MOUSE_MOTION {
                 rect := window.get_size()
-                input.mouse_position.x = i32(e.motion.x) - i32(rect.x)/2
-                input.mouse_position.y = i32(rect.y)/2 - i32(e.motion.y)
+                input.current_mouse_position.x = i32(e.motion.x) - i32(rect.x)/2
+                input.current_mouse_position.y = i32(rect.y)/2 - i32(e.motion.y)
             }
         }
         now := sdl3.GetTicks()

@@ -3,7 +3,6 @@
 package input
 
 import "vendor:sdl3"
-import "core:fmt"
 
 sdl2key :: proc(e: sdl3.Event) -> Scancode {
     #partial switch e.key.scancode {

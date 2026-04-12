@@ -1,8 +1,5 @@
 package input
 
-import "core:fmt"
-
-
 Scancode :: enum {
     Key_None,
     Key_0, Key_1, Key_2, Key_3, Key_4, Key_5, Key_6, Key_7, Key_8, Key_9,
@@ -18,14 +15,14 @@ keys_current: [Scancode]b8 = {}
 keys_pressed: [Scancode]b8 = {}
 keys_released: [Scancode]b8 = {}
 
-MouseButton :: enum {
+Mouse_Button :: enum {
     Left, Middle, Right,
 }
 
-mouse_buttons_current: [MouseButton]b8 = {}
-mouse_buttons_pressed: [MouseButton]b8 = {}
-mouse_buttons_released: [MouseButton]b8 = {}
-mouse_position: [2]i32 = {} //relative to center of window, y-negative.
+mouse_buttons_current: [Mouse_Button]b8 = {}
+mouse_buttons_pressed: [Mouse_Button]b8 = {}
+mouse_buttons_released: [Mouse_Button]b8 = {}
+current_mouse_position: [2]i32 = {} //relative to center of window, y-negative.
 
 update :: proc() {
     for &key in keys_pressed {
@@ -42,29 +39,41 @@ update :: proc() {
     }
 }
 
+@(export)
 key_down :: proc(key: Scancode) -> bool {
     return bool(keys_current[key])
 }
+@(export)
 key_up :: proc(key: Scancode) -> bool {
     return bool(!keys_current[key])
 }
+@(export)
 key_pressed :: proc(key: Scancode) -> bool {
     //return bool(keys_current_frame[key] && !keys_previous_frame[key])
     return bool(keys_pressed[key])
 }
+@(export)
 key_released :: proc(key: Scancode) -> bool {
     return bool(keys_released[key])
 }
 
-mouse_down :: proc(button: MouseButton) -> bool {
+@(export)
+mouse_down :: proc(button: Mouse_Button) -> bool {
     return bool(mouse_buttons_current[button])
 }
-mouse_up :: proc(button: MouseButton) -> bool {
+@(export)
+mouse_up :: proc(button: Mouse_Button) -> bool {
     return bool(!mouse_buttons_current[button])
 }
-mouse_pressed :: proc(button: MouseButton) -> bool {
+@(export)
+mouse_pressed :: proc(button: Mouse_Button) -> bool {
     return bool(mouse_buttons_pressed[button])
 }
-mouse_released :: proc(button: MouseButton) -> bool {
+@(export)
+mouse_released :: proc(button: Mouse_Button) -> bool {
     return bool(mouse_buttons_released[button])
+}
+@(export)
+mouse_position :: proc() -> [2]i32 {
+    return current_mouse_position
 }

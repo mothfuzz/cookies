@@ -125,7 +125,7 @@ init :: proc() {
 
 update_player :: proc() {
 
-    mouse_pos := [2]f32{f32(input.mouse_position.x), f32(input.mouse_position.y)}
+    mouse_pos := [2]f32{f32(input.mouse_position().x), f32(input.mouse_position().y)}
     player_pos := transform.get_position(&player.trans)
     mouse_vec := mouse_pos - player_pos.xy
     angle := linalg.atan2(mouse_vec.y, mouse_vec.x)

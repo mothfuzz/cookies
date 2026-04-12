@@ -14,7 +14,7 @@ Sound :: struct {
     channels: u32,
     sample_rate: u32,
 }
-PlayingSound :: struct {
+Playing_Sound :: struct {
     data: Sound,
     sound: ^ma.sound,
     audio_buffer: ^ma.audio_buffer,
@@ -22,10 +22,10 @@ PlayingSound :: struct {
 
 ctx: runtime.Context
 engine: ma.engine
-live_sounds: map[^ma.sound]PlayingSound
-dead_sounds: map[^ma.sound]PlayingSound
+live_sounds: map[^ma.sound]Playing_Sound
+dead_sounds: map[^ma.sound]Playing_Sound
 
-data_callback :: proc(userdata: rawptr, buffer: [^]u8, buffer_size_bytes: i32) {
+data_callback :: proc "c" (userdata: rawptr, buffer: [^]u8, buffer_size_bytes: i32) {
     context = (^runtime.Context)(userdata)^
     buffer_size_frames := u64(buffer_size_bytes) / u64(ma.get_bytes_per_frame(.f32, ma.engine_get_channels(&engine)))
     ma.engine_read_pcm_frames(&engine, buffer, buffer_size_frames, nil)
@@ -95,7 +95,7 @@ delete_sound :: proc(sound: Sound) {
 }
 
 @(private)
-get_new_sound :: proc() -> (playing_sound: PlayingSound) {
+get_new_sound :: proc() -> (playing_sound: Playing_Sound) {
     for key, sound in dead_sounds {
         playing_sound = sound
         //free old sound
@@ -120,7 +120,7 @@ sound_end :: proc "c" (pUserData: rawptr, pSound: ^ma.sound) {
     dead_sounds[pSound] = playing_sound
 }
 
-play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (playing_sound: PlayingSound){
+play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (playing_sound: Playing_Sound){
     playing_sound = get_new_sound()
     playing_sound.data = sound
 
@@ -149,14 +149,14 @@ play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (pl
     return
 }
 
-loop_sound :: proc(playing_sound: ^PlayingSound, looped: bool = true) {
+loop_sound :: proc(playing_sound: ^Playing_Sound, looped: bool = true) {
     if playing_sound.sound in live_sounds {
         ma.sound_set_looping(playing_sound.sound, b32(looped))
     } else {
         playing_sound^ = play_sound(playing_sound.data, looped)
     }
 }
-sound_is_looping :: proc(playing_sound: ^PlayingSound) -> bool {
+sound_is_looping :: proc(playing_sound: ^Playing_Sound) -> bool {
     if playing_sound.sound in live_sounds {
         return bool(ma.sound_is_looping(playing_sound.sound))
     } else {
@@ -164,7 +164,7 @@ sound_is_looping :: proc(playing_sound: ^PlayingSound) -> bool {
     }
 }
 
-stop_sound :: proc(playing_sound: ^PlayingSound, finish_playing: bool = false) {
+stop_sound :: proc(playing_sound: ^Playing_Sound, finish_playing: bool = false) {
     if playing_sound.sound in live_sounds {
         if finish_playing {
             ma.sound_set_looping(playing_sound.sound, false)
@@ -178,14 +178,14 @@ stop_sound :: proc(playing_sound: ^PlayingSound, finish_playing: bool = false) {
     }
 }
 
-sound_is_playing :: proc(playing_sound: ^PlayingSound) -> bool {
+sound_is_playing :: proc(playing_sound: ^Playing_Sound) -> bool {
     if playing_sound.sound in live_sounds {
         return bool(ma.sound_is_playing(playing_sound.sound))
     }
     return false
 }
 
-pause_sound :: proc(playing_sound: ^PlayingSound, fade_out: uint = 0) {
+pause_sound :: proc(playing_sound: ^Playing_Sound, fade_out: uint = 0) {
     if playing_sound.sound in live_sounds {
         if fade_out > 0 {
             ma.sound_stop_with_fade_in_milliseconds(playing_sound.sound, u64(fade_out))
@@ -194,7 +194,7 @@ pause_sound :: proc(playing_sound: ^PlayingSound, fade_out: uint = 0) {
         }
     }
 }
-resume_sound :: proc(playing_sound: ^PlayingSound, fade_in: uint = 0) {
+resume_sound :: proc(playing_sound: ^Playing_Sound, fade_in: uint = 0) {
     if playing_sound.sound in live_sounds {
         ma.sound_set_stop_time_in_milliseconds(playing_sound.sound, ~u64(0)) //workaround for if sound was scheduled to stop
         if fade_in > 0 {

@@ -65,6 +65,7 @@ reset :: proc "contextless" (node: ^Transform) {
     //node.prev_world_trans = node.next_world_trans
 }
 
+@(private)
 update_root :: proc "contextless" (node: ^Transform, reset: bool = false) {
     if node == nil {
         return
@@ -76,6 +77,7 @@ update_root :: proc "contextless" (node: ^Transform, reset: bool = false) {
     }
 }
 
+@(private)
 update :: proc "contextless" (node: ^Transform, dirty: bool = false, reset: bool = false) {
     if node == nil {
         return
@@ -113,6 +115,7 @@ extract :: proc "contextless" (m: matrix[4, 4]f32) -> (position: [3]f32, orienta
     return
 }
 
+@(private)
 interp :: proc "contextless" (trans: ^Transform, t: f32) -> (position: [3]f32, orientation: quaternion128, scale: [3]f32) {
     prev_position, prev_orientation, prev_scale := extract(trans.prev_world_trans)
     next_position, next_orientation, next_scale := extract(trans.next_world_trans)

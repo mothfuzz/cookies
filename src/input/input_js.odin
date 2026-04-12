@@ -2,9 +2,7 @@
 
 package input
 
-import "../window"
 import "core:sys/wasm/js"
-import "core:fmt"
 
 js2key :: proc(e: js.Event) -> Scancode {
     //will need to find some way to get the actual key from this. e.g. for UI purposes.
@@ -75,7 +73,4 @@ js2key :: proc(e: js.Event) -> Scancode {
     case "ArrowDown": return .Key_Down
     }
     return .Key_None
-}
-
-init :: proc() {
 }

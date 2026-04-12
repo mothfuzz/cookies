@@ -232,8 +232,8 @@ tick :: proc() {
     }
     if input.mouse_down(.Left) {
         //fmt.println("click!!!", accumulator)
-        fmt.println(input.mouse_position)
-        transform.set_position(&triangle_trans, {f32(input.mouse_position.x), f32(input.mouse_position.y), 0})
+        fmt.println(input.mouse_position())
+        transform.set_position(&triangle_trans, {f32(input.mouse_position().x), f32(input.mouse_position().y), 0})
     }
     if input.mouse_pressed(.Right) {
         fmt.println("right click!!!", accumulator)
@@ -261,7 +261,6 @@ tick :: proc() {
 }
 
 draw :: proc(t: f64) {
-
     screen_size.x = f32(window.get_size().x)
     screen_size.y = f32(window.get_size().y)
     graphics.set_viewport(&cam, {0, 0, screen_size.x/2, screen_size.y})

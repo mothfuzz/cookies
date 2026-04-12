@@ -8,11 +8,11 @@ import "cookies:audio"
 import "core:fmt"
 
 bonk: audio.Sound
-bonk_playing: audio.PlayingSound
+bonk_playing: audio.Playing_Sound
 music: [dynamic]audio.Sound = {}
 now_playing: int = 0
-now_playing_sound: audio.PlayingSound
-previously_playing_sound: audio.PlayingSound
+now_playing_sound: audio.Playing_Sound
+previously_playing_sound: audio.Playing_Sound
 
 init :: proc() {
     bonk = audio.make_sound_from_file(#load("bonk.wav"))

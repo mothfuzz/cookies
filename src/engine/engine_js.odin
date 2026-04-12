@@ -1,7 +1,6 @@
 #+build js
 package engine
 
-import "base:runtime"
 import "core:time"
 import "core:sys/wasm/js"
 
@@ -9,8 +8,6 @@ import "cookies:window"
 import "cookies:graphics"
 import "cookies:input"
 import "cookies:audio"
-
-main_context: runtime.Context
 
 user_init: proc() = nil
 user_tick: proc() = nil
@@ -22,9 +19,7 @@ initialized: bool = false
 accumulator: f64 = 0
 interpolator: time.Tick = {}
 
-@(export)
-step :: proc "c" (delta_time: f64) -> bool {
-    context = main_context
+step :: proc(delta_time: f64) -> bool {
     if !graphics.ren.ready {
         _ = time.tick_lap_time(&interpolator)
         return true
@@ -89,7 +84,6 @@ resize_event :: proc(e: js.Event) {
 }
 
 boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
-    main_context = context
 
     user_init = init
     user_tick = tick

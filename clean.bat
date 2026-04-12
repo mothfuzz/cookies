@@ -10,3 +10,6 @@ for %%a in ("bin\*.wasm") do (
 )
 
 del bin\*.js
+del bin\cookies.dll
+del bin\cookies.lib
+del bin\cookies.exp

@@ -6,11 +6,6 @@ package engine
 //import "cookies:input"
 //import "cookies:audio"
 
-@(init)
-init_dylib :: proc "contextless" () {
-    //actually this might be better handled by the modules themselves
-}
-
 //skyhooks!
 /*init_hooks := make([dynamic]proc())
 pre_tick_hooks := make([dynamic]proc())
@@ -20,6 +15,7 @@ draw_hooks := make([dynamic]proc(f64))
 quit_hooks := make([dynamic]proc())*/
 
 tick_rate : uint = 125
+@(export)
 set_tick_rate :: proc(new_tick_rate: uint) {
     tick_rate = new_tick_rate
 }
