@@ -3,6 +3,7 @@ package graphics
 import "cookies:transform"
 
 Bone :: struct {
+    name: string,
     node: ^transform.Transform,
     inv_bind: matrix[4,4]f32,
 }

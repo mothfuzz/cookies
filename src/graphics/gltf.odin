@@ -295,8 +295,11 @@ load_skeleton :: proc(data: ^cgltf.data, scene: ^Scene, skin: cgltf.skin) -> (sk
         fmt.eprintln("failed to load all inverse bind matrices!")
     }
     for joint, i in skin.joints {
-        mem.copy(&sk.bones[i].inv_bind, &inv_binds[i*16], size_of(matrix[4,4]f32))
-        sk.bones[i].node = &scene.nodes[cgltf.node_index(data, joint)].transform
+        bone := &sk.bones[i]
+        mem.copy(&bone.inv_bind, &inv_binds[i*16], size_of(matrix[4,4]f32))
+        node := &scene.nodes[cgltf.node_index(data, joint)]
+        bone.node = &node.transform
+        bone.name = string(node.name)
         if joint == skin.skeleton {
             sk.root = i
         }
