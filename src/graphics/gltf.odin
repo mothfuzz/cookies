@@ -6,6 +6,7 @@ import "vendor:cgltf"
 import "core:strings"
 import "core:encoding/base64"
 import "core:slice"
+import "core:mem"
 
 Loaded_File :: struct {
     data: []u8,
@@ -103,8 +104,8 @@ Scene :: struct {
     colliders: []spatial.Tri_Mesh,
     textures: []Texture,
     materials: []Material,
-    //skeletons: []Skeleton, //'skins'
-    //animations: []Animation,
+    skeletons: []Skeleton, //'skins'
+    animations: []Animation,
     cameras: []Camera,
     lights: []Light,
     //actual scene
@@ -238,22 +239,70 @@ load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: Mes
     return
 }
 
-/*@(private)
-load_skeleton :: proc(skin: cgltf.skin) -> (sk: Skeleton) {
-    size_f32 := cgltf.accessor_unpack_floats(skin.inverse_bind_matrices, nil, 0)
-    floats := make([]f32, size_f32)
-    
-    if cgltf.accessor_unpack_floats(skin.inverse_bind_matrices, raw_data(floats), size_f32) < size_f32 {
+@(private)
+load_animation :: proc(data: ^cgltf.data, scene: ^Scene, animation: cgltf.animation) -> (a: Animation) {
+    a.name = string(animation.name)
+    a.channels = make([]Animation_Channel, len(animation.channels))
+    for channel, i in animation.channels {
+        out_channel := &a.channels[i]
+        input_len := cgltf.accessor_unpack_floats(channel.sampler.input, nil, 0)
+        out_channel.input = make([]f32, input_len)
+        output_tmp: [^]f32
+        if cgltf.accessor_unpack_floats(channel.sampler.input, raw_data(out_channel.input), input_len) < input_len {
+            fmt.eprintln("failed to load all input keyframes!")
+        }
+        output_len := cgltf.accessor_unpack_floats(channel.sampler.output, nil, 0)
+        //copy data into the animation itself, easier on the brain.
+        switch channel.target_path {
+        case .translation:
+            out_channel.output = make(Keyframes_Translation, output_len/3)
+            output_tmp = &out_channel.output.(Keyframes_Translation)[0].x
+        case .rotation:
+            out_channel.output = make(Keyframes_Rotation, output_len/4)
+            output_tmp = &out_channel.output.(Keyframes_Rotation)[0].x
+        case .scale:
+            out_channel.output = make(Keyframes_Scale, output_len/3)
+            output_tmp = &out_channel.output.(Keyframes_Scale)[0].x
+        case .weights:
+            //out_channel.output = make(Keyframes_Weights, ...)
+            //not supported
+        case .invalid:
+            fmt.eprintln("invalid animation path type!")
+        }
+        if cgltf.accessor_unpack_floats(channel.sampler.output, output_tmp, output_len) < output_len {
+            fmt.eprintln("failed to load all output keyframes!")
+        }
+        switch channel.sampler.interpolation {
+        case .linear:
+            out_channel.interp = .Linear
+        case .step:
+            out_channel.interp = .Step
+        case .cubic_spline:
+            //out_channel.interp = .Cubic_Spline
+            //not supported
+        }
+        out_channel.target_node = &scene.nodes[cgltf.node_index(data, channel.target_node)].transform
+    }
+    return
+}
+
+@(private)
+load_skeleton :: proc(data: ^cgltf.data, scene: ^Scene, skin: cgltf.skin) -> (sk: Skeleton) {
+    sk.bones = make([]Bone, len(skin.joints))
+    inv_binds: []f32 = make([]f32, len(skin.joints)*16)
+    defer delete(inv_binds)
+    if cgltf.accessor_unpack_floats(skin.inverse_bind_matrices, raw_data(inv_binds), len(inv_binds)) < len(inv_binds) {
         fmt.eprintln("failed to load all inverse bind matrices!")
     }
-
-    sk.inv_bind = mem.slice_data_cast([]matrix[4,4]f32, floats)
-
-    sk.bones = make([]Bone, len(sk.inv_bind))
-    //how do get bones???
-    
+    for joint, i in skin.joints {
+        mem.copy(&sk.bones[i].inv_bind, &inv_binds[i*16], size_of(matrix[4,4]f32))
+        sk.bones[i].node = &scene.nodes[cgltf.node_index(data, joint)].transform
+        if joint == skin.skeleton {
+            sk.root = i
+        }
+    }
     return
-}*/
+}
 
 make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: bool = false) -> (scene: Scene) {
 
@@ -317,11 +366,6 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
         }
     }
 
-    //scene.skeletons = make([]Skeleton, len(data.skins))
-    //for skin, i in data.skins {
-        //scene.skeletons[i] = load_skeleton(skin)
-    //}
-
     //load scene
     scene.nodes = make([]Node, len(data.nodes))
     for &node in scene.nodes {
@@ -376,6 +420,17 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
         }
     }
     scene.active_layout = &scene.layouts[cgltf.scene_index(data, data.scene)]
+
+    //now that we have nodes loaded, load animation data
+    scene.animations = make([]Animation, len(data.animations))
+    for animation, i in data.animations {
+        scene.animations[i] = load_animation(data, &scene, animation)
+    }
+    scene.skeletons = make([]Skeleton, len(data.skins))
+    for skin, i in data.skins {
+        scene.skeletons[i] = load_skeleton(data, &scene, skin)
+    }
+    
 
     cgltf.free(data)
     return
@@ -441,14 +496,14 @@ delete_scene :: proc(scene: ^Scene) {
         delete_camera(camera)
     }
 
-    /*for &skeleton in scene.skeletons {
+    for &skeleton in scene.skeletons {
         delete_skeleton(skeleton)
     }
     delete(scene.skeletons)
     for &animation in scene.animations {
         delete_animation(animation)
     }
-    delete(scene.animations)*/
+    delete(scene.animations)
 
     //delete(scene.cameras)
     //delete(scene.lights)
