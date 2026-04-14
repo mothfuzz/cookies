@@ -24,7 +24,7 @@ Animation_Channel :: struct {
     input: []f32, //timestamps
     output: Keyframes, //values at said timestamps
     interp: Interpolation,
-    target_node: ^transform.Transform,
+    target_node: uint,
 }
 Animation :: struct {
     name: string,

@@ -192,17 +192,32 @@ get_orientation_quaternion :: proc "contextless" (trans: ^Transform) -> quaterni
     return r
 }
 
-scale :: proc "contextless" (trans: ^Transform, scale: [3]f32) {
+scale_nonuniform :: proc "contextless" (trans: ^Transform, scale: [3]f32) {
     trans.scale *= scale
     trans.dirty = true
 }
-set_scale :: proc "contextless" (trans: ^Transform, scale: [3]f32, interpolate: bool = false) {
+scale_uniform :: proc "contextless" (trans: ^Transform, scale: f32) {
+    trans.scale *= scale
+    trans.dirty = true
+}
+scale :: proc{scale_nonuniform, scale_uniform}
+
+set_scale_nonuniform :: proc "contextless" (trans: ^Transform, scale: [3]f32, interpolate: bool = false) {
     trans.scale = scale
     trans.dirty = true
     if !interpolate {
         reset(trans)
     }
 }
+set_scale_uniform :: proc "contextless" (trans: ^Transform, scale: f32, interpolate: bool = false) {
+    trans.scale = {scale, scale, scale}
+    trans.dirty = true
+    if !interpolate {
+        reset(trans)
+    }
+}
+set_scale :: proc{set_scale_nonuniform, set_scale_uniform}
+
 get_scale :: proc "contextless" (trans: ^Transform) -> [3]f32 {
     t, r, s := extract(trans.prev_world_trans)
     return s

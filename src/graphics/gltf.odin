@@ -78,41 +78,98 @@ load :: proc(path: cstring) -> []u8 {
 import "cookies:transform"
 import "cookies:spatial"
 
-Node_Type :: union {
-    ^Model,
-    ^Camera,
-    ^Light,
+Node_Type :: enum {
+    Node, //i.e. non-renderable
+    Model,
+    Camera,
+    Light,
 }
 
 Node :: struct {
     name: string,
     transform: transform.Transform,
-    has_renderable: bool,
+    parent_node: uint, //for easier copying
     type: Node_Type,
+    data: uint, //index into Models/Cameras/Lights
 }
 
 //a 'scene' is merely an arrangment of assets.
 Layout :: struct {
     name: string,
-    roots: []^Node,
+    roots: []uint,
 }
+
 
 Scene :: struct {
     //assets
-    models: []Model, //'meshes'
     meshes: []Mesh, //'primitives'
     colliders: []spatial.Tri_Mesh,
     textures: []Texture,
     materials: []Material,
     skeletons: []Skeleton, //'skins'
     animations: []Animation,
+    //instanced data
+    copied: bool,
+    models: []Model, //'meshes'
     cameras: []Camera,
     lights: []Light,
     //actual scene
     name: string,
     nodes: []Node,
     layouts: []Layout, //'scenes'
-    active_layout: ^Layout,
+    active_layout: uint,
+}
+
+copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
+    //assets
+    s.meshes = scene.meshes
+    s.colliders = scene.colliders
+    s.textures = scene.textures
+    s.materials = scene.materials
+    s.skeletons = scene.skeletons
+    s.animations = scene.animations
+    //instanced data
+    s.copied = true
+    s.models = make([]Model, len(scene.models))
+    for &model, i in s.models {
+        model.materials = make([]^Material, len(scene.models[i].materials))
+        copy(model.materials, scene.models[i].materials)
+        model.meshes = make([]^Mesh, len(scene.models[i].meshes))
+        copy(model.meshes, scene.models[i].meshes)
+    }
+    s.cameras = make([]Camera, len(scene.cameras))
+    copy(s.cameras, scene.cameras)
+    s.lights = make([]Light, len(scene.lights))
+    copy(s.lights, scene.lights)
+    //actual scene
+    if new_name != "" {
+        s.name = new_name
+    } else {
+        s.name = scene.name
+    }
+    s.nodes = make([]Node, len(scene.nodes))
+    copy(s.nodes, scene.nodes)
+    //have to do this in 2 passes to preserve relationships
+    for &node in s.nodes {
+        //can't use 'unlink' bc we don't want to mess up the original's hierarchy
+        node.transform.first_child = nil
+        node.transform.last_child = nil
+        node.transform.prev_sibling = nil
+        node.transform.next_sibling = nil
+    }
+    for &node in s.nodes {
+        if node.transform.parent != nil {
+            transform.link(&s.nodes[node.parent_node].transform, &node.transform)
+        }
+    }
+    s.layouts = make([]Layout, len(scene.layouts))
+    for &layout, i in s.layouts {
+        layout.roots = make([]uint, len(scene.layouts[i].roots))
+        copy(layout.roots, scene.layouts[i].roots)
+    }
+    s.active_layout = scene.active_layout
+    
+    return
 }
 
 @(private)
@@ -281,7 +338,7 @@ load_animation :: proc(data: ^cgltf.data, scene: ^Scene, animation: cgltf.animat
             //out_channel.interp = .Cubic_Spline
             //not supported
         }
-        out_channel.target_node = &scene.nodes[cgltf.node_index(data, channel.target_node)].transform
+        out_channel.target_node = cgltf.node_index(data, channel.target_node)
     }
     return
 }
@@ -297,11 +354,10 @@ load_skeleton :: proc(data: ^cgltf.data, scene: ^Scene, skin: cgltf.skin) -> (sk
     for joint, i in skin.joints {
         bone := &sk.bones[i]
         mem.copy(&bone.inv_bind, &inv_binds[i*16], size_of(matrix[4,4]f32))
-        node := &scene.nodes[cgltf.node_index(data, joint)]
-        bone.node = &node.transform
-        bone.name = string(node.name)
+        node := cgltf.node_index(data, joint)
+        bone.node = node
         if joint == skin.skeleton {
-            sk.root = i
+            sk.root = uint(i)
         }
     }
     return
@@ -327,8 +383,8 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
         return
     }
 
-    //TODO: load lights...
-    //TODO: load cameras...
+    // TODO: load lights...
+    // TODO: load cameras...
 
     scene.textures = make([]Texture, len(data.images))
     for image, i in data.images {
@@ -377,6 +433,7 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
     for node, i in data.nodes {
         if node.parent != nil {
             p := cgltf.node_index(data, node.parent)
+            scene.nodes[i].parent_node = p //otherwise 0
             transform.link(&scene.nodes[p].transform, &scene.nodes[i].transform) //this should work but if it doesn't I guess I'll fix it
         }
         if node.has_matrix {
@@ -399,30 +456,31 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
                 transform.set_scale(&scene.nodes[i].transform, node.scale)
             }
         }
+        scene.nodes[i].type = .Node //by default
         if node.mesh != nil {
             index := cgltf.mesh_index(data, node.mesh)
-            scene.nodes[i].type = &scene.models[index]
-            scene.nodes[i].has_renderable = true
+            scene.nodes[i].type = .Model
+            scene.nodes[i].data = index
         }
         if node.camera != nil {
             index := cgltf.camera_index(data, node.camera)
-            scene.nodes[i].type = &scene.cameras[index]
-            scene.nodes[i].has_renderable = true
+            scene.nodes[i].type = .Camera
+            scene.nodes[i].data = index
         }
         if node.light != nil {
             index := cgltf.light_index(data, node.light)
-            scene.nodes[i].type = &scene.lights[index]
-            scene.nodes[i].has_renderable = true
+            scene.nodes[i].type = .Light
+            scene.nodes[i].data = index
         }
     }
     scene.layouts = make([]Layout, len(data.scenes))
     for layout, i in data.scenes {
-        scene.layouts[i].roots = make([]^Node, len(layout.nodes))
+        scene.layouts[i].roots = make([]uint, len(layout.nodes))
         for node, j in layout.nodes {
-            scene.layouts[i].roots[j] = &scene.nodes[cgltf.node_index(data, node)]
+            scene.layouts[i].roots[j] = cgltf.node_index(data, node)
         }
     }
-    scene.active_layout = &scene.layouts[cgltf.scene_index(data, data.scene)]
+    scene.active_layout = cgltf.scene_index(data, data.scene)
 
     //now that we have nodes loaded, load animation data
     scene.animations = make([]Animation, len(data.animations))
@@ -434,7 +492,6 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
         scene.skeletons[i] = load_skeleton(data, &scene, skin)
     }
     
-
     cgltf.free(data)
     return
 }
@@ -443,73 +500,86 @@ node_from_transform :: proc(trans: ^transform.Transform) -> ^Node {
     return cast(^Node)(uintptr(trans) - offset_of(Node, transform))
 }
 
-draw_node :: proc(node: ^Node, t: f64) {
+draw_node :: proc(scene: ^Scene, node: ^Node, t: f64) {
     //draw self
-    if node.has_renderable {
-        if model, ok := node.type.(^Model); ok {
-            draw_model(model^, transform.smooth(&node.transform, t))
-            //draw_model(model^, transform.compute(&node.transform))
-        }
-        //TODO: light
-        //TODO: camera...?
+    switch node.type {
+    case .Node:
+    case .Model:
+        draw_model(scene.models[node.data], transform.smooth(&node.transform, t))
+    case .Camera:
+        //...
+    case .Light:
+        //...
     }
     //draw immediate sibling (will trigger subsequent draws)
     if node.transform.next_sibling != nil {
-        draw_node(node_from_transform(node.transform.next_sibling), t)
+        draw_node(scene, node_from_transform(node.transform.next_sibling), t)
     }
     //draw first child (will trigger subsequent draws)
     if node.transform.first_child != nil {
-        draw_node(node_from_transform(node.transform.first_child), t)
+        draw_node(scene, node_from_transform(node.transform.first_child), t)
     }
 }
 draw_scene :: proc(scene: ^Scene, t: f64) {
-    for node in scene.active_layout.roots {
-        draw_node(node, t)
+    for i in scene.layouts[scene.active_layout].roots {
+        draw_node(scene, &scene.nodes[i], t)
     }
 }
 
-draw_instance :: proc(scene: ^Scene, t: f64, trans: matrix[4,4]f32 = 1, anim: Animation_State) {
-    // TODO
-    draw_scene(scene, t)
+link_scene_transform :: proc(scene: ^Scene, parent: ^transform.Transform) {
+    for i in scene.layouts[scene.active_layout].roots {
+        node := &scene.nodes[i]
+        transform.link(parent, &node.transform)
+    }
+}
+unlink_scene_transform :: proc(scene: ^Scene) {
+    for i in scene.layouts[scene.active_layout].roots {
+        node := &scene.nodes[i]
+        transform.unlink(&node.transform)
+    }
 }
 
 delete_scene :: proc(scene: ^Scene) {
-    for &texture in scene.textures {
-        delete_texture(texture)
+    if !scene.copied {
+        for &texture in scene.textures {
+            delete_texture(texture)
+        }
+        delete(scene.textures)
+        for &mesh in scene.meshes {
+            delete_mesh(mesh)
+        }
+        delete(scene.meshes)
+        for &material in scene.materials {
+            delete_material(material)
+        }
+        delete(scene.materials)
+        for &tri_mesh in scene.colliders {
+            spatial.delete_tri_mesh(tri_mesh)
+        }
+        delete(scene.colliders)
+        for &skeleton in scene.skeletons {
+            delete_skeleton(skeleton)
+        }
+        delete(scene.skeletons)
+        for &animation in scene.animations {
+            delete_animation(animation)
+        }
+        delete(scene.animations)
     }
-    delete(scene.textures)
-    for &mesh in scene.meshes {
-        delete_mesh(mesh)
-    }
-    delete(scene.meshes)
-    for &material in scene.materials {
-        delete_material(material)
-    }
-    delete(scene.materials)
+
     for &model in scene.models {
         delete(model.meshes)
         delete(model.materials)
     }
     delete(scene.models)
-    for &tri_mesh in scene.colliders {
-        spatial.delete_tri_mesh(tri_mesh)
-    }
-    delete(scene.colliders)
-    for &camera in scene.cameras {
+    /*for &camera in scene.cameras {
         delete_camera(camera)
     }
-
-    for &skeleton in scene.skeletons {
-        delete_skeleton(skeleton)
+    delete(scene.cameras)
+    for &light in scene.lights {
+        delete_light(scene.lights)
     }
-    delete(scene.skeletons)
-    for &animation in scene.animations {
-        delete_animation(animation)
-    }
-    delete(scene.animations)
-
-    //delete(scene.cameras)
-    //delete(scene.lights)
+    delete(scene.lights)*/
 
     for &layout in scene.layouts {
         delete(layout.roots)

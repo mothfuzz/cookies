@@ -34,6 +34,10 @@ sun_light: graphics.Directional_Light
 spot_light: graphics.Spot_Light
 
 emantaller: graphics.Scene
+cheese1: graphics.Scene
+cheese1_trans := transform.ORIGIN
+cheese2: graphics.Scene
+cheese2_trans := transform.ORIGIN
 
 brick_color: graphics.Texture
 brick_norm: graphics.Texture
@@ -145,12 +149,15 @@ init :: proc() {
     text_mat = graphics.make_material(unifont.texture, filtering=false)
 
     graphics.preload("emantaller.png", #load("resources/emantaller.png"))
-    emantaller = graphics.make_scene_from_file("emantaller.gltf", #load("resources/emantaller.gltf"), true)
-    transform.set_scale(&emantaller.active_layout.roots[0].transform, {100, 100, 100})
-    transform.set_position(&emantaller.active_layout.roots[0].transform, {0, 0, -100})
-
-    spatial.transform_tri_mesh(&emantaller.colliders[0], transform.compute(&emantaller.active_layout.roots[0].transform))
-    fmt.println(emantaller.colliders[0])
+    emantaller = graphics.make_scene_from_file("emantaller.gltf", #load("resources/emantaller.gltf"))
+    cheese1 = graphics.copy_scene(&emantaller)
+    graphics.link_scene_transform(&cheese1, &cheese1_trans)
+    transform.set_scale(&cheese1_trans, 100)
+    transform.set_position(&cheese1_trans, {0, 0, -100})
+    cheese2 = graphics.copy_scene(&emantaller)
+    graphics.link_scene_transform(&cheese2, &cheese2_trans)
+    transform.set_scale(&cheese2_trans, 500)
+    transform.set_position(&cheese2_trans, {0, 0, -500})
 
     my_light = graphics.make_point_light({0, -160, -320}, 600, {1, 1, 0, 1})
     sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 1})
@@ -257,7 +264,7 @@ tick :: proc() {
     graphics.look_to(&cam2, {camera_pos.x+offset_x, camera_pos.y, camera_pos.z+offset_z}, forward)
 
 
-    transform.rotatey(&emantaller.active_layout.roots[0].transform, 0.01)
+    transform.rotatey(&cheese1_trans, 0.01)
 }
 
 draw :: proc(t: f64) {
@@ -286,7 +293,8 @@ draw :: proc(t: f64) {
     transform.translate(&text_trans, {-16*3, 0, 1})
     graphics.draw_text("Hello!!", unifont, transform.compute(&text_trans), {0, 1, 1, 1})
 
-    graphics.draw_scene(&emantaller, t)
+    graphics.draw_scene(&cheese1, t)
+    graphics.draw_scene(&cheese2, t)
 
     //graphics.draw_point_light(my_light)
     //graphics.draw_directional_light(sun_light)
@@ -311,6 +319,8 @@ kill :: proc() {
     graphics.delete_texture(brick_pbr)
 
     graphics.delete_scene(&emantaller)
+    graphics.delete_scene(&cheese1)
+    graphics.delete_scene(&cheese2)
     graphics.unload_files()
 }
 
