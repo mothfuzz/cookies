@@ -47,13 +47,18 @@ delete_animation :: proc(animation: Animation) {
     delete(animation.channels)
 }
 
+Animation_Channel_Instance :: struct {
+    current_frame: uint,
+}
+
 Animation_Instance :: struct {
-    anim: Animation,
-    current_time: f64,
-    current_frame: int,
+    //anim: uint, //not needed as it maps 1:1 with scene.animations
+    current_time: f32,
+    duration: f32, //max channel input timestamp
     playing: bool,
     looping: bool,
-    speed: f64,
+    speed: f32,
+    channels: []Animation_Channel_Instance,
 }
 
 Animation_State :: struct {
@@ -61,18 +66,73 @@ Animation_State :: struct {
 }
 
 animate :: proc(scene: ^Scene) -> (anim: Animation_State) {
-    //anim.animations = make([]Animation_Instance, len(scene.animations))
-    for &a, i in anim.animations {
-        //a.anim = scene.animations[i]
-        a.speed = 1.0
+    anim.animations = make([]Animation_Instance, len(scene.animations))
+    //set duration to maximum timestamp
+    for &a, i in scene.animations {
+        anim.animations[i].channels = make([]Animation_Channel_Instance, len(a.channels))
+        for &c in a.channels {
+            for timestamp in c.input {
+                if timestamp > anim.animations[i].duration {
+                    anim.animations[i].duration = timestamp
+                }
+            }
+        }
     }
     return
 }
 
-play :: proc(a: ^Animation_State, id: int, looping: bool = false, speed: f64 = 1.0) {
+@(private)
+progress :: proc(scene: ^Scene, a: ^Animation_State, dt: f64) {
+    for &a, i in a.animations {
+        if a.playing {
+            a.current_time = a.current_time + f32(dt) * a.speed
+            //animate individual channels...
+            source_channels := &scene.animations[i].channels
+            for &channel, c in a.channels {
+                source_channel := &source_channels[c]
+                if a.speed > 0 {
+                    if a.current_time > a.duration {
+                        if a.looping {
+                            a.current_time = 0
+                            channel.current_frame = 0
+                        } else {
+                            a.current_time = a.duration
+                            channel.current_frame = len(source_channel.input)
+                        }
+                    } else {
+                        next_frame := min(channel.current_frame + 1, uint(len(source_channel.input)))
+                        if a.current_time > source_channel.input[next_frame] {
+                            channel.current_frame = next_frame
+                        }
+                    }
+                }
+                if a.speed < 0 {
+                    if a.current_time < 0 {
+                        if a.looping {
+                            a.current_time = a.duration
+                            channel.current_frame = len(source_channel.input)
+                        } else {
+                            a.current_time = 0
+                            channel.current_frame = 0
+                        }
+                    } else {
+                        prev_frame := max(channel.current_frame - 1, 0)
+                        if a.current_time < source_channel.input[prev_frame] {
+                            channel.current_frame = prev_frame
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+play :: proc(a: ^Animation_State, id: int, looping: bool = false, speed: f32 = 1.0) {
     anim := &a.animations[id]
     anim.current_time = 0
-    anim.current_frame = 0
+    for &c in anim.channels {
+        c.current_frame = 0
+    }
     anim.playing = true
     anim.looping = looping
     anim.speed = speed
@@ -81,7 +141,9 @@ stop :: proc(a: ^Animation_State, id: int) {
     anim := &a.animations[id]
     anim.playing = false
     anim.current_time = 0
-    anim.current_frame = 0
+    for &c in anim.channels {
+        c.current_frame = 0
+    }
 }
 pause :: proc(a: ^Animation_State, id: int) {
     a.animations[id].playing = false

@@ -10,7 +10,7 @@ import "cookies:graphics"
 import "cookies:input"
 import "cookies:audio"
 
-boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
+boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
     success := sdl3.Init({.VIDEO, .AUDIO})
     if !success {
         fmt.panicf("Unable to initialize SDL3")
@@ -36,8 +36,10 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
 
     then := sdl3.GetTicks()
     accumulator: f64 = 0
-    interpolator: time.Tick = {}
-    _ = time.tick_lap_time(&interpolator)
+    frame_interpolator: time.Tick = {}
+    tick_interpolator: time.Tick = {}
+    _ = time.tick_lap_time(&frame_interpolator)
+    _ = time.tick_lap_time(&tick_interpolator)
     main_loop: for {
         e: sdl3.Event
         for sdl3.PollEvent(&e) {
@@ -93,11 +95,12 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
                 input.current_mouse_position.y = i32(rect.y)/2 - i32(e.motion.y)
             }
         }
+        _ = time.tick_lap_time(&frame_interpolator)
         now := sdl3.GetTicks()
         accumulator += f64(now - then)
         then = now //when will then be now? soon.
         for ; accumulator > 0; accumulator -= 1000.0/f64(tick_rate) {
-            _ = time.tick_lap_time(&interpolator)
+            _ = time.tick_lap_time(&tick_interpolator)
             /*for hook in pre_tick_hooks {
                 hook()
             }*/
@@ -109,11 +112,12 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
             }*/
             input.update()
         }
-        t := time.duration_seconds(time.tick_since(interpolator))*f64(tick_rate)
+        delta := time.duration_seconds(time.tick_since(frame_interpolator))
+        alpha := time.duration_seconds(time.tick_since(tick_interpolator)) * f64(tick_rate)
         if draw != nil {
-            draw(t)
+            draw(alpha, delta)
         }
-        graphics.render(t)
+        graphics.render(alpha)
         /*for hook in draw_hooks {
             hook(t)
         }*/

@@ -2,7 +2,6 @@ package scene
 
 import "core:fmt"
 import "base:runtime"
-import "core:sync"
 
 Handler :: distinct proc(self: ^Actor, message: ^Event)
 
@@ -13,9 +12,9 @@ Event :: struct {
 Mailbox :: struct {
     handler: Handler,
     //double-buffered
-    queue_mutex: sync.Mutex,
     queue: [dynamic]Event,
     inbox: [dynamic]Event,
+    using mailbox_sync: Mailbox_Sync,
 }
 
 @(private)
@@ -34,10 +33,9 @@ Unsubscribe :: struct {
 Post_Office :: struct {
     routes: map[string]map[ActorId]^Mailbox, //must be pointer because queue_mutex must not change location
     subscriptions: map[ActorId]map[string]struct{},
-    subscribes_mutex: sync.Mutex,
     subscribes: [dynamic]Subscribe,
-    unsubscribes_mutex: sync.Mutex,
     unsubscribes: [dynamic]Unsubscribe,
+    using post_office_sync: Post_Office_Sync,
 }
 
 delete_post_office :: proc(po: ^Post_Office) {
@@ -65,38 +63,6 @@ get_event_type :: proc($E: typeid) -> (typename: string, ok: bool) {
     return fmt.tprintf("%s.%s", named_type.pkg, named_type.name), true
 }
 
-when ODIN_OS == .JS {
-    subscribe :: proc(po: ^Post_Office, id: ActorId, $E: typeid, handler: Handler) {
-        if typename, ok := get_event_type(E); ok {
-            append(&po.subscribes, Subscribe{typename, id, handler})
-        } else {
-            fmt.eprintln("Event must be a named type.")
-        }
-    }
-    unsubscribe :: proc(po: ^Post_Office, id: ActorId, $E: typeid) {
-        if typename, ok := get_event_type(E); ok {
-            append(&po.subscribes, Subscribe{typename, id})
-        }
-    }
-} else {
-    subscribe :: proc(po: ^Post_Office, id: ActorId, $E: typeid, handler: Handler) {
-        if typename, ok := get_event_type(E); ok {
-            if sync.mutex_guard(&po.subscribes_mutex) {
-                append(&po.subscribes, Subscribe{typename, id, handler})
-            }
-        } else {
-            fmt.eprintln("Event must be a named type.")
-        }
-    }
-    unsubscribe :: proc(po: ^Post_Office, id: ActorId, $E: typeid) {
-        if typename, ok := get_event_type(E); ok {
-            if sync.mutex_guard(&po.unsubscribes_mutex) {
-                append(&po.unsubscribes, Unsubscribe{typename, id})
-            }
-        }
-    }
-}
-
 @(private)
 unsubscribe_all :: proc(po: ^Post_Office, id: ActorId) {
     for event_type, &route in po.routes {
@@ -106,7 +72,6 @@ unsubscribe_all :: proc(po: ^Post_Office, id: ActorId) {
         }
     }
 }
-
 
 @(private)
 process_subscriptions :: proc(po: ^Post_Office) {
@@ -137,27 +102,12 @@ process_subscriptions :: proc(po: ^Post_Office) {
                 free(mailbox)
             }
             delete_key(route, unsubscribe.id)
-            delete(route^)
         }
         if subscription, ok := &po.subscriptions[unsubscribe.id]; ok {
             delete_key(subscription, unsubscribe.event_type)
         }
     }
     clear(&po.unsubscribes)
-}
-
-when ODIN_OS == .JS {
-    @(private)
-    append_event :: proc(m: ^Mailbox, event: Event) {
-        append(&m.queue, event)
-    }
-} else {
-    @(private)
-    append_event :: proc(m: ^Mailbox, event: Event) {
-        if sync.mutex_guard(&m.queue_mutex) {
-            append(&m.queue, event)
-        }
-    }
 }
 
 publish :: proc(scene: ^Scene, event: $E) {
@@ -182,29 +132,6 @@ send :: proc(scene: ^Scene, id: ActorId, event: $E) {
                 event := Event{data}
                 append_event(mailbox, event)
             }
-        }
-    }
-}
-
-when ODIN_OS == .JS {
-    @(private)
-    buffer_events :: proc(m: ^Mailbox) {
-        reserve(&m.inbox, len(m.queue))
-        for event in m.queue {
-            append(&m.inbox, event)
-        }
-        clear(&m.queue)
-    }
-
-} else {
-    @(private)
-    buffer_events :: proc(m: ^Mailbox) {
-        if sync.mutex_guard(&m.queue_mutex) {
-            reserve(&m.inbox, len(m.queue))
-            for event in m.queue {
-                append(&m.inbox, event)
-            }
-            clear(&m.queue)
         }
     }
 }

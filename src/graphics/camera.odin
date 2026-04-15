@@ -57,6 +57,10 @@ bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: ^Camera
     x := cam.viewport.x
     y := cam.viewport.y
     w, h := get_viewport_size(cam)
+    x = max(x, 0)
+    y = max(y, 0)
+    w = min(w, screen_uniforms.size.x)
+    h = min(h, screen_uniforms.size.y)
     wgpu.RenderPassEncoderSetViewport(render_pass, x, y, w, h, 0, 1)
     wgpu.RenderPassEncoderSetScissorRect(render_pass, u32(x), u32(y), u32(w), u32(h))
 }

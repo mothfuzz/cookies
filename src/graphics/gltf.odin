@@ -520,9 +520,12 @@ draw_node :: proc(scene: ^Scene, node: ^Node, t: f64) {
         draw_node(scene, node_from_transform(node.transform.first_child), t)
     }
 }
-draw_scene :: proc(scene: ^Scene, t: f64) {
+draw_scene :: proc(scene: ^Scene, alpha: f64, delta: f64, anim: ^Animation_State = nil) {
+    if anim != nil {
+        progress(scene, anim, delta)
+    }
     for i in scene.layouts[scene.active_layout].roots {
-        draw_node(scene, &scene.nodes[i], t)
+        draw_node(scene, &scene.nodes[i], alpha)
     }
 }
 

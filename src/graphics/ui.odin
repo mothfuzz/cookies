@@ -1,6 +1,5 @@
 package graphics
 
-import "core:fmt"
 import "vendor:wgpu"
 
 //set up graphics pipeline & renderpass
@@ -129,7 +128,6 @@ delete_ui_batches :: proc() {
 //assumes fill_rect is normalized screen space xywh -1:+1 & clip_rect is texcoord space xywh 0:1...
 draw_ui :: proc(fill_rect: [4]f32, color: [4]f32, texture: Texture, clip_rect: [4]f32) {
     if !(texture in ui_batches) {
-        fmt.println("attempting to load texture...")
         bindings := []wgpu.BindGroupEntry{
             {binding = 0, sampler = ui_sampler},
             {binding = 1, textureView = texture.view},

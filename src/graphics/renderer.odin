@@ -469,7 +469,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     ren.ready = true
     fmt.println("renderer SAYS it's ready.")
     fmt.println(status)
-    fmt.println(ren.device)
+    fmt.println("GPU device address:", ren.device)
 }
 
 ctx: runtime.Context

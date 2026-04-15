@@ -1,8 +1,6 @@
 package scene
 
 import "core:fmt"
-import "core:thread"
-import "core:sync"
 
 ActorId :: distinct u64
 
@@ -26,9 +24,7 @@ Scene :: struct {
     baseid: ActorId,
     spawns: [dynamic]Actor,
     kills: [dynamic]ActorId,
-    spawn_mutex: sync.Mutex,
-    kill_mutex: sync.Mutex,
-    pool: ^thread.Pool,
+    using scene_sync: Scene_Sync,
     ids: [dynamic]ActorId,
     name: string,
 
@@ -36,11 +32,7 @@ Scene :: struct {
 }
 
 destroy :: proc(s: ^Scene) {
-    if s.pool != nil {
-        thread.pool_finish(s.pool)
-        thread.pool_destroy(s.pool)
-        free(s.pool)
-    }
+    delete_threads(s)
     delete_post_office(s)
     delete(s.ids)
     for id, actor in s.actors {
@@ -58,38 +50,9 @@ update_ids :: proc(s: ^Scene) {
     }
 }
 
-work :: proc(t: thread.Task) {
-    s := (^Scene)(t.data)
-    starting_index := t.user_index
-    ending_index := min(len(s.ids), starting_index + max(1, len(s.ids)/num_workers()))
-    //fmt.println("updating actors numbered", starting_index, "-", ending_index, "in this thread")
-    for i := starting_index; i < ending_index; i += 1 {
-        actor := &s.actors[s.ids[i]]
-        //fmt.println("processing actor", actor.id)
-        if actor.tick != nil {
-            actor->tick()
-        }
-    }
-}
-
-work_events :: proc(t: thread.Task) {
-    s := (^Scene)(t.data)
-    starting_index := t.user_index
-    ending_index := min(len(s.ids), starting_index + max(1, len(s.ids)/num_workers()))
-    for i := starting_index; i < ending_index; i += 1 {
-        actor := &s.actors[s.ids[i]]
-        //fmt.println("processing actor", actor.id)
-        process_events(s, actor)
-    }
-}
-
 tick :: proc(s: ^Scene) {
 
-    if s.pool == nil && thread.IS_SUPPORTED {
-        s.pool = new(thread.Pool)
-        thread.pool_init(s.pool, context.allocator, num_workers())
-        thread.pool_start(s.pool)
-    }
+    init_threads(s)
 
     for actor in s.spawns {
         s.actors[actor.id] = actor
@@ -114,30 +77,7 @@ tick :: proc(s: ^Scene) {
 
     process_subscriptions(s)
 
-    if thread.IS_SUPPORTED {
-        //yay parallel!
-
-        chunk_size := max(1, len(s.ids)/num_workers())
-        for i := 0; i < len(s.ids); i += chunk_size {
-            thread.pool_add_task(s.pool, context.allocator, work_events, s, i)
-        }
-        thread.pool_finish(s.pool)
-
-        for i := 0; i < len(s.ids); i += chunk_size {
-            thread.pool_add_task(s.pool, context.allocator, work, s, i)
-        }
-        thread.pool_finish(s.pool)
-    } else {
-        for id, &actor in s.actors {
-            process_events(s, &actor)
-        }
-        for id, &actor in s.actors {
-            if actor.tick != nil {
-                actor->tick()
-            }
-        }
-    }
-
+    process_threads(s)
 }
 
 draw :: proc(s: ^Scene, t: f64) {

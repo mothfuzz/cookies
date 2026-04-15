@@ -11,7 +11,7 @@ init :: proc() {
     window.set_size(500, 500)
 }
 
-draw :: proc(t: f64) {
+draw :: proc(t: f64, dt: f64) {
     graphics.ui_draw_rect({0, 0, 500, 500}, color=1, texture=frasier)
 }
 

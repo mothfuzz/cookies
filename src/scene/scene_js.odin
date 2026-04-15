@@ -2,8 +2,24 @@
 
 package scene
 
-num_workers :: proc() -> int {
-    return 1
+Scene_Sync :: struct {}
+
+@(private)
+init_threads :: proc(s: ^Scene) {}
+
+@(private)
+delete_threads :: proc(s: ^Scene) {}
+
+@(private)
+process_threads :: proc(s: ^Scene) {
+    for id, &actor in s.actors {
+        process_events(s, &actor)
+    }
+    for id, &actor in s.actors {
+        if actor.tick != nil {
+            actor->tick()
+        }
+    }
 }
 
 spawn :: proc(s: ^Scene, t: $T, methods: ActorMethods, name: string="") -> ActorId {

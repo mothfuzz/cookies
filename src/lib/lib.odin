@@ -32,7 +32,7 @@ get_context :: proc "c" () -> runtime.Context {
 
 user_init: proc "c" ()
 user_tick: proc "c" ()
-user_draw: proc "c" (f64)
+user_draw: proc "c" (f64, f64)
 user_quit: proc "c" ()
 
 _init :: proc() {
@@ -45,9 +45,9 @@ _tick :: proc() {
         user_tick()
     }
 }
-_draw :: proc(t: f64) {
+_draw :: proc(alpha: f64, delta: f64) {
     if user_draw != nil {
-        user_draw(t)
+        user_draw(alpha, delta)
     }
 }
 _quit :: proc() {
@@ -57,7 +57,7 @@ _quit :: proc() {
 }
 
 @(export)
-boot :: proc "c" (init: proc"c"(), tick: proc"c"(), draw: proc"c"(f64), quit: proc"c"()) {
+boot :: proc "c" (init: proc"c"(), tick: proc"c"(), draw: proc"c"(f64, f64), quit: proc"c"()) {
     context = get_context()
 
     user_init = init

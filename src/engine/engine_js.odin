@@ -1,7 +1,6 @@
 #+build js
 package engine
 
-import "core:time"
 import "core:sys/wasm/js"
 
 import "cookies:window"
@@ -11,17 +10,18 @@ import "cookies:audio"
 
 user_init: proc() = nil
 user_tick: proc() = nil
-user_draw: proc(f64) = nil
+user_draw: proc(f64, f64) = nil
 user_quit: proc() = nil
 
 
 initialized: bool = false
 accumulator: f64 = 0
-interpolator: time.Tick = {}
+elapsed_time: f64 = 0
+last_tick: f64 = 0
 
+@(export)
 step :: proc(delta_time: f64) -> bool {
     if !graphics.ren.ready {
-        _ = time.tick_lap_time(&interpolator)
         return true
     }
 
@@ -49,9 +49,10 @@ step :: proc(delta_time: f64) -> bool {
         audio.quit()
         return false
     }
+    elapsed_time += delta_time
     accumulator += delta_time
     for ; accumulator > 0; accumulator -= 1.0/f64(tick_rate) {
-        _ = time.tick_lap_time(&interpolator)
+        last_tick = elapsed_time
         /*for hook in pre_tick_hooks {
             hook()
         }*/
@@ -63,19 +64,20 @@ step :: proc(delta_time: f64) -> bool {
         }*/
         input.update()
     }
-    //this does not produce correct results, using 1.0 for now (no interpolation)
-    t := time.duration_seconds(time.tick_since(interpolator))*f64(tick_rate)
+    alpha := (elapsed_time - last_tick) * f64(tick_rate) //tick_rate = ticks per second
     if user_draw != nil {
-        user_draw(1.0)
+        user_draw(alpha, delta_time)
     }
     /*for hook in draw_hooks {
         hook(1.0)
     }*/
-    graphics.render(1.0)
+    graphics.render(alpha)
     return true
 }
 
+import "core:fmt"
 resize_event :: proc(e: js.Event) {
+    fmt.println("JS: Resize event fired!!!")
     graphics.configure_surface(window.get_size())
     graphics.configure_render_targets()
     /*for hook in resize_hooks {
@@ -83,7 +85,7 @@ resize_event :: proc(e: js.Event) {
     }*/
 }
 
-boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
+boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
 
     user_init = init
     user_tick = tick
@@ -91,6 +93,7 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
     user_quit = quit
 
     js.add_window_event_listener(.Resize, nil, resize_event)
+    //js.add_event_listener("canvas", .Resize, nil, resize_event)
     js.add_event_listener("canvas", .Key_Down, nil, proc(e: js.Event) {
         js.event_prevent_default()
         js.event_stop_propagation()
@@ -104,19 +107,20 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64), quit: proc()) {
         input.keys_current[input.js2key(e)] = false
     })
     js.add_event_listener("canvas", .Mouse_Down, nil, proc(e: js.Event) {
-        input.mouse_buttons_pressed[input.MouseButton(e.mouse.button)] = true
-        input.mouse_buttons_current[input.MouseButton(e.mouse.button)] = true
+        input.mouse_buttons_pressed[input.Mouse_Button(e.mouse.button)] = true
+        input.mouse_buttons_current[input.Mouse_Button(e.mouse.button)] = true
     })
     js.add_event_listener("canvas", .Mouse_Up, nil, proc(e: js.Event) {
-        input.mouse_buttons_released[input.MouseButton(e.mouse.button)] = true
-        input.mouse_buttons_current[input.MouseButton(e.mouse.button)] = false
+        input.mouse_buttons_released[input.Mouse_Button(e.mouse.button)] = true
+        input.mouse_buttons_current[input.Mouse_Button(e.mouse.button)] = false
     })
     js.add_event_listener("canvas", .Mouse_Move, nil, proc(e: js.Event) {
         pos := e.mouse.offset
         rect := window.get_size()
-        input.mouse_position.x = i32(pos.x) - i32(rect.x/2)
-        input.mouse_position.y = i32(rect.y/2) - i32(pos.y)
+        input.current_mouse_position.x = i32(pos.x) - i32(rect.x/2)
+        input.current_mouse_position.y = i32(rect.y/2) - i32(pos.y)
     })
+
 
     graphics.init(window.get_wgpu_surface, window.get_size())
 }

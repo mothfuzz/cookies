@@ -30,7 +30,7 @@ tick :: proc() {
     transform.translate(&trans, {10, 10, 10})
 }
 
-draw :: proc(t: f64) {
+draw :: proc(t: f64, dt: f64) {
     if abs(t - prev_t) > 0.01 {
         fmt.println("T:", t)
         fmt.println(transform.smooth(&trans, t))

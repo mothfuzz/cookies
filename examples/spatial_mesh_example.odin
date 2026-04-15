@@ -32,7 +32,7 @@ init :: proc() {
     graphics.set_render_distance(10.0)
     graphics.set_fog_distance(5.0)
 
-    cam = graphics.make_camera({0, 0, Screen_Width, Screen_Height})
+    cam = graphics.make_camera()
     graphics.look_at(&cam, {0, 1, 1}, {0, 0, -1})
     graphics.set_camera(&cam)
 
@@ -108,10 +108,10 @@ tick :: proc() {
     graphics.look_to(&cam, ball_trans.position + {c, camera_height, s}, ball_trans.position)
 }
 
-draw :: proc(t: f64) {
+draw :: proc(t: f64, dt: f64) {
     graphics.draw_directional_light(dir_light)
     graphics.draw_mesh(ball.meshes[0], ball.materials[0], transform.smooth(&ball_trans, t))
-    graphics.draw_scene(&testmap, t)
+    graphics.draw_scene(&testmap, t, dt)
     graphics.ui_draw_text("WASD to move ball", font, {-Screen_Width/2+2, Screen_Height/2}, 1)
     graphics.ui_draw_text("Arrow keys to move camera", font, {-Screen_Width/2+2, Screen_Height/2-18}, 1)
 }

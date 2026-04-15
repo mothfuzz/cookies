@@ -10,7 +10,6 @@ import "cookies:input"
 import "cookies:scene"
 import "cookies:graphics"
 import "cookies:transform"
-import "cookies:spatial"
 import "core:fmt"
 import "core:math"
 
@@ -267,16 +266,17 @@ tick :: proc() {
     transform.rotatey(&cheese1_trans, 0.01)
 }
 
-draw :: proc(t: f64) {
+draw :: proc(a: f64, dt: f64) {
+    fmt.println("DT:", dt)
     screen_size.x = f32(window.get_size().x)
     screen_size.y = f32(window.get_size().y)
     graphics.set_viewport(&cam, {0, 0, screen_size.x/2, screen_size.y})
     graphics.set_viewport(&cam2, {screen_size.x/2 - 1, 0, screen_size.x/2, screen_size.y})
 
     graphics.set_cameras({&cam, &cam2})
-    scene.draw(&main_scene, t)
-    graphics.draw_mesh(triangle, brick_mat, transform.smooth(&triangle_trans, t))
-    graphics.draw_sprite(mat2, transform.smooth(&quad_trans, t), {64, 64, 128, 128}, {1, 0, 0, 0.9}) //frasier
+    scene.draw(&main_scene, a)
+    graphics.draw_mesh(triangle, brick_mat, transform.smooth(&triangle_trans, a))
+    graphics.draw_sprite(mat2, transform.smooth(&quad_trans, a), {64, 64, 128, 128}, {1, 0, 0, 0.9}) //frasier
     graphics.draw_mesh(quad, metal_mat, transform.compute(&floor_trans))
     plus_one := floor_trans
     transform.translate(&plus_one, {0, 2, 0})
@@ -293,8 +293,8 @@ draw :: proc(t: f64) {
     transform.translate(&text_trans, {-16*3, 0, 1})
     graphics.draw_text("Hello!!", unifont, transform.compute(&text_trans), {0, 1, 1, 1})
 
-    graphics.draw_scene(&cheese1, t)
-    graphics.draw_scene(&cheese2, t)
+    graphics.draw_scene(&cheese1, a, dt)
+    graphics.draw_scene(&cheese2, a, dt)
 
     //graphics.draw_point_light(my_light)
     //graphics.draw_directional_light(sun_light)
@@ -326,25 +326,29 @@ kill :: proc() {
 
 import "core:mem"
 main :: proc() {
-    track: mem.Tracking_Allocator
-    mem.tracking_allocator_init(&track, context.allocator)
-    context.allocator = mem.tracking_allocator(&track)
+    when ODIN_OS != .JS {
+        track: mem.Tracking_Allocator
+        mem.tracking_allocator_init(&track, context.allocator)
+        context.allocator = mem.tracking_allocator(&track)
+    }
 
     fmt.println("HEWWO!!!")
     engine.set_tick_rate(30)
     engine.boot(init, tick, draw, kill)
 
-    if len(track.allocation_map) > 0 {
-        fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
-        for _, entry in track.allocation_map {
-            fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+    when ODIN_OS != .JS {
+        if len(track.allocation_map) > 0 {
+            fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+            for _, entry in track.allocation_map {
+                fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+            }
         }
-    }
-    if len(track.bad_free_array) > 0 {
-        fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
-        for entry in track.bad_free_array {
-            fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+        if len(track.bad_free_array) > 0 {
+            fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+            for entry in track.bad_free_array {
+                fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+            }
         }
+        mem.tracking_allocator_destroy(&track)
     }
-    mem.tracking_allocator_destroy(&track)
 }

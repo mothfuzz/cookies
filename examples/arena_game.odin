@@ -326,7 +326,7 @@ draw_enemies :: proc(t: f64) {
 }
 
 
-draw :: proc(t: f64) {
+draw :: proc(t: f64, dt: f64) {
 
     bs := f32(Big_Font_Size)
     rs := f32(Regular_Font_Size)

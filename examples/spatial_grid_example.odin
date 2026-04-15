@@ -100,7 +100,7 @@ calculate_collisions :: proc() {
     }
 }
 
-draw_guys :: proc(t: f64) {
+draw_guys :: proc(t: f64, dt: f64) {
     it := handle_map.iterator_make(&guys)
     for guy, handle in handle_map.iterate(&it) {
         trans := transform.smooth(&guy.trans, t)
