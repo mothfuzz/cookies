@@ -267,7 +267,6 @@ tick :: proc() {
 }
 
 draw :: proc(a: f64, dt: f64) {
-    fmt.println("DT:", dt)
     screen_size.x = f32(window.get_size().x)
     screen_size.y = f32(window.get_size().y)
     graphics.set_viewport(&cam, {0, 0, screen_size.x/2, screen_size.y})

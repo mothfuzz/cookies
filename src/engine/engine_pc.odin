@@ -36,10 +36,8 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
 
     then := sdl3.GetTicks()
     accumulator: f64 = 0
-    frame_interpolator: time.Tick = {}
-    tick_interpolator: time.Tick = {}
-    _ = time.tick_lap_time(&frame_interpolator)
-    _ = time.tick_lap_time(&tick_interpolator)
+    interpolator: time.Tick = {}
+    _ = time.tick_lap_time(&interpolator)
     main_loop: for {
         e: sdl3.Event
         for sdl3.PollEvent(&e) {
@@ -95,12 +93,12 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
                 input.current_mouse_position.y = i32(rect.y)/2 - i32(e.motion.y)
             }
         }
-        _ = time.tick_lap_time(&frame_interpolator)
         now := sdl3.GetTicks()
-        accumulator += f64(now - then)
+        delta := f64(now - then)/1000.0
+        accumulator += delta
         then = now //when will then be now? soon.
-        for ; accumulator > 0; accumulator -= 1000.0/f64(tick_rate) {
-            _ = time.tick_lap_time(&tick_interpolator)
+        for ; accumulator > 0; accumulator -= 1.0/f64(tick_rate) {
+            _ = time.tick_lap_time(&interpolator)
             /*for hook in pre_tick_hooks {
                 hook()
             }*/
@@ -112,8 +110,7 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
             }*/
             input.update()
         }
-        delta := time.duration_seconds(time.tick_since(frame_interpolator))
-        alpha := time.duration_seconds(time.tick_since(tick_interpolator)) * f64(tick_rate)
+        alpha := time.duration_seconds(time.tick_since(interpolator)) * f64(tick_rate)
         if draw != nil {
             draw(alpha, delta)
         }
