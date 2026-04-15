@@ -88,6 +88,9 @@ Node_Type :: enum {
 Node :: struct {
     name: string,
     transform: transform.Transform,
+    original_position: [3]f32, //to be used when not-animated
+    original_orientation: quaternion128,
+    original_scale: [3]f32,
     parent_node: uint, //for easier copying
     type: Node_Type,
     data: uint, //index into Models/Cameras/Lights
@@ -443,17 +446,23 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
             transform.set_position(&scene.nodes[i].transform, position)
             transform.set_orientation_quaternion(&scene.nodes[i].transform, orientation)
             transform.set_scale(&scene.nodes[i].transform, scale)
+            scene.nodes[i].original_position = position
+            scene.nodes[i].original_orientation = orientation
+            scene.nodes[i].original_scale = scale
         } else {
             //load TRS directly
             if node.has_translation {
                 transform.set_position(&scene.nodes[i].transform, node.translation)
+                scene.nodes[i].original_position = node.translation
             }
             if node.has_rotation {
                 rot := transmute(quaternion128)(node.rotation) //both are xyzw
                 transform.set_orientation_quaternion(&scene.nodes[i].transform, rot)
+                scene.nodes[i].original_orientation = rot
             }
             if node.has_scale {
                 transform.set_scale(&scene.nodes[i].transform, node.scale)
+                scene.nodes[i].original_scale = node.scale
             }
         }
         scene.nodes[i].type = .Node //by default

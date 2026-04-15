@@ -37,6 +37,7 @@ cheese1: graphics.Scene
 cheese1_trans := transform.ORIGIN
 cheese2: graphics.Scene
 cheese2_trans := transform.ORIGIN
+cheese2_anim: graphics.Animation_State
 
 brick_color: graphics.Texture
 brick_norm: graphics.Texture
@@ -157,6 +158,8 @@ init :: proc() {
     graphics.link_scene_transform(&cheese2, &cheese2_trans)
     transform.set_scale(&cheese2_trans, 500)
     transform.set_position(&cheese2_trans, {0, 0, -500})
+    cheese2_anim = graphics.animate(&cheese2)
+    graphics.play(&cheese2_anim, 0, true)
 
     my_light = graphics.make_point_light({0, -160, -320}, 600, {1, 1, 0, 1})
     sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 1})
@@ -262,7 +265,6 @@ tick :: proc() {
     graphics.look_to(&cam, {camera_pos.x-offset_x, camera_pos.y, camera_pos.z-offset_z}, forward)
     graphics.look_to(&cam2, {camera_pos.x+offset_x, camera_pos.y, camera_pos.z+offset_z}, forward)
 
-
     transform.rotatey(&cheese1_trans, 0.01)
 }
 
@@ -293,7 +295,7 @@ draw :: proc(a: f64, dt: f64) {
     graphics.draw_text("Hello!!", unifont, transform.compute(&text_trans), {0, 1, 1, 1})
 
     graphics.draw_scene(&cheese1, a, dt)
-    graphics.draw_scene(&cheese2, a, dt)
+    graphics.draw_scene(&cheese2, a, dt, &cheese2_anim)
 
     //graphics.draw_point_light(my_light)
     //graphics.draw_directional_light(sun_light)
@@ -319,6 +321,7 @@ kill :: proc() {
 
     graphics.delete_scene(&emantaller)
     graphics.delete_scene(&cheese1)
+    graphics.deanimate(&cheese2_anim)
     graphics.delete_scene(&cheese2)
     graphics.unload_files()
 }
