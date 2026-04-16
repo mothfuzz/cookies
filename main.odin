@@ -266,6 +266,14 @@ tick :: proc() {
     graphics.look_to(&cam2, {camera_pos.x+offset_x, camera_pos.y, camera_pos.z+offset_z}, forward)
 
     transform.rotatey(&cheese1_trans, 0.01)
+
+    if input.key_pressed(.Key_C) {
+        graphics.stop(&cheese2_anim, 0, true)
+    }
+    if input.key_pressed(.Key_V) {
+        graphics.play(&cheese2_anim, 0, true)
+        fmt.printfln("%#v", cheese2)
+    }
 }
 
 draw :: proc(a: f64, dt: f64) {

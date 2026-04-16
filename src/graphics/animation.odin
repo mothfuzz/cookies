@@ -64,10 +64,12 @@ Animation_Instance :: struct {
 }
 
 Animation_State :: struct {
+    scene: ^Scene,
     animations: []Animation_Instance,
 }
 
 animate :: proc(scene: ^Scene) -> (anim: Animation_State) {
+    anim.scene = scene
     anim.animations = make([]Animation_Instance, len(scene.animations))
     //set duration to maximum timestamp
     for &a, i in scene.animations {
@@ -83,20 +85,20 @@ animate :: proc(scene: ^Scene) -> (anim: Animation_State) {
     return
 }
 
-deanimate :: proc(a: ^Animation_State) {
-    for &anim in a.animations {
-        delete(anim.channels)
+deanimate :: proc(anim: ^Animation_State) {
+    for &a in anim.animations {
+        delete(a.channels)
     }
-    delete(a.animations)
+    delete(anim.animations)
 }
 
 @(private)
-progress :: proc(scene: ^Scene, a: ^Animation_State, dt: f64) {
-    for &a, i in a.animations {
+progress :: proc(anim: ^Animation_State, dt: f64) {
+    for &a, i in anim.animations {
         if a.playing {
             a.current_time = a.current_time + f32(dt) * a.speed
             //animate individual channels...
-            source_channels := &scene.animations[i].channels
+            source_channels := &anim.scene.animations[i].channels
             for &channel, c in a.channels {
                 source_channel := &source_channels[c]
                 last_frame: uint = len(source_channel.input) - 1
@@ -139,27 +141,31 @@ progress :: proc(scene: ^Scene, a: ^Animation_State, dt: f64) {
                     }
                 }
 
-                // TODO: now all we gots to do is adjust the node's transform.
-                //source_channel.target_node...
-                prev_time := source_channel.input[channel.prev_frame]
-                next_time := source_channel.input[channel.next_frame]
-                t := (a.current_time - prev_time) / (next_time - prev_time)
+                t: f32 = 0
+                if channel.prev_frame != channel.next_frame {
+                    prev_time := source_channel.input[channel.prev_frame]
+                    next_time := source_channel.input[channel.next_frame]
+                    t = (a.current_time - prev_time) / (next_time - prev_time)
+                }
+                //note: even though it's interpolated already,
+                //we're doing additional interpolation in the transform itself
+                //in case of switching animations or other active transforms
                 switch o in source_channel.output {
                 case Keyframes_Translation:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     translation := linalg.lerp(prev_frame, next_frame, t)
-                    transform.set_position(&scene.nodes[source_channel.target_node].transform, translation)
+                    transform.set_position(&anim.scene.nodes[source_channel.target_node].transform, translation, true)
                 case Keyframes_Rotation:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     rotation := linalg.quaternion_slerp(prev_frame, next_frame, t)
-                    transform.set_orientation_quaternion(&scene.nodes[source_channel.target_node].transform, rotation)
+                    transform.set_orientation_quaternion(&anim.scene.nodes[source_channel.target_node].transform, rotation, true)
                 case Keyframes_Scale:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     scale := linalg.lerp(prev_frame, next_frame, t)
-                    transform.set_scale(&scene.nodes[source_channel.target_node].transform, scale)
+                    transform.set_scale(&anim.scene.nodes[source_channel.target_node].transform, scale, true)
                 }
             }
         }
@@ -167,31 +173,44 @@ progress :: proc(scene: ^Scene, a: ^Animation_State, dt: f64) {
 }
 
 
-play :: proc(a: ^Animation_State, id: int, looping: bool = false, speed: f32 = 1.0) {
-    anim := &a.animations[id]
-    anim.current_time = 0
-    for &c in anim.channels {
+play :: proc(anim: ^Animation_State, id: int, looping: bool = false, speed: f32 = 1.0) {
+    a := &anim.animations[id]
+    a.current_time = 0
+    for &c, i in a.channels {
+        size := uint(len(anim.scene.animations[id].channels[i].input))
+        if speed > 0 {
+            c.next_frame = min(1, size)
+            c.prev_frame = 0
+        } else {
+            c.next_frame = size
+            c.prev_frame = 0
+        }
+    }
+    a.playing = true
+    a.looping = looping
+    a.speed = speed
+}
+stop :: proc(anim: ^Animation_State, id: int, return_to_rest: bool = false) {
+    a := &anim.animations[id]
+    a.playing = false
+    a.current_time = 0
+    for &c, i in a.channels {
         c.next_frame = 0
         c.prev_frame = 0
-    }
-    anim.playing = true
-    anim.looping = looping
-    anim.speed = speed
-}
-stop :: proc(a: ^Animation_State, id: int) {
-    anim := &a.animations[id]
-    anim.playing = false
-    anim.current_time = 0
-    for &c in anim.channels {
-        c.next_frame = 0
-        c.prev_frame = 0
+        if return_to_rest {
+            source_channel := &anim.scene.animations[id].channels[i]
+            node := &anim.scene.nodes[source_channel.target_node]
+            transform.set_position(&node.transform, node.original_position, true)
+            transform.set_orientation_quaternion(&node.transform, node.original_orientation, true)
+            transform.set_scale(&node.transform, node.original_scale, true)
+        }
     }
 }
-pause :: proc(a: ^Animation_State, id: int) {
-    a.animations[id].playing = false
+pause :: proc(anim: ^Animation_State, id: int) {
+    anim.animations[id].playing = false
 }
-resume :: proc(a: ^Animation_State, id: int) {
-    a.animations[id].playing = true
+resume :: proc(anim: ^Animation_State, id: int) {
+    anim.animations[id].playing = true
 }
 
 //graphics.animate(&my_scene) -> Animation_State

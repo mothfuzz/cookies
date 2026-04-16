@@ -122,6 +122,10 @@ interp :: proc "contextless" (trans: ^Transform, t: f32) -> (position: [3]f32, o
     position = linalg.lerp(prev_position, next_position, t)
     orientation = linalg.quaternion_slerp(prev_orientation, next_orientation, t)
     scale = linalg.lerp(prev_scale, next_scale, t)
+    //if target state is reached, don't jump back and forth...
+    if t >= 0.9 {
+        reset(trans)
+    }
     return
 }
 

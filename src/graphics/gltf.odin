@@ -454,15 +454,21 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
             if node.has_translation {
                 transform.set_position(&scene.nodes[i].transform, node.translation)
                 scene.nodes[i].original_position = node.translation
+            } else {
+                scene.nodes[i].original_position = 0
             }
             if node.has_rotation {
                 rot := transmute(quaternion128)(node.rotation) //both are xyzw
                 transform.set_orientation_quaternion(&scene.nodes[i].transform, rot)
                 scene.nodes[i].original_orientation = rot
+            } else {
+                scene.nodes[i].original_orientation = 1
             }
             if node.has_scale {
                 transform.set_scale(&scene.nodes[i].transform, node.scale)
                 scene.nodes[i].original_scale = node.scale
+            } else {
+                scene.nodes[i].original_scale = 1
             }
         }
         scene.nodes[i].type = .Node //by default
@@ -531,7 +537,7 @@ draw_node :: proc(scene: ^Scene, node: ^Node, t: f64) {
 }
 draw_scene :: proc(scene: ^Scene, alpha: f64, delta: f64, anim: ^Animation_State = nil) {
     if anim != nil {
-        progress(scene, anim, delta)
+        progress(anim, delta)
     }
     for i in scene.layouts[scene.active_layout].roots {
         draw_node(scene, &scene.nodes[i], alpha)
