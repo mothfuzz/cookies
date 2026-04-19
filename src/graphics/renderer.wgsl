@@ -48,7 +48,7 @@ struct SpotLight {
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) tangent: vec3<f32>,
+    @location(2) tangent: vec4<f32>,
     @location(3) texcoord: vec2<f32>,
     @location(4) color: vec4<f32>,
     @location(5) bones: vec4<f32>,
@@ -67,7 +67,7 @@ struct VSOut {
     @builtin(position) out_position: vec4<f32>,
     @location(0) position: vec4<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) tangent: vec3<f32>,
+    @location(2) tangent: vec4<f32>,
     @location(3) @interpolate(perspective) texcoord: vec2<f32>,
     @location(4) color: vec4<f32>,
     @location(5) tint: vec4<f32>,
@@ -104,7 +104,8 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     let bones3 = mat3x3<f32>(bones[0].xyz, bones[1].xyz, bones[2].xyz);
     v.position = modelview * bones * vec4<f32>(vertex.position, 1.0);
     v.normal = normalize((modelview * vec4<f32>(normalize(bones3 * vertex.normal), 0.0)).xyz);
-    v.tangent = normalize((modelview * vec4<f32>(normalize(bones3 * vertex.tangent), 0.0)).xyz);
+    let tangent = normalize((modelview * vec4<f32>(normalize(bones3 * vertex.tangent.xyz), 0.0)).xyz);
+    v.tangent = vec4<f32>(tangent, vertex.tangent.w);
     v.out_position = camera.projection * v.position;
     let tex_offset = vertex.clip_rect.xy;
     let tex_factor = vertex.clip_rect.zw;
@@ -196,11 +197,15 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
         let roughness = pbr.g;
         let metallic = pbr.b;
 
-        //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
-        let tangent_to_view = mat3x3<f32>(in.tangent, normalize(cross(in.normal, in.tangent)), in.normal);
-        //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
-        let n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
-        //let n = normalize(v.normal);
+        var n = normalize(in.normal);
+        if(all(in.tangent.xyz != vec3<f32>(0.0))) {
+            //if we have tangents, do extra calculations & use the normal map
+            //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
+            let binormal = normalize(cross(in.normal, in.tangent.xyz) * in.tangent.w);
+            let tangent_to_view = mat3x3<f32>(in.tangent.xyz, binormal, in.normal);
+            //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
+            n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
+        }
         let v = normalize(-in.position.xyz); //already in view space
 
         var light = vec3<f32>(0.03) * final_color.rgb * ambient_occlusion; //initial ambient value

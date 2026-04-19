@@ -173,7 +173,7 @@ init :: proc() {
     graphics.play(&brainstem_anim, 0, true)
 
     my_light = graphics.make_point_light({0, -160, -320}, 600, {1, 1, 0, 1})
-    sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 1})
+    sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 10})
     spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, math.to_radians_f32(45), math.to_radians_f32(60), {0, 0, 1, 1})
 
     brick_color = graphics.make_texture_from_image(#load("resources/brick4/basecolor.jpg"))

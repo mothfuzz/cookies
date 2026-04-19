@@ -31,13 +31,13 @@ init :: proc() {
     graphics.look_at(&cam, {0, 0, 10}, {0, 0, 0})
     graphics.set_camera(&cam)
 
-    light = graphics.make_directional_light({0, -1, 0}, {1, 0, 0, 10})
+    light = graphics.make_directional_light({0.6, 0.4, 0}, {1, 0, 0, 10})
     
     brainstem = graphics.make_scene_from_file("BrainStem.gltf", #load("../resources/BrainStem.gltf"))
     graphics.link_scene_transform(&brainstem, &brainstem_trans)
     transform.set_position(&brainstem_trans, {0, -1, 5})
     brainstem_anim = graphics.animate(&brainstem)
-    graphics.play(&brainstem_anim, 0, true, 0.1)
+    graphics.play(&brainstem_anim, 0, true, 0.5)
     fmt.printfln("%#v", brainstem.nodes[0])
 
     brainstem2 = graphics.copy_scene(&brainstem)

@@ -8,7 +8,7 @@ import "vendor:wgpu"
 Vertex :: struct {
     position: [3]f32,
     normal: [3]f32,
-    tangent: [3]f32,
+    tangent: [4]f32,
     texcoord: [2]f32,
     color: [4]f32,
     bones: [4]f32,
@@ -143,7 +143,7 @@ calculate_normals :: proc(vertices: [][3]f32, indices: []u32, out_normals: [][3]
     }
 }
 
-calculate_tangents :: proc(vertices: [][3]f32, normals: [][3]f32, texcoords: [][2]f32, indices: []u32, out_tangents: [][3]f32) {
+calculate_tangents :: proc(vertices: [][3]f32, normals: [][3]f32, texcoords: [][2]f32, indices: []u32, out_tangents: [][4]f32) {
     indices := indices
     if indices == nil || len(indices) == 0 {
         indices = make([]u32, len(vertices))
@@ -160,11 +160,12 @@ calculate_tangents :: proc(vertices: [][3]f32, normals: [][3]f32, texcoords: [][
         tex_ba := texcoords[bi] - texcoords[ai]
         tex_ca := texcoords[ci] - texcoords[ai]
 
-        tangent := [3]f32{}
+        tangent := [4]f32{}
         f := 1.0 / (tex_ba.x * tex_ca.y - tex_ca.x * tex_ba.y)
         tangent.x = f * (tex_ca.y * pos_ba.x - tex_ba.y * pos_ca.x)
         tangent.y = f * (tex_ca.y * pos_ba.y - tex_ba.y * pos_ca.y)
         tangent.z = f * (tex_ca.y * pos_ba.z - tex_ba.y * pos_ca.z)
+        tangent.w = 1.0
 
         out_tangents[ai] = tangent
         out_tangents[bi] = tangent
@@ -201,9 +202,9 @@ normal_attribute := wgpu.VertexBufferLayout{
 }
 tangent_attribute := wgpu.VertexBufferLayout{
     stepMode = .Vertex,
-    arrayStride = size_of([3]f32),
+    arrayStride = size_of([4]f32),
     attributeCount = 1,
-    attributes = &wgpu.VertexAttribute{format = .Float32x3, shaderLocation = 2},
+    attributes = &wgpu.VertexAttribute{format = .Float32x4, shaderLocation = 2},
 }
 texcoord_attribute := wgpu.VertexBufferLayout{
     stepMode = .Vertex,
