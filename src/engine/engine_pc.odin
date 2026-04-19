@@ -2,7 +2,6 @@
 package engine
 
 import "core:fmt"
-import "core:time"
 import "vendor:sdl3"
 
 import "cookies:window"
@@ -36,8 +35,6 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
 
     then := sdl3.GetTicks()
     accumulator: f64 = 0
-    interpolator: time.Tick = {}
-    _ = time.tick_lap_time(&interpolator)
     main_loop: for {
         e: sdl3.Event
         for sdl3.PollEvent(&e) {
@@ -97,8 +94,8 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
         delta := f64(now - then)/1000.0
         accumulator += delta
         then = now //when will then be now? soon.
-        for ; accumulator > 0; accumulator -= 1.0/f64(tick_rate) {
-            _ = time.tick_lap_time(&interpolator)
+        time_step := 1.0/f64(tick_rate)
+        for ; accumulator >= time_step; accumulator -= time_step {
             /*for hook in pre_tick_hooks {
                 hook()
             }*/
@@ -110,7 +107,7 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
             }*/
             input.update()
         }
-        alpha := time.duration_seconds(time.tick_since(interpolator)) * f64(tick_rate)
+        alpha := accumulator / time_step
         if draw != nil {
             draw(alpha, delta)
         }

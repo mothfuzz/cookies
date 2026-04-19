@@ -37,7 +37,7 @@ init :: proc() {
     graphics.link_scene_transform(&brainstem, &brainstem_trans)
     transform.set_position(&brainstem_trans, {0, -1, 5})
     brainstem_anim = graphics.animate(&brainstem)
-    graphics.play(&brainstem_anim, 0, true, 0.5)
+    graphics.play(&brainstem_anim, 0, true, 0.1)
     fmt.printfln("%#v", brainstem.nodes[0])
 
     brainstem2 = graphics.copy_scene(&brainstem)
@@ -81,6 +81,7 @@ tick :: proc() {
 }
 
 draw :: proc(a: f64, dt: f64) {
+    fmt.println(a)
     graphics.draw_scene(&brainstem, a, dt, &brainstem_anim)
     graphics.draw_scene(&brainstem2, a, dt, &brainstem2_anim)
     graphics.draw_directional_light(light)

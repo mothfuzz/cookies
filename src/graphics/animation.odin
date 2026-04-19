@@ -95,11 +95,11 @@ deanimate :: proc(anim: ^Animation_State) {
 @(private)
 progress :: proc(anim: ^Animation_State, dt: f64) {
     for &a, i in anim.animations {
+        source_channels := &anim.scene.animations[i].channels
         if a.playing {
             a.current_time = a.current_time + f32(dt) * a.speed
             current_time := a.current_time
             //animate individual channels...
-            source_channels := &anim.scene.animations[i].channels
             for &channel, c in a.channels {
                 source_channel := &source_channels[c]
                 last_frame: uint = len(source_channel.input) - 1
@@ -166,6 +166,23 @@ progress :: proc(anim: ^Animation_State, dt: f64) {
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     scale := linalg.lerp(prev_frame, next_frame, t)
+                    transform.set_scale(&anim.scene.nodes[source_channel.target_node].transform, scale, true)
+                }
+            }
+        } else {
+            //make sure to not loop between frames when stopped
+            for &channel, c in a.channels {
+                channel.prev_frame = channel.next_frame
+                source_channel := &source_channels[c]
+                switch o in source_channel.output {
+                case Keyframes_Translation:
+                    translation := o[channel.next_frame]
+                    transform.set_position(&anim.scene.nodes[source_channel.target_node].transform, translation, true)
+                case Keyframes_Rotation:
+                    rotation := o[channel.next_frame]
+                    transform.set_orientation_quaternion(&anim.scene.nodes[source_channel.target_node].transform, rotation, true)
+                case Keyframes_Scale:
+                    scale := o[channel.next_frame]
                     transform.set_scale(&anim.scene.nodes[source_channel.target_node].transform, scale, true)
                 }
             }

@@ -18,6 +18,8 @@ Transform :: struct {
     prev_sibling: ^Transform,
     next_sibling: ^Transform,
     dirty: bool,
+    changed: bool, //separate from dirty flag because dirty might be false in case of requesting world transform during physics etc.
+    a_start: f64, //alpha value for 'starting point' so we can detect loops
 }
 
 ORIGIN :: Transform{position=0, orientation=1, scale=1,
@@ -122,10 +124,6 @@ interp :: proc "contextless" (trans: ^Transform, t: f32) -> (position: [3]f32, o
     position = linalg.lerp(prev_position, next_position, t)
     orientation = linalg.quaternion_slerp(prev_orientation, next_orientation, t)
     scale = linalg.lerp(prev_scale, next_scale, t)
-    //if target state is reached, don't jump back and forth...
-    if t >= 0.9 {
-        reset(trans)
-    }
     return
 }
 
@@ -136,6 +134,15 @@ compute :: proc "contextless" (trans: ^Transform) -> matrix[4, 4]f32 {
 
 smooth :: proc "contextless" (trans: ^Transform, t: f64) -> matrix[4, 4]f32 {
     update_root(trans)
+    if trans.changed {
+        trans.a_start = t
+        trans.changed = false
+    }
+    if t < trans.a_start {
+        //loop detected, don't render motions twice
+        reset(trans)
+        trans.a_start = t
+    }
     return linalg.matrix4_from_trs(interp(trans, f32(t)))
 }
 
@@ -143,10 +150,12 @@ smooth :: proc "contextless" (trans: ^Transform, t: f64) -> matrix[4, 4]f32 {
 translate :: proc "contextless" (trans: ^Transform, translation: [3]f32) {
     trans.position += translation
     trans.dirty = true
+    trans.changed = true
 }
 set_position :: proc "contextless" (trans: ^Transform, position: [3]f32, interpolate: bool = false) {
     trans.position = position
     trans.dirty = true
+    trans.changed = true
     if !interpolate {
         reset(trans)
     }
@@ -159,22 +168,27 @@ get_position :: proc "contextless" (trans: ^Transform) -> [3]f32 {
 rotate :: proc "contextless" (trans: ^Transform, rotation: [3]f32) {
     trans.orientation = linalg.quaternion_from_euler_angles(expand_values(rotation), linalg.Euler_Angle_Order.XYZ) * trans.orientation
     trans.dirty = true
+    trans.changed = true
 }
 rotatex :: proc "contextless" (trans: ^Transform, rotation: f32) {
     trans.orientation = linalg.quaternion_from_euler_angle_x(rotation) * trans.orientation
     trans.dirty = true
+    trans.changed = true
 }
 rotatey :: proc "contextless" (trans: ^Transform, rotation: f32) {
     trans.orientation = linalg.quaternion_from_euler_angle_y(rotation) * trans.orientation
     trans.dirty = true
+    trans.changed = true
 }
 rotatez :: proc "contextless" (trans: ^Transform, rotation: f32) {
     trans.orientation = linalg.quaternion_from_euler_angle_z(rotation) * trans.orientation
     trans.dirty = true
+    trans.changed = true
 }
 set_orientation :: proc "contextless" (trans: ^Transform, orientation: [3]f32, interpolate: bool = false) {
     trans.orientation = linalg.quaternion_from_euler_angles(expand_values(orientation), .XYZ)
     trans.dirty = true
+    trans.changed = true
     if !interpolate {
         reset(trans)
     }
@@ -182,6 +196,7 @@ set_orientation :: proc "contextless" (trans: ^Transform, orientation: [3]f32, i
 set_orientation_quaternion :: proc "contextless" (trans: ^Transform, orientation: quaternion128, interpolate: bool = false) {
     trans.orientation = orientation
     trans.dirty = true
+    trans.changed = true
     if !interpolate {
         reset(trans)
     }
@@ -199,11 +214,13 @@ get_orientation_quaternion :: proc "contextless" (trans: ^Transform) -> quaterni
 scale :: proc "contextless" (trans: ^Transform, scale: [3]f32) {
     trans.scale *= scale
     trans.dirty = true
+    trans.changed = true
 }
 
 set_scale :: proc "contextless" (trans: ^Transform, scale: [3]f32, interpolate: bool = false) {
     trans.scale = scale
     trans.dirty = true
+    trans.changed = true
     if !interpolate {
         reset(trans)
     }

@@ -16,8 +16,6 @@ user_quit: proc() = nil
 
 initialized: bool = false
 accumulator: f64 = 0
-elapsed_time: f64 = 0
-last_tick: f64 = 0
 
 @(export)
 step :: proc(delta_time: f64) -> bool {
@@ -49,10 +47,9 @@ step :: proc(delta_time: f64) -> bool {
         audio.quit()
         return false
     }
-    elapsed_time += delta_time
     accumulator += delta_time
-    for ; accumulator > 0; accumulator -= 1.0/f64(tick_rate) {
-        last_tick = elapsed_time
+    time_step := 1.0/f64(tick_rate)
+    for ; accumulator >= time_step; accumulator -= time_step {
         /*for hook in pre_tick_hooks {
             hook()
         }*/
@@ -64,7 +61,7 @@ step :: proc(delta_time: f64) -> bool {
         }*/
         input.update()
     }
-    alpha := (elapsed_time - last_tick) * f64(tick_rate) //tick_rate = ticks per second
+    alpha := accumulator / time_step
     if user_draw != nil {
         user_draw(alpha, delta_time)
     }
