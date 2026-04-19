@@ -97,13 +97,14 @@ progress :: proc(anim: ^Animation_State, dt: f64) {
     for &a, i in anim.animations {
         if a.playing {
             a.current_time = a.current_time + f32(dt) * a.speed
+            current_time := a.current_time
             //animate individual channels...
             source_channels := &anim.scene.animations[i].channels
             for &channel, c in a.channels {
                 source_channel := &source_channels[c]
                 last_frame: uint = len(source_channel.input) - 1
                 if a.speed > 0 {
-                    if a.current_time > a.duration {
+                    if current_time > a.duration {
                         if a.looping {
                             a.current_time = 0
                             channel.next_frame = 0
@@ -122,7 +123,7 @@ progress :: proc(anim: ^Animation_State, dt: f64) {
                     }
                 }
                 if a.speed < 0 {
-                    if a.current_time < 0 {
+                    if current_time < 0 {
                         if a.looping {
                             a.current_time = a.duration
                             channel.next_frame = last_frame
