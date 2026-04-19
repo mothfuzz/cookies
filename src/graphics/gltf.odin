@@ -91,6 +91,7 @@ Node :: struct {
     original_position: [3]f32, //to be used when not-animated
     original_orientation: quaternion128,
     original_scale: [3]f32,
+    has_parent: bool,
     parent_node: uint, //for easier copying
     type: Node_Type,
     data: uint, //index into Models/Cameras/Lights
@@ -157,13 +158,14 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     //have to do this in 2 passes to preserve relationships
     for &node in s.nodes {
         //can't use 'unlink' bc we don't want to mess up the original's hierarchy
+        node.transform.parent = nil
         node.transform.first_child = nil
         node.transform.last_child = nil
         node.transform.prev_sibling = nil
         node.transform.next_sibling = nil
     }
     for &node in s.nodes {
-        if node.transform.parent != nil {
+        if node.has_parent {
             transform.link(&s.nodes[node.parent_node].transform, &node.transform)
         }
     }
@@ -442,6 +444,7 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
     for node, i in data.nodes {
         if node.parent != nil {
             p := cgltf.node_index(data, node.parent)
+            scene.nodes[i].has_parent = true
             scene.nodes[i].parent_node = p //otherwise 0
             transform.link(&scene.nodes[p].transform, &scene.nodes[i].transform) //this should work but if it doesn't I guess I'll fix it
         }

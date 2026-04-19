@@ -526,7 +526,7 @@ render_meshes :: proc(render_pass: wgpu.RenderPassEncoder, pipeline: wgpu.Render
         }
 
         if flush {
-            bind_skeletons(render_pass, skeletons[:], 3)
+            bind_skeletons(render_pass, 3, skeletons[:], u32(len(instances)))
             draw_mesh_instances(render_pass, current_mesh, instances[:])
             clear(&instances)
             clear(&skeletons)

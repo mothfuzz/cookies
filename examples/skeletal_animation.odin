@@ -10,9 +10,15 @@ import "core:math"
 
 cam: graphics.Camera
 
+light: graphics.Directional_Light
+
 brainstem: graphics.Scene
 brainstem_trans := transform.ORIGIN
 brainstem_anim: graphics.Animation_State
+
+brainstem2: graphics.Scene
+brainstem2_trans := transform.ORIGIN
+brainstem2_anim: graphics.Animation_State
 
 init :: proc() {
     window.set_size(800, 800)
@@ -24,13 +30,23 @@ init :: proc() {
     cam = graphics.make_camera()
     graphics.look_at(&cam, {0, 0, 10}, {0, 0, 0})
     graphics.set_camera(&cam)
+
+    light = graphics.make_directional_light({0, -1, 0}, {1, 0, 0, 10})
     
     brainstem = graphics.make_scene_from_file("BrainStem.gltf", #load("../resources/BrainStem.gltf"))
     graphics.link_scene_transform(&brainstem, &brainstem_trans)
-    transform.set_position(&brainstem_trans, {0, -1, -10})
+    transform.set_position(&brainstem_trans, {0, -1, 5})
     brainstem_anim = graphics.animate(&brainstem)
     graphics.play(&brainstem_anim, 0, true, 0.5)
     fmt.printfln("%#v", brainstem.nodes[0])
+
+    brainstem2 = graphics.copy_scene(&brainstem)
+    graphics.link_scene_transform(&brainstem2, &brainstem2_trans)
+    transform.set_position(&brainstem2_trans, {2, -1, 2})
+    transform.set_scale(&brainstem2_trans, 0.5)
+    brainstem2_anim = graphics.animate(&brainstem2)
+    graphics.play(&brainstem2_anim, 0, true)
+    fmt.printfln("%#v", brainstem2.nodes[0])
 }
 
 up_or_down: bool
@@ -66,12 +82,16 @@ tick :: proc() {
 
 draw :: proc(a: f64, dt: f64) {
     graphics.draw_scene(&brainstem, a, dt, &brainstem_anim)
+    graphics.draw_scene(&brainstem2, a, dt, &brainstem2_anim)
+    graphics.draw_directional_light(light)
 }
 
 quit :: proc() {
     graphics.delete_camera(cam)
     graphics.deanimate(&brainstem_anim)
     graphics.delete_scene(&brainstem)
+    graphics.deanimate(&brainstem2_anim)
+    graphics.delete_scene(&brainstem2)
     graphics.unload_files()
 }
 

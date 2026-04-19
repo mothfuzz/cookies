@@ -83,15 +83,16 @@ fn ident() -> mat4x4<f32> {
 }
 
 @group(3) @binding(0) var<storage, read> skeletons: array<mat4x4<f32>>;
-fn calculate_bones_position(vertex: Vertex, instance_index: u32) -> vec4<f32> {
-    let position = vec4<f32>(vertex.position, 1.0);
+@group(3) @binding(1) var<uniform> skeleton_len: u32;
+fn calculate_bones(vertex: Vertex, instance_index: u32) -> mat4x4<f32> {
     if(all(vertex.weights == vec4<f32>(0.0))) {
-        return position;
+        return ident();
     }
-    let bone1 = skeletons[u32(vertex.bones.x)] * position * vertex.weights.x;
-    let bone2 = skeletons[u32(vertex.bones.y)] * position * vertex.weights.y;
-    let bone3 = skeletons[u32(vertex.bones.z)] * position * vertex.weights.z;
-    let bone4 = skeletons[u32(vertex.bones.w)] * position * vertex.weights.w;
+    let offset = instance_index * skeleton_len;
+    let bone1 = skeletons[offset + u32(vertex.bones.x)] * vertex.weights.x;
+    let bone2 = skeletons[offset + u32(vertex.bones.y)] * vertex.weights.y;
+    let bone3 = skeletons[offset + u32(vertex.bones.z)] * vertex.weights.z;
+    let bone4 = skeletons[offset + u32(vertex.bones.w)] * vertex.weights.w;
     return bone1 + bone2 + bone3 + bone4;
 }
 
@@ -99,9 +100,11 @@ fn calculate_bones_position(vertex: Vertex, instance_index: u32) -> vec4<f32> {
 fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VSOut {
     var v: VSOut;
     let modelview = mat4x4<f32>(vertex.modelview_0, vertex.modelview_1, vertex.modelview_2, vertex.modelview_3);
-    v.position = modelview * calculate_bones_position(vertex, instance_index);
-    v.normal = normalize((modelview * vec4<f32>(vertex.normal, 0.0)).xyz);
-    v.tangent = normalize((modelview * vec4<f32>(vertex.tangent, 0.0)).xyz);
+    let bones = calculate_bones(vertex, instance_index);
+    let bones3 = mat3x3<f32>(bones[0].xyz, bones[1].xyz, bones[2].xyz);
+    v.position = modelview * bones * vec4<f32>(vertex.position, 1.0);
+    v.normal = normalize((modelview * vec4<f32>(normalize(bones3 * vertex.normal), 0.0)).xyz);
+    v.tangent = normalize((modelview * vec4<f32>(normalize(bones3 * vertex.tangent), 0.0)).xyz);
     v.out_position = camera.projection * v.position;
     let tex_offset = vertex.clip_rect.xy;
     let tex_factor = vertex.clip_rect.zw;
