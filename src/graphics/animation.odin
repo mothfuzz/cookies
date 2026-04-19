@@ -177,12 +177,12 @@ play :: proc(anim: ^Animation_State, id: int, looping: bool = false, speed: f32 
     a := &anim.animations[id]
     a.current_time = 0
     for &c, i in a.channels {
-        size := uint(len(anim.scene.animations[id].channels[i].input))
+        last_frame := uint(len(anim.scene.animations[id].channels[i].input)) - 1
         if speed > 0 {
-            c.next_frame = min(1, size)
+            c.next_frame = min(1, last_frame)
             c.prev_frame = 0
         } else {
-            c.next_frame = size
+            c.next_frame = last_frame
             c.prev_frame = 0
         }
     }

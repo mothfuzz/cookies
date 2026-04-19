@@ -39,6 +39,10 @@ cheese2: graphics.Scene
 cheese2_trans := transform.ORIGIN
 cheese2_anim: graphics.Animation_State
 
+brainstem: graphics.Scene
+brainstem_trans := transform.ORIGIN
+brainstem_anim: graphics.Animation_State
+
 brick_color: graphics.Texture
 brick_norm: graphics.Texture
 brick_pbr: graphics.Texture
@@ -161,6 +165,13 @@ init :: proc() {
     cheese2_anim = graphics.animate(&cheese2)
     graphics.play(&cheese2_anim, 0, true)
 
+    brainstem = graphics.make_scene_from_file("BrainStem.gltf", #load("resources/BrainStem.gltf"))
+    graphics.link_scene_transform(&brainstem, &brainstem_trans)
+    transform.set_position(&brainstem_trans, {500, 0, 0})
+    transform.set_scale(&brainstem_trans, 500)
+    brainstem_anim = graphics.animate(&brainstem)
+    graphics.play(&brainstem_anim, 0, true)
+
     my_light = graphics.make_point_light({0, -160, -320}, 600, {1, 1, 0, 1})
     sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 1})
     spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, math.to_radians_f32(45), math.to_radians_f32(60), {0, 0, 1, 1})
@@ -262,8 +273,8 @@ tick :: proc() {
                       camera_pos.z - math.sin(camera_angle)*graphics.z_2d(&cam)}
     offset_x := math.sin(camera_angle) * 50
     offset_z := math.cos(camera_angle) * 50
-    graphics.look_to(&cam, {camera_pos.x-offset_x, camera_pos.y, camera_pos.z-offset_z}, forward)
-    graphics.look_to(&cam2, {camera_pos.x+offset_x, camera_pos.y, camera_pos.z+offset_z}, forward)
+    graphics.look_to(&cam, {camera_pos.x+offset_x, camera_pos.y, camera_pos.z+offset_z}, forward)
+    graphics.look_to(&cam2, {camera_pos.x-offset_x, camera_pos.y, camera_pos.z-offset_z}, forward)
 
     transform.rotatey(&cheese1_trans, 0.01)
 
@@ -305,9 +316,11 @@ draw :: proc(a: f64, dt: f64) {
     graphics.draw_scene(&cheese1, a, dt)
     graphics.draw_scene(&cheese2, a, dt, &cheese2_anim)
 
-    //graphics.draw_point_light(my_light)
-    //graphics.draw_directional_light(sun_light)
-    //graphics.draw_spot_light(spot_light)
+    graphics.draw_scene(&brainstem, a, dt, &brainstem_anim)
+
+    graphics.draw_point_light(my_light)
+    graphics.draw_directional_light(sun_light)
+    graphics.draw_spot_light(spot_light)
 }
 
 kill :: proc() {
@@ -331,6 +344,10 @@ kill :: proc() {
     graphics.delete_scene(&cheese1)
     graphics.deanimate(&cheese2_anim)
     graphics.delete_scene(&cheese2)
+
+    graphics.deanimate(&brainstem_anim)
+    graphics.delete_scene(&brainstem)
+    
     graphics.unload_files()
 }
 

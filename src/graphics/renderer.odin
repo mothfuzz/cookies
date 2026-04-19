@@ -32,36 +32,6 @@ Renderer :: struct {
 }
 ren: Renderer
 
-Screen_Uniforms :: struct {
-    size: [4]f32, //width, height, near, far
-    color: [4]f32, //rgb + fog start
-}
-screen_uniforms: Screen_Uniforms = {
-    size={0, 0, 0.1, 0},
-}
-screen_uniforms_buffer: wgpu.Buffer
-uniform_bind_group: wgpu.BindGroup
-
-set_background_color :: proc(color: [3]f32) {
-    screen_uniforms.color.rgb = linalg.vector4_srgb_to_linear([4]f32{color.r, color.g, color.b, 1.0}).rgb
-}
-get_background_color :: proc() -> [3]f32 {
-    c := screen_uniforms.color.rgb
-    return linalg.vector4_linear_to_srgb([4]f32{c.r, c.g, c.b, 1.0}).rgb
-}
-
-set_render_distance :: proc(far: f32) {
-    screen_uniforms.size[3] = far
-}
-
-get_screen_size :: proc() -> [2]f32 {
-    return screen_uniforms.size.xy
-}
-
-set_fog_distance :: proc(fog_start: f32) {
-    screen_uniforms.color[3] = fog_start
-}
-
 with_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
     //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
     #partial switch format {
@@ -227,18 +197,6 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     })
 
     //bind group layouts
-    uniform_layout_entries := []wgpu.BindGroupLayoutEntry{
-        //screen_uniforms
-        wgpu.BindGroupLayoutEntry{
-            binding = 0,
-            visibility = {.Vertex, .Fragment},
-            buffer = {type=.Uniform},
-        },
-    }
-    uniform_layout := wgpu.DeviceCreateBindGroupLayout(ren.device, &{
-        entryCount = len(uniform_layout_entries),
-        entries = raw_data(uniform_layout_entries),
-    })
     camera_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(camera_layout_entries),
         entries = raw_data(camera_layout_entries),
@@ -253,8 +211,12 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         entryCount = len(lights_layout_entries),
         entries = raw_data(lights_layout_entries),
     })
+    skeletons_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
+        entryCount = len(skeletons_layout_entries),
+        entries = raw_data(skeletons_layout_entries),
+    })
 
-    bind_group_layouts := []wgpu.BindGroupLayout{uniform_layout, camera_layout, material_layout, lights_layout}
+    bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, lights_layout, skeletons_layout}
     ren.layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
         bindGroupLayoutCount = len(bind_group_layouts),
         bindGroupLayouts = raw_data(bind_group_layouts),
@@ -262,14 +224,6 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
 
     //create uniform buffers/bind group up front
     screen_uniforms_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of(Screen_Uniforms)})
-    bindings := []wgpu.BindGroupEntry{
-        {binding = 0, buffer = screen_uniforms_buffer, size = size_of(Screen_Uniforms)},
-    }
-    uniform_bind_group = wgpu.DeviceCreateBindGroup(device, &{
-        layout = uniform_layout,
-        entryCount = len(bindings),
-        entries = raw_data(bindings),
-    })
 
     //vertex data
     vertex_buffers := []wgpu.VertexBufferLayout{
@@ -527,8 +481,8 @@ set_cameras :: proc(cams: []^Camera) {
 render_meshes :: proc(render_pass: wgpu.RenderPassEncoder, pipeline: wgpu.RenderPipeline, cam: ^Camera, all_meshes: []MeshRenderItem, all_indices: []int, t: f64) {
     wgpu.RenderPassEncoderSetPipeline(render_pass, pipeline)
     wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
-    bind_camera(render_pass, 1, cam, t) //view produced here
-    bind_lights(render_pass, 3, cam)
+    bind_camera(render_pass, 0, cam, t) //view produced here
+    bind_lights(render_pass, 2, cam)
 
     reset_modelviews(all_meshes[:])
     indices := frustum_culling(cam, all_meshes[:], all_indices[:])
@@ -537,8 +491,10 @@ render_meshes :: proc(render_pass: wgpu.RenderPassEncoder, pipeline: wgpu.Render
     current_mesh: Mesh
     current_material: Material
     instances := make([dynamic]InstanceData, 0)
+    skeletons := make([dynamic]matrix[4,4]f32)
     flush := false
     defer delete(instances)
+    defer delete(skeletons)
     for i in 0..<len(indices) {
         //batch em up
         instance := &all_meshes[indices[i]]
@@ -548,10 +504,15 @@ render_meshes :: proc(render_pass: wgpu.RenderPassEncoder, pipeline: wgpu.Render
         }
         if instance.material != current_material {
             current_material = instance.material
-            bind_material(render_pass, 2, current_material)
+            bind_material(render_pass, 1, current_material)
         }
         calculate_modelview(instance, cam)
         append(&instances, InstanceData{modelview=instance.modelview, dynamic_material=instance.dynamic_material})
+        if instance.bones == nil {
+            append(&skeletons, 1)
+        } else {
+            append(&skeletons, ..instance.bones)
+        }
 
         //if next mesh is different, or there is no next mesh, draw the current batch
         switch {
@@ -565,8 +526,10 @@ render_meshes :: proc(render_pass: wgpu.RenderPassEncoder, pipeline: wgpu.Render
         }
 
         if flush {
+            bind_skeletons(render_pass, skeletons[:], 3)
             draw_mesh_instances(render_pass, current_mesh, instances[:])
             clear(&instances)
+            clear(&skeletons)
             flush = false
         }
     }
@@ -620,7 +583,7 @@ render :: proc(t: f64) {
 
     //solid AND opaque for lights
     append_render_list(&all_meshes, &all_indices, &solid_batches)
-    append_render_list(&all_meshes, &all_indices, &solid_batches)
+    append_render_list(&all_meshes, &all_indices, &trans_batches)
 
     //TODO: render both solid & trans meshes for each light with a shadow map...
     clear(&all_meshes)

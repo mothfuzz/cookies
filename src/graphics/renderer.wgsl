@@ -4,6 +4,8 @@ struct Screen {
 }
 @group(0) @binding(0) var<uniform> screen: Screen;
 
+// TODO: need to combine Sceen & Camera into one bind group.
+// this way we can have Camera, Material, Lighting, and Skeletons
 
 struct Camera {
     eye: vec4<f32>,
@@ -11,28 +13,28 @@ struct Camera {
     view: mat4x4<f32>,
     projection: mat4x4<f32>,
 }
-@group(1) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var<uniform> camera: Camera;
 
 
-@group(2) @binding(0) var smp: sampler;
-@group(2) @binding(1) var base_color: texture_2d<f32>;
-@group(2) @binding(2) var normal: texture_2d<f32>;
-@group(2) @binding(3) var pbr: texture_2d<f32>; //ambient roughness metallic
-@group(2) @binding(4) var emissive: texture_2d<f32>;
+@group(1) @binding(0) var smp: sampler;
+@group(1) @binding(1) var base_color: texture_2d<f32>;
+@group(1) @binding(2) var normal: texture_2d<f32>;
+@group(1) @binding(3) var pbr: texture_2d<f32>; //ambient roughness metallic
+@group(1) @binding(4) var emissive: texture_2d<f32>;
 
 struct PointLight {
     position: vec4<f32>, //view space xyz+radius
     color: vec4<f32>, //rgb+intensity
     view_to_shadow: mat4x4<f32>,
 }
-@group(3) @binding(0) var<storage, read> point_lights: array<PointLight>;
+@group(2) @binding(0) var<storage, read> point_lights: array<PointLight>;
 
 struct DirectionalLight {
     direction: vec4<f32>, //view space xyz+radius
     color: vec4<f32>, //rgb+intensity
     view_to_shadow: mat4x4<f32>,
 }
-@group(3) @binding(1) var<storage, read> directional_lights: array<DirectionalLight>;
+@group(2) @binding(1) var<storage, read> directional_lights: array<DirectionalLight>;
 
 struct SpotLight {
     position: vec4<f32>,//xyz+inner angle
@@ -40,7 +42,8 @@ struct SpotLight {
     color: vec4<f32>,
     view_to_shadow: mat4x4<f32>,
 }
-@group(3) @binding(2) var<storage, read> spot_lights: array<SpotLight>;
+@group(2) @binding(2) var<storage, read> spot_lights: array<SpotLight>;
+
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -79,25 +82,24 @@ fn ident() -> mat4x4<f32> {
     );
 }
 
-fn calculate_bones(vertex: Vertex) -> mat4x4<f32> {
+@group(3) @binding(0) var<storage, read> skeletons: array<mat4x4<f32>>;
+fn calculate_bones_position(vertex: Vertex, instance_index: u32) -> vec4<f32> {
+    let position = vec4<f32>(vertex.position, 1.0);
     if(all(vertex.weights == vec4<f32>(0.0))) {
-        return ident();
+        return position;
     }
-    let inv_bind = ident();
-    let animation = array<mat4x4<f32>, 4>(ident(), ident(), ident(), ident());
-    let bone1 = animation[i32(vertex.bones.x)] * vertex.weights.x;
-    let bone2 = animation[i32(vertex.bones.y)] * vertex.weights.y;
-    let bone3 = animation[i32(vertex.bones.z)] * vertex.weights.z;
-    let bone4 = animation[i32(vertex.bones.w)] * vertex.weights.w;
-    return bone1 * bone2 * bone3 * bone4;
+    let bone1 = skeletons[u32(vertex.bones.x)] * position * vertex.weights.x;
+    let bone2 = skeletons[u32(vertex.bones.y)] * position * vertex.weights.y;
+    let bone3 = skeletons[u32(vertex.bones.z)] * position * vertex.weights.z;
+    let bone4 = skeletons[u32(vertex.bones.w)] * position * vertex.weights.w;
+    return bone1 + bone2 + bone3 + bone4;
 }
 
 @vertex
 fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VSOut {
     var v: VSOut;
     let modelview = mat4x4<f32>(vertex.modelview_0, vertex.modelview_1, vertex.modelview_2, vertex.modelview_3);
-    let bones = calculate_bones(vertex);
-    v.position = modelview * bones * vec4<f32>(vertex.position, 1.0);
+    v.position = modelview * calculate_bones_position(vertex, instance_index);
     v.normal = normalize((modelview * vec4<f32>(vertex.normal, 0.0)).xyz);
     v.tangent = normalize((modelview * vec4<f32>(vertex.tangent, 0.0)).xyz);
     v.out_position = camera.projection * v.position;
@@ -250,6 +252,7 @@ fn solid_main(in: VSOut) -> @location(0) vec4<f32> {
     }
     final_color = apply_lights(in, final_color);
     final_color = apply_fog(in.position, final_color);
+
     return final_color;
 }
 

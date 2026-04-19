@@ -94,6 +94,8 @@ Node :: struct {
     parent_node: uint, //for easier copying
     type: Node_Type,
     data: uint, //index into Models/Cameras/Lights
+    animated: bool,
+    skin: uint,
 }
 
 //a 'scene' is merely an arrangment of assets.
@@ -108,7 +110,7 @@ Scene :: struct {
     meshes: []Mesh, //'primitives'
     colliders: []spatial.Tri_Mesh,
     textures: []Texture,
-    materials: []Material,
+    materials: []CombinedMaterial,
     skeletons: []Skeleton, //'skins'
     animations: []Animation,
     //instanced data
@@ -135,7 +137,7 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     s.copied = true
     s.models = make([]Model, len(scene.models))
     for &model, i in s.models {
-        model.materials = make([]^Material, len(scene.models[i].materials))
+        model.materials = make([]^CombinedMaterial, len(scene.models[i].materials))
         copy(model.materials, scene.models[i].materials)
         model.meshes = make([]^Mesh, len(scene.models[i].meshes))
         copy(model.meshes, scene.models[i].meshes)
@@ -200,10 +202,11 @@ load_image :: proc(opts: cgltf.options, image: cgltf.image) -> Texture {
 }
 
 @(private)
-load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material) -> Material {
+load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material) -> CombinedMaterial {
     filtering := true
     tiling := [2]bool{false, false}
     base_color_tex: Texture = white_tex
+    base_color_tint: [4]f32 = 1
     if material.pbr_metallic_roughness.base_color_texture.texture != nil {
         base_color_index := cgltf.image_index(data, material.pbr_metallic_roughness.base_color_texture.texture.image_)
         base_color_tex = scene.textures[base_color_index]
@@ -212,6 +215,9 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
         filtering = sampler.mag_filter == .linear
         tiling[0] = sampler.wrap_s != .clamp_to_edge
         tiling[1] = sampler.wrap_t != .clamp_to_edge
+    }
+    if material.pbr_metallic_roughness.base_color_factor != 0 {
+        base_color_tint = material.pbr_metallic_roughness.base_color_factor
     }
 
     normal_tex: Texture = normal_tex
@@ -233,7 +239,8 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
         emissive_tex = scene.textures[emissive_index]
     }
 
-    return make_material(base_color_tex, normal_tex, pbr_tex, emissive_tex, filtering, tiling)
+    ret_material := make_material(base_color_tex, normal_tex, pbr_tex, emissive_tex, filtering, tiling)
+    return {ret_material, base_color_tint}
 }
 
 @(private)
@@ -244,7 +251,6 @@ load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: Mes
     if cgltf.accessor_unpack_indices(primitive.indices, raw_data(indices), 4, indices_len) < indices_len {
         fmt.eprintln("failed to load all indices!")
     }
-    fmt.println(indices)
     vertices: #soa[]Vertex = nil
     defer delete(vertices)
     default_colors := true
@@ -394,7 +400,7 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
         scene.textures[i] = load_image(opts, image)
     }
 
-    scene.materials = make([]Material, len(data.materials))
+    scene.materials = make([]CombinedMaterial, len(data.materials))
     for material, i in data.materials {
         scene.materials[i] = load_material(data, &scene, material)
     }
@@ -412,7 +418,7 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
     for mesh, i in data.meshes {
         model := &scene.models[i]
         model.meshes = make([]^Mesh, len(mesh.primitives))
-        model.materials = make([]^Material, len(mesh.primitives))
+        model.materials = make([]^CombinedMaterial, len(mesh.primitives))
         for primitive, j in mesh.primitives {
 
             material_index := cgltf.material_index(data, primitive.material)
@@ -476,6 +482,10 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
             index := cgltf.mesh_index(data, node.mesh)
             scene.nodes[i].type = .Model
             scene.nodes[i].data = index
+            if node.skin != nil {
+                scene.nodes[i].animated = true
+                scene.nodes[i].skin = cgltf.skin_index(data, node.skin)
+            }
         }
         if node.camera != nil {
             index := cgltf.camera_index(data, node.camera)
@@ -520,7 +530,8 @@ draw_node :: proc(scene: ^Scene, node: ^Node, t: f64) {
     switch node.type {
     case .Node:
     case .Model:
-        draw_model(scene.models[node.data], transform.smooth(&node.transform, t))
+        bones := calculate_skeleton(scene, node, t)
+        draw_model(scene.models[node.data], transform.smooth(&node.transform, t), bones)
     case .Camera:
         //...
     case .Light:
@@ -568,7 +579,7 @@ delete_scene :: proc(scene: ^Scene) {
         }
         delete(scene.meshes)
         for &material in scene.materials {
-            delete_material(material)
+            delete_material(material.material)
         }
         delete(scene.materials)
         for &tri_mesh in scene.colliders {

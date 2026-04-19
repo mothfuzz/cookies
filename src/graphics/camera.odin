@@ -20,10 +20,48 @@ Camera :: struct {
     viewport: [4]f32,
     using uniforms: Camera_Uniforms,
 }
+
+Screen_Uniforms :: struct {
+    size: [4]f32, //width, height, near, far
+    color: [4]f32, //rgb + fog start
+}
+screen_uniforms: Screen_Uniforms = {
+    size={0, 0, 0.1, 0},
+}
+screen_uniforms_buffer: wgpu.Buffer
+uniform_bind_group: wgpu.BindGroup
+
+set_background_color :: proc(color: [3]f32) {
+    screen_uniforms.color.rgb = linalg.vector4_srgb_to_linear([4]f32{color.r, color.g, color.b, 1.0}).rgb
+}
+get_background_color :: proc() -> [3]f32 {
+    c := screen_uniforms.color.rgb
+    return linalg.vector4_linear_to_srgb([4]f32{c.r, c.g, c.b, 1.0}).rgb
+}
+
+set_render_distance :: proc(far: f32) {
+    screen_uniforms.size[3] = far
+}
+
+get_screen_size :: proc() -> [2]f32 {
+    return screen_uniforms.size.xy
+}
+
+set_fog_distance :: proc(fog_start: f32) {
+    screen_uniforms.color[3] = fog_start
+}
+
 camera_buffer: wgpu.Buffer
 camera_layout_entries := []wgpu.BindGroupLayoutEntry{
+    //screen bindings
     wgpu.BindGroupLayoutEntry{
         binding = 0,
+        visibility = {.Vertex, .Fragment},
+        buffer = {type=.Uniform},
+    },
+    //actual camera data
+    wgpu.BindGroupLayoutEntry{
+        binding = 1,
         visibility = {.Vertex, .Fragment},
         buffer = {type=.Uniform},
     },
@@ -33,7 +71,8 @@ camera_layout: wgpu.BindGroupLayout
 make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}) -> (cam: Camera) {
     cam.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Uniform, .CopyDst}, size=size_of(Camera_Uniforms)})
     bindings := []wgpu.BindGroupEntry{
-        {binding = 0, buffer = cam.buffer, size = size_of(Camera_Uniforms)},
+        {binding = 0, buffer = screen_uniforms_buffer, size = size_of(Screen_Uniforms)},
+        {binding = 1, buffer = cam.buffer, size = size_of(Camera_Uniforms)},
     }
     cam.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
         layout = camera_layout,

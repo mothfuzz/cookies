@@ -8,6 +8,7 @@ MeshDraw :: struct {
     using dynamic_material: DynamicMaterial,
     is_sprite: bool,
     is_billboard: bool,
+    bones: []matrix[4,4]f32,
 }
 
 //more often do we have the same mesh with different textures
@@ -47,7 +48,7 @@ delete_batches :: proc() {
 
 draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0,
                   clip_rect: [4]f32 = 0, tint: [4]f32 = 1,
-                  sprite: bool = false, billboard: bool = false) {
+                  sprite: bool = false, billboard: bool = false, bones: []matrix[4,4]f32 = nil) {
     model := model
     batch: ^map[Material][dynamic]MeshDraw
     if mesh.transparent || material.base_color.transparent || (tint.a < 1 && tint.a > 0) {
@@ -60,7 +61,7 @@ draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0,
             batch[material] = make([dynamic]MeshDraw, 0)
         }
         instances := &batch[material]
-        append(instances, MeshDraw{model, {clip_rect, tint}, sprite, billboard})
+        append(instances, MeshDraw{model, {clip_rect, tint}, sprite, billboard, bones})
     }
     if mesh.solid && material.base_color.solid && tint.a == 1.0 {
         //fmt.println("transparent draw")
@@ -73,7 +74,7 @@ draw_mesh :: proc(mesh: Mesh, material: Material, model: matrix[4, 4]f32 = 0,
             batch[material] = make([dynamic]MeshDraw, 0)
         }
         instances := &batch[material]
-        append(instances, MeshDraw{model, {clip_rect, tint}, sprite, billboard})
+        append(instances, MeshDraw{model, {clip_rect, tint}, sprite, billboard, bones})
     }
 }
 
