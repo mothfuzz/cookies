@@ -72,6 +72,9 @@ step :: proc(delta_time: f64) -> bool {
         hook(1.0)
     }*/
     graphics.render(alpha)
+
+    free_all(context.temp_allocator)
+    
     return true
 }
 

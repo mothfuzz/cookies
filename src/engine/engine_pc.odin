@@ -118,6 +118,8 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
         /*for hook in draw_hooks {
             hook(t)
         }*/
+
+        free_all(context.temp_allocator)
     }
 
     if quit != nil {
