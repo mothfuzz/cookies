@@ -81,7 +81,6 @@ tick :: proc() {
 }
 
 draw :: proc(a: f64, dt: f64) {
-    fmt.println(a)
     graphics.draw_scene(&brainstem, a, dt, &brainstem_anim)
     graphics.draw_scene(&brainstem2, a, dt, &brainstem2_anim)
     graphics.draw_directional_light(light)

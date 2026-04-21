@@ -103,6 +103,7 @@ progress :: proc(anim: ^Animation_State, dt: f64) {
             for &channel, c in a.channels {
                 source_channel := &source_channels[c]
                 last_frame: uint = len(source_channel.input) - 1
+                //handle looping/clamping
                 if a.speed > 0 {
                     if current_time > a.duration {
                         if a.looping {
@@ -113,12 +114,6 @@ progress :: proc(anim: ^Animation_State, dt: f64) {
                             a.current_time = a.duration
                             channel.next_frame = last_frame
                             channel.prev_frame = last_frame
-                        }
-                    } else {
-                        next_frame := min(channel.next_frame + 1, last_frame)
-                        if a.current_time > source_channel.input[next_frame] {
-                            channel.prev_frame = channel.next_frame
-                            channel.next_frame = next_frame
                         }
                     }
                 }
@@ -133,12 +128,20 @@ progress :: proc(anim: ^Animation_State, dt: f64) {
                             channel.next_frame = 0
                             channel.prev_frame = 0
                         }
-                    } else {
-                        next_frame := max(channel.next_frame - 1, 0)
-                        if a.current_time < source_channel.input[next_frame] {
-                            channel.prev_frame = channel.next_frame
-                            channel.next_frame = next_frame
-                        }
+                    }
+                }
+
+                //actually progress animation, skipping any keyframes we missed with a large dt
+                if a.speed > 0 {
+                    for channel.next_frame < last_frame && a.current_time > source_channel.input[channel.next_frame] {
+                        channel.prev_frame = channel.next_frame
+                        channel.next_frame += 1
+                    }
+                }
+                if a.speed < 0 {
+                    for channel.next_frame > 0 && a.current_time < source_channel.input[channel.next_frame] {
+                        channel.prev_frame = channel.next_frame
+                        channel.next_frame -= 1
                     }
                 }
 
@@ -146,27 +149,24 @@ progress :: proc(anim: ^Animation_State, dt: f64) {
                 if channel.prev_frame != channel.next_frame {
                     prev_time := source_channel.input[channel.prev_frame]
                     next_time := source_channel.input[channel.next_frame]
-                    t = (a.current_time - prev_time) / (next_time - prev_time)
+                    t = clamp((a.current_time - prev_time) / (next_time - prev_time), 0, 1)
                 }
-                //note: even though it's interpolated already,
-                //we're doing additional interpolation in the transform itself
-                //in case of switching animations or other active transforms
                 switch o in source_channel.output {
                 case Keyframes_Translation:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     translation := linalg.lerp(prev_frame, next_frame, t)
-                    transform.set_position(&anim.scene.nodes[source_channel.target_node].transform, translation, true)
+                    transform.set_position(&anim.scene.nodes[source_channel.target_node].transform, translation)
                 case Keyframes_Rotation:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     rotation := linalg.quaternion_slerp(prev_frame, next_frame, t)
-                    transform.set_orientation_quaternion(&anim.scene.nodes[source_channel.target_node].transform, rotation, true)
+                    transform.set_orientation_quaternion(&anim.scene.nodes[source_channel.target_node].transform, rotation)
                 case Keyframes_Scale:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     scale := linalg.lerp(prev_frame, next_frame, t)
-                    transform.set_scale(&anim.scene.nodes[source_channel.target_node].transform, scale, true)
+                    transform.set_scale(&anim.scene.nodes[source_channel.target_node].transform, scale)
                 }
             }
         } else {
@@ -177,13 +177,13 @@ progress :: proc(anim: ^Animation_State, dt: f64) {
                 switch o in source_channel.output {
                 case Keyframes_Translation:
                     translation := o[channel.next_frame]
-                    transform.set_position(&anim.scene.nodes[source_channel.target_node].transform, translation, true)
+                    transform.set_position(&anim.scene.nodes[source_channel.target_node].transform, translation)
                 case Keyframes_Rotation:
                     rotation := o[channel.next_frame]
-                    transform.set_orientation_quaternion(&anim.scene.nodes[source_channel.target_node].transform, rotation, true)
+                    transform.set_orientation_quaternion(&anim.scene.nodes[source_channel.target_node].transform, rotation)
                 case Keyframes_Scale:
                     scale := o[channel.next_frame]
-                    transform.set_scale(&anim.scene.nodes[source_channel.target_node].transform, scale, true)
+                    transform.set_scale(&anim.scene.nodes[source_channel.target_node].transform, scale)
                 }
             }
         }
