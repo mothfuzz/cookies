@@ -242,7 +242,7 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
     }
 
     ret_material := make_material(base_color_tex, normal_tex, pbr_tex, emissive_tex, filtering, tiling)
-    return {ret_material, base_color_tint}
+    return {ret_material, {tint=base_color_tint}}
 }
 
 @(private)
@@ -582,7 +582,7 @@ delete_scene :: proc(scene: ^Scene) {
         }
         delete(scene.meshes)
         for &material in scene.materials {
-            delete_material(material.material)
+            delete_material(material.base)
         }
         delete(scene.materials)
         for &tri_mesh in scene.colliders {

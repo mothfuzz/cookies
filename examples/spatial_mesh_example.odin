@@ -104,12 +104,17 @@ tick :: proc() {
     ball_velocity.z = clamp(ball_velocity.z, -Ball_Max_Speed, +Ball_Max_Speed)
     ball_velocity = spatial.move(ball_trans.position, Radius, ball_velocity, testmap.colliders)
     transform.translate(&ball_trans, ball_velocity)
+    //a ball rolls at linear velocity / radius
+    //but that doesn't look right so we have a 0.7 in there...
+    transform.rotatex(&ball_trans, ball_velocity.z*(0.7/Radius))
+    transform.rotatez(&ball_trans, -ball_velocity.x*(0.7/Radius))
 
     graphics.look_to(&cam, ball_trans.position + {c, camera_height, s}, ball_trans.position)
 }
 
 draw :: proc(t: f64, dt: f64) {
     graphics.draw_directional_light(dir_light)
+    graphics.draw_model(ball.models[0], transform.smooth(&ball_trans, t))
     graphics.draw_mesh(ball.meshes[0], ball.materials[0], transform.smooth(&ball_trans, t))
     graphics.draw_scene(&testmap, t, dt)
     graphics.ui_draw_text("WASD to move ball", font, {-Screen_Width/2+2, Screen_Height/2}, 1)
