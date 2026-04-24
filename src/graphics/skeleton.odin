@@ -97,4 +97,5 @@ bind_skeletons :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, skeletons
     })
 
     wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, current_skeletons_bind_group)
+    skeletons_bound = true
 }
