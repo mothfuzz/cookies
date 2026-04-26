@@ -79,7 +79,7 @@ ui_draw_text :: proc(text: string, font: Font, pos: [2]f32 = 0, color: [4]f32 = 
 }
 
 /*lord*/ char_quad: Mesh
-draw_text :: proc(text: string, font: Font, model: matrix[4,4]f32 = 1, color: [4]f32 = 1, sprite: bool=true, billboard: bool=false) {
+draw_text :: proc(frame: ^Frame, text: string, font: Font, model: matrix[4,4]f32 = 1, color: [4]f32 = 1, sprite: bool=true, billboard: bool=false) {
 
     if char_quad.size == 0 {
         char_quad = make_mesh([]Vertex{
@@ -109,7 +109,7 @@ draw_text :: proc(text: string, font: Font, model: matrix[4,4]f32 = 1, color: [4
             (quad.s1 - quad.s0)*FONT_RES,
             (quad.t1 - quad.t0)*FONT_RES,
         }
-        draw_mesh(char_quad, font.material, model * trans, clip_rect, color, sprite, billboard)
+        draw_mesh(frame, char_quad, font.material, trans=model * trans, base_color_tint=color, clip_rect=clip_rect, sprite=sprite, billboard=billboard)
     }
 
 }

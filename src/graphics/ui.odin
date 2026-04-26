@@ -146,6 +146,27 @@ draw_ui :: proc(fill_rect: [4]f32, color: [4]f32, texture: Texture, clip_rect: [
     z_index += 1
 }
 
+//0,0 is center, rect is -1:1 xywh, clip_rect is xywh, 0:w & 0:h of texture
+ui_draw_rect :: proc(rect: [4]f32, color: [4]f32 = 1, texture: Texture = white_tex, clip_rect: [4]f32 = 0) {
+    sx := screen_uniforms.size.x/2
+    sy := screen_uniforms.size.y/2
+    fill_rect := [4]f32{
+        rect[0]/sx,
+        rect[1]/sy,
+        rect[2]/sx,
+        rect[3]/sy,
+    }
+    tx := f32(texture.size.x)
+    ty := f32(texture.size.y)
+    clip_rect := [4]f32{
+        clip_rect[0]/tx,
+        clip_rect[1]/ty,
+        (clip_rect[2]==0?tx:clip_rect[2])/tx,
+        (clip_rect[3]==0?ty:clip_rect[2])/ty,
+    }
+    draw_ui(fill_rect, color, texture, clip_rect)
+}
+
 render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder) {
     render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
         label = "ui",

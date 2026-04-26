@@ -12,8 +12,8 @@ Texture :: struct {
     resolve: wgpu.Texture,
     resolve_view: wgpu.TextureView,
     size: [2]uint,
-    transparent: bool,
-    solid: bool,
+    is_trans: bool,
+    is_solid: bool,
 }
 
 make_render_target :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Unorm, resolve_format: wgpu.TextureFormat = .RGBA8UnormSrgb) -> (tex: Texture) {
@@ -46,7 +46,8 @@ make_render_target :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Uno
     })
     tex.resolve_view = wgpu.TextureCreateView(tex.resolve)
     tex.size = size
-    tex.transparent = false
+    tex.is_solid = true //I guess
+    tex.is_trans = false
     return
 }
 
@@ -132,13 +133,13 @@ make_mips :: proc(input: []u32, size: [2]uint, include_original: bool = false) -
     return
 }
 
-make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (tex: Texture) {
+make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false, premultiply_alpha: bool = true) -> (tex: Texture) {
     for pixel in input {
         if (pixel & 0xff000000) > 0 && (pixel & 0xff000000) < 0xff000000 {
-            tex.transparent = true
+            tex.is_trans = true
         }
         if (pixel & 0xff000000) == 0xff000000 {
-            tex.solid = true
+            tex.is_solid = true
         }
     }
     //create texture & write all mips, including original
@@ -220,9 +221,9 @@ load_data_2d :: proc(img: []byte) -> (img_u32: []u32, x, y: uint) {
 }
 
 //inherently 2D
-make_texture_from_image :: proc(img: []byte, linear: bool = false) -> (tex: Texture) {
+make_texture_from_image :: proc(img: []byte, linear: bool = false, premultiply_alpha: bool = true) -> (tex: Texture) {
     img_u32, x, y := load_data_2d(img)
-    tex = make_texture_2D(img_u32, {x, y}, linear)
+    tex = make_texture_2D(img_u32, {x, y}, linear, premultiply_alpha)
     delete(img_u32)
     return
 }
@@ -287,7 +288,7 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
         final_texture[i] |= (ambient_final[i] & 0xff) << (0*8)
     }
 
-    tex = make_texture_2D(final_texture, {uint(x), uint(y)}, true)
+    tex = make_texture_2D(final_texture, {uint(x), uint(y)}, true, false)
 
     return
 }

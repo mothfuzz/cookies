@@ -1,8 +1,8 @@
 package graphics
 
 import "core:fmt"
-import "core:math/linalg"
 import "base:runtime"
+
 import "vendor:wgpu"
 
 Renderer :: struct {
@@ -60,9 +60,6 @@ view_format: wgpu.TextureFormat
 configure_surface :: proc(size: [2]uint = 0) {
     if size != 0 {
         screen_uniforms.size.xy = {f32(size.x), f32(size.y)}
-        for cam in cameras {
-            calculate_projection(cam)
-        }
     }
 
     fmt.println("reconfiguring draw surface...")
@@ -439,10 +436,7 @@ init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
 }
 
 quit :: proc() {
-    delete_batches()
     delete_ui_batches()
-    delete_lights()
-    delete(cameras)
     delete_defaults()
     wgpu.RenderPipelineRelease(ren.solid_pipeline)
     wgpu.RenderPipelineRelease(ren.trans_pipeline)
@@ -465,95 +459,203 @@ quit :: proc() {
     wgpu.InstanceRelease(ren.instance)
 }
 
-cameras: []^Camera
-set_camera :: proc(cam: ^Camera) {
-    delete(cameras)
-    cameras = make([]^Camera, 1)
-    cameras[0] = cam
+//now for the good part!
+
+Frame :: struct {
+    lights: [dynamic]Light_Draw,
+    cameras: [dynamic]Camera,
+    action: map[Material_Hash]map[Mesh_Hash][dynamic]Mesh_Draw,
+    //resources
+    meshes: map[Mesh_Hash]Mesh,
+    materials: map[Material_Hash]Material,
 }
-set_cameras :: proc(cams: []^Camera) {
-    delete(cameras)
-    cameras = make([]^Camera, len(cams))
-    copy(cameras, cams)
-}
 
-//renders all meshes to a specific view with a specific pipeline
-render_meshes :: proc(render_pass: wgpu.RenderPassEncoder, pipeline: wgpu.RenderPipeline, cam: ^Camera, all_meshes: []MeshRenderItem, all_indices: []int, t: f64) {
-    wgpu.RenderPassEncoderSetPipeline(render_pass, pipeline)
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, uniform_bind_group)
-    bind_camera(render_pass, 0, cam, t) //view produced here
-    bind_lights(render_pass, 2, cam)
-
-    reset_modelviews(all_meshes[:])
-    indices := frustum_culling(cam, all_meshes[:], all_indices[:])
-    defer delete(indices)
-
-    current_mesh: Mesh
-    current_material: Material
-    instances := make([dynamic]InstanceData, 0)
-    skeletons := make([dynamic]matrix[4,4]f32)
-    flush := false
-    defer delete(instances)
-    defer delete(skeletons)
-    for i in 0..<len(indices) {
-        //batch em up
-        instance := &all_meshes[indices[i]]
-        if instance.mesh != current_mesh {
-            current_mesh = instance.mesh
-            bind_mesh(render_pass, current_mesh)
-        }
-        if instance.material != current_material {
-            current_material = instance.material
-            bind_material(render_pass, 1, current_material)
-        }
-        calculate_modelview(instance, cam)
-        append(&instances, InstanceData{modelview=instance.modelview, dynamic_material=instance.dynamic_material})
-        if instance.bones == nil {
-            append(&skeletons, 1)
-        } else {
-            append(&skeletons, ..instance.bones)
-        }
-
-        //if next mesh is different, or there is no next mesh, draw the current batch
-        switch {
-        case i+1 < len(indices):
-            instance := &all_meshes[indices[i+1]]
-            if instance.mesh != current_mesh || instance.material != current_material {
-                flush = true
+delete_frame :: proc(frame: Frame) {
+    delete(frame.lights)
+    delete(frame.cameras)
+    for material, meshes in frame.action {
+        for mesh, instances in meshes {
+            for instance in instances {
+                if instance.bones != nil {
+                    delete(instance.bones)
+                }
             }
-        case i+1 == len(indices):
-            flush = true
+            delete(instances)
         }
+        delete(meshes)
+    }
+    delete(frame.action)
+    delete(frame.meshes)
+    delete(frame.materials)
+}
 
-        if flush {
-            bind_skeletons(render_pass, 3, skeletons[:], u32(len(instances)))
-            draw_mesh_instances(render_pass, current_mesh, instances[:])
+draw_point_light :: proc(frame: ^Frame, light: Point_Light, trans: matrix[4,4]f32 = 1) {
+    append(&frame.lights, Light_Draw{light, trans})
+}
+draw_directional_light :: proc(frame: ^Frame, light: Directional_Light, trans: matrix[4,4]f32 = 1) {
+    append(&frame.lights, Light_Draw{light, trans})
+}
+draw_spot_light :: proc(frame: ^Frame, light: Spot_Light, trans: matrix[4,4]f32 = 1) {
+    append(&frame.lights, Light_Draw{light, trans})
+}
+draw_light :: proc{draw_point_light, draw_directional_light, draw_spot_light}
+
+draw_camera :: proc(frame: ^Frame, camera: ^Camera, a: f64 = 1.0) {
+    calculate_camera(camera, a)
+    append(&frame.cameras, camera^)
+}
+
+draw_mesh :: proc(f: ^Frame, mesh: Mesh, material: Material, trans: matrix[4,4]f32 = 1,
+                  clip_rect: [4]f32 = 0,
+                  base_color_tint: [4]f32 = 1,
+                  ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
+                  emissive_tint: [3]f32 = 1,
+                  sprite: bool = false, billboard: bool = false,
+                  bones: []matrix[4,4]f32 = nil) {
+    //make sure resources are set
+    if !(mesh.hash in f.meshes) {
+        f.meshes[mesh.hash] = mesh
+    }
+    if !(material.hash in f.materials) {
+        f.materials[material.hash] = material
+    }
+
+    //get the batch
+    if f.action == nil {
+        f.action = make(map[Material_Hash]map[Mesh_Hash][dynamic]Mesh_Draw)
+    }
+    if !(material.hash in f.action) {
+        f.action[material.hash] = make(map[Mesh_Hash][dynamic]Mesh_Draw)
+    }
+    meshes := &f.action[material.hash]
+    if !(mesh.hash in meshes) {
+        meshes[mesh.hash] = make([dynamic]Mesh_Draw)
+    }
+    instances := &meshes[mesh.hash]
+
+    pbr_tint := [4]f32{ambient_tint, roughness_tint, metallic_tint, 1}
+    emissive_tint := [4]f32{emissive_tint.r, emissive_tint.g, emissive_tint.b, 1}
+    dynamic_material := Dynamic_Material{clip_rect, base_color_tint, pbr_tint, emissive_tint}
+
+    draw := Mesh_Draw{{trans, dynamic_material}, sprite, billboard, bones, {}}
+    calculate_mesh_local(&draw, mesh, material)
+
+    append(instances, draw)
+}
+
+draw_sprite :: proc(frame: ^Frame, material: Material, model: matrix[4, 4]f32 = 1,
+                    clip_rect: [4]f32 = 0,
+                    base_color_tint: [4]f32 = 1,
+                    ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
+                    emissive_tint: [3]f32 = 1,
+                    billboard: bool = true) {
+    draw_mesh(frame, quad_mesh, material, model, clip_rect,
+              base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint, true, billboard)
+}
+
+Mesh_Batch :: struct {
+    mesh: Mesh,
+    material: Material,
+    instances: []Mesh_Draw,
+}
+flatten_action :: proc(f: Frame) -> []Mesh_Batch {
+    batches := make([dynamic]Mesh_Batch)
+    for material_hash, meshes in f.action {
+        for mesh_hash, instances in meshes {
+            mesh := f.meshes[mesh_hash]
+            material := f.materials[material_hash]
+            append(&batches, Mesh_Batch{mesh, material, instances[:]})
+        }
+    }
+    return batches[:]
+}
+clear_action :: proc(f: ^Frame) {
+    for material, &meshes in f.action {
+        for mesh, &instances in meshes {
+            for instance in instances {
+                if instance.bones != nil {
+                    delete(instance.bones)
+                }
+            }
             clear(&instances)
-            clear(&skeletons)
-            flush = false
         }
     }
-
 }
 
-append_render_list :: proc(all_meshes: ^[dynamic]MeshRenderItem, all_indices: ^[dynamic]int, batches: ^map[Mesh]map[Material][dynamic]MeshDraw) {
-    for mesh, &batch in batches {
-        for material, &instances in batch {
-            for instance, i in instances {
-                append(all_meshes, MeshRenderItem{mesh=mesh, material=material, draw=instance})
-                append(all_indices, len(all_indices))
+Draw_Call :: struct {
+    mesh: Mesh,
+    material: Material,
+    instances: []Instance,
+    skeletons: []matrix[4,4]f32,
+}
+
+//embarassingly parallel.
+compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera) -> []Draw_Call {
+    draws := make([dynamic]Draw_Call)
+    for batch, i in batches {
+        trans := batch.mesh.is_trans || batch.material.base_color.is_trans
+        solid := batch.mesh.is_solid || batch.material.base_color.is_solid
+        instances := make([dynamic]Instance)
+        skeletons := make([dynamic]matrix[4,4]f32)
+        for instance in batch.instances {
+            instance_is_trans := instance.base_color_tint.a > 0 && instance.base_color_tint.a < 1
+            instance_is_solid := instance.base_color_tint.a == 1
+            if !trans && !solid && !instance_is_trans && !instance_is_solid {
+                //don't render a totally invisible mesh
+                continue;
+            }
+            instance := instance
+            //check it against frustum before doing world calculations
+            //if it passes, compute billboards/modelview/etc.
+            if bounds_in_frustum(camera, instance.bounding_box) {
+                calculate_mesh_world(&instance, camera)
+                append(&instances, instance)
+                if instance.bones == nil {
+                    append(&skeletons, 1)
+                } else {
+                    append(&skeletons, ..instance.bones)
+                }
             }
         }
+        if len(instances) == 0 {
+            delete(instances)
+        } else {
+            append(&draws, Draw_Call{batch.mesh, batch.material, instances[:], skeletons[:]})
+        }
     }
-
+    return draws[:]
+}
+delete_draw_calls :: proc(draws: []Draw_Call) {
+    for d in draws {
+        delete(d.instances)
+        delete(d.skeletons)
+    }
+    delete(draws)
 }
 
-render :: proc(t: f64) {
-    if !ren.ready {
-        return
+execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Call) {
+    //lights and cameras are already bound at this point.
+    prev_material: Material_Hash
+    prev_mesh: Mesh_Hash
+    for draw in draws {
+        if prev_material == 0 || draw.material.hash != prev_material {
+            bind_material(render_pass, 1, draw.material)
+        }
+        if prev_mesh == 0 || draw.mesh.hash != prev_mesh {
+            bind_mesh(render_pass, draw.mesh)
+        }
+        bind_skeletons(render_pass, 3, draw.skeletons, u32(len(draw.instances)))
+        draw_mesh_instances(render_pass, draw.mesh, draw.instances)
     }
+}
 
-    //t is the interpolation factor.
+render_frame :: proc(frame: Frame) {
+
+    //context.allocator = context.temp_allocator
+    //defer free_all(context.temp_allocator)
+
+    defer delete_frame(frame)
+
     //prepare the screen surface
     surface_tex := wgpu.SurfaceGetCurrentTexture(ren.surface)
     switch surface_tex.status {
@@ -575,21 +677,8 @@ render :: proc(t: f64) {
     command_encoder := wgpu.DeviceCreateCommandEncoder(ren.device, nil)
     defer wgpu.CommandEncoderRelease(command_encoder)
 
-    //gather all meshes into a list
-    all_meshes := make([dynamic]MeshRenderItem)
-    defer delete(all_meshes)
-    all_indices := make([dynamic]int)
-    defer delete(all_indices)
 
-    //solid AND opaque for lights
-    append_render_list(&all_meshes, &all_indices, &solid_batches)
-    append_render_list(&all_meshes, &all_indices, &trans_batches)
-
-    //TODO: render both solid & trans meshes for each light with a shadow map...
-    clear(&all_meshes)
-    clear(&all_indices)
-
-    //first do simple clear-color pass
+    //begin with a simple full-screen clear pass
     clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
         label = "clear",
         colorAttachmentCount = 1,
@@ -615,45 +704,6 @@ render :: proc(t: f64) {
     })
     wgpu.RenderPassEncoderEnd(clear_pass)
     wgpu.RenderPassEncoderRelease(clear_pass)
-
-    //then execute an opaque pass for each camera
-    append_render_list(&all_meshes, &all_indices, &solid_batches)
-    for cam in cameras {
-        screen_uniforms_temp := screen_uniforms
-        cam_width, cam_height := get_viewport_size(cam)
-        screen_uniforms_temp.size.x = cam_width
-        screen_uniforms_temp.size.y = cam_height
-        if screen_uniforms_temp.color.rgb == 0 {
-            screen_uniforms_temp.color.rgb = 1
-        }
-        wgpu.QueueWriteBuffer(ren.queue, screen_uniforms_buffer, 0, &screen_uniforms_temp, size_of(Screen_Uniforms))
-
-        render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-            label = "solid",
-            colorAttachmentCount = 1,
-            colorAttachments = &wgpu.RenderPassColorAttachment{
-                view = ren.msaa_view,
-                resolveTarget = screen,
-                loadOp = .Load,
-                storeOp = .Store,
-                depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            },
-            depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-                view = ren.depth_buffer.view,
-                depthLoadOp = .Load,
-                depthStoreOp = .Store,
-                stencilLoadOp = .Load,
-                stencilStoreOp = .Store,
-            },
-        })
-
-        render_meshes(render_pass, ren.solid_pipeline, cam, all_meshes[:], all_indices[:], t)
-
-        wgpu.RenderPassEncoderEnd(render_pass)
-        wgpu.RenderPassEncoderRelease(render_pass)
-    }
-    clear(&all_meshes)
-    clear(&all_indices)
 
     //then execute a clear pass for the transparent objects...
     trans_clear_attachments := []wgpu.RenderPassColorAttachment{
@@ -691,18 +741,92 @@ render :: proc(t: f64) {
     wgpu.RenderPassEncoderEnd(trans_clear_pass)
     wgpu.RenderPassEncoderRelease(trans_clear_pass)
 
-    //then execute a transparent pass for each camera
-    append_render_list(&all_meshes, &all_indices, &trans_batches)
-    for cam in cameras {
-        screen_uniforms_temp := screen_uniforms
-        cam_width, cam_height := get_viewport_size(cam)
-        screen_uniforms_temp.size.x = cam_width
-        screen_uniforms_temp.size.y = cam_height
-        if screen_uniforms_temp.color.rgb == 0 {
-            screen_uniforms_temp.color.rgb = 1
-        }
-        wgpu.QueueWriteBuffer(ren.queue, screen_uniforms_buffer, 0, &screen_uniforms_temp, size_of(Screen_Uniforms))
+    //next get started going through the current frame's render batches...
 
+    batches := flatten_action(frame)
+    defer delete(batches)
+
+    //go through lights & render shadow maps...
+    //shadow_mapping_pass := wgpu.CommandEncoderBeginRenderPass(...)
+    //wgpu.RenderPassEncoderSetPipeline(shadow_mapping_pass, shadow_mapping_pipeline)
+    /*for light in frame.point_lights {
+        if !light.has_shadows {
+            continue
+        }
+        light_camera := Camera{} //might be multiple if point light / cascaded
+
+        //set render target...
+        
+        draws := compute_draw_calls(batches, light_camera)
+        defer delete_draw_calls(draws)
+        execute_draw_calls(draws)
+    }*/
+
+    lights := calculate_lights(frame.lights[:])
+    defer delete_lights(lights)
+
+    for camera in frame.cameras {
+
+        //gather all draw calls...
+        all_draws := compute_draw_calls(batches, camera)
+        defer delete_draw_calls(all_draws)
+
+        lights := calculate_lights_uniforms(lights, camera)
+        defer delete_lights_uniforms(lights)
+
+        //perform solid pass
+        render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+            label = "solid",
+            colorAttachmentCount = 1,
+            colorAttachments = &wgpu.RenderPassColorAttachment{
+                view = ren.msaa_view,
+                resolveTarget = screen,
+                loadOp = .Load,
+                storeOp = .Store,
+                depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            },
+            depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+                view = ren.depth_buffer.view,
+                depthLoadOp = .Load,
+                depthStoreOp = .Store,
+                stencilLoadOp = .Load,
+                stencilStoreOp = .Store,
+            },
+        })
+        wgpu.RenderPassEncoderSetPipeline(render_pass, ren.solid_pipeline)
+        bind_camera(render_pass, 0, camera)
+        bind_lights(render_pass, 2, lights)
+        solid_draws := make([dynamic]Draw_Call)
+        defer delete_draw_calls(solid_draws[:])
+        for draw in all_draws {
+            skeleton_size := 0
+            if draw.skeletons != nil {
+                skeleton_size = len(draw.skeletons)/len(draw.instances)
+            }
+            instances := make([dynamic]Instance)
+            skeletons := make([dynamic]matrix[4,4]f32)
+            for instance, i in draw.instances {
+                if (draw.mesh.is_solid || draw.material.base_color.is_solid) &&
+                    instance.base_color_tint.a == 1 {
+                    append(&instances, instance)
+                    if draw.skeletons != nil {
+                        base := i*skeleton_size
+                        append(&skeletons, ..draw.skeletons[base:base+skeleton_size])
+                    }
+                }
+            }
+            if len(instances) == 0 {
+                delete(instances)
+                delete(skeletons)
+            } else {
+                append(&solid_draws, Draw_Call{draw.mesh, draw.material, instances[:], skeletons[:]})
+            }
+        }
+        execute_draw_calls(render_pass, solid_draws[:])
+        wgpu.RenderPassEncoderEnd(render_pass)
+        wgpu.RenderPassEncoderRelease(render_pass)
+
+        //then perform trans pass
         trans_color_attachments := []wgpu.RenderPassColorAttachment{
             //accum
             {
@@ -721,7 +845,7 @@ render :: proc(t: f64) {
                 depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
             },
         }
-        render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+        render_pass = wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
             label = "trans",
             colorAttachmentCount = len(trans_color_attachments),
             colorAttachments = raw_data(trans_color_attachments),
@@ -733,16 +857,41 @@ render :: proc(t: f64) {
                 stencilStoreOp = .Store,
             },
         })
-
-        render_meshes(render_pass, ren.trans_pipeline, cam, all_meshes[:], all_indices[:], t)
-
+        wgpu.RenderPassEncoderSetPipeline(render_pass, ren.trans_pipeline)
+        bind_camera(render_pass, 0, camera)
+        bind_lights(render_pass, 2, lights)
+        trans_draws := make([dynamic]Draw_Call)
+        defer delete_draw_calls(trans_draws[:])
+        for draw in all_draws {
+            skeleton_size := 0
+            if draw.skeletons != nil {
+                skeleton_size = len(draw.skeletons)/len(draw.instances)
+            }
+            instances := make([dynamic]Instance)
+            skeletons := make([dynamic]matrix[4,4]f32)
+            for instance, i in draw.instances {
+                if draw.mesh.is_trans || draw.material.base_color.is_trans ||
+                    (instance.base_color_tint.a > 0 && instance.base_color_tint.a < 1) {
+                    append(&instances, instance)
+                    if draw.skeletons != nil {
+                        base := i*skeleton_size
+                        append(&skeletons, ..draw.skeletons[base:base+skeleton_size])
+                    }
+                }
+            }
+            if len(instances) == 0 {
+                delete(instances)
+                delete(skeletons)
+            } else {
+                append(&trans_draws, Draw_Call{draw.mesh, draw.material, instances[:], skeletons[:]})
+            }
+        }
+        execute_draw_calls(render_pass, trans_draws[:])
         wgpu.RenderPassEncoderEnd(render_pass)
         wgpu.RenderPassEncoderRelease(render_pass)
     }
-    clear(&all_meshes)
-    clear(&all_indices)
 
-    //finally render composite pass...
+    //finally, execute the composite pass
     composite_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
         label = "composite",
         colorAttachmentCount = 1,
@@ -763,17 +912,18 @@ render :: proc(t: f64) {
     wgpu.RenderPassEncoderEnd(composite_pass)
     wgpu.RenderPassEncoderRelease(composite_pass)
 
-    //cleanup the lights & meshes
-    clear_lights()
-    clear_batches()
-
-    //render the UI on top
+    //render the UI on top of everything else
     render_ui(screen, command_encoder)
 
-    //then blast it
+    //then blast it!!!
     command_buffer := wgpu.CommandEncoderFinish(command_encoder)
     defer wgpu.CommandBufferRelease(command_buffer)
 
     wgpu.QueueSubmit(ren.queue, {command_buffer})
     wgpu.SurfacePresent(ren.surface)
+
+    //cleanup...
+    //clear(&frame.cameras)
+    //clear(&frame.lights)
+    //clear_action(frame)
 }

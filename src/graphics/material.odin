@@ -1,7 +1,7 @@
 package graphics
 
 import "vendor:wgpu"
-
+import "base:runtime"
 
 material_layout_entries := []wgpu.BindGroupLayoutEntry{
     wgpu.BindGroupLayoutEntry{
@@ -36,10 +36,14 @@ material_layout_entries := []wgpu.BindGroupLayoutEntry{
 }
 material_layout: wgpu.BindGroupLayout
 
-DynamicMaterial :: struct {
+Dynamic_Material :: struct {
     clip_rect: [4]f32,
-    tint: [4]f32, //base_color_tint
+    base_color_tint: [4]f32, //rgba
+    pbr_tint: [4]f32, //ambient, roughness, metallic
+    emissive_tint: [4]f32, //rgb
 }
+
+Material_Hash :: distinct uintptr
 
 Material :: struct {
     bind_group: wgpu.BindGroup,
@@ -48,6 +52,8 @@ Material :: struct {
     normal: Texture,
     pbr: Texture,
     emissive: Texture,
+    //
+    hash: Material_Hash,
 }
 
 rebuild_material :: proc(mat: ^Material) {
@@ -63,6 +69,8 @@ rebuild_material :: proc(mat: ^Material) {
         entryCount = len(bindings),
         entries = raw_data(bindings),
     })
+    mat.hash = 0 //do not hash hashes
+    mat.hash = Material_Hash(runtime.default_hasher(mat, 0, size_of(Material)))
 }
 
 make_material :: proc(base_color: Texture=white_tex, normal: Texture=normal_tex, pbr: Texture=white_tex, emissive: Texture=black_tex, filtering: bool = true, tiling: [2]bool = false) -> (mat: Material) {

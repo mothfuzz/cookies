@@ -29,7 +29,6 @@ init :: proc() {
 
     cam = graphics.make_camera()
     graphics.look_at(&cam, {0, 0, 10}, {0, 0, 0})
-    graphics.set_camera(&cam)
 
     light = graphics.make_directional_light({0.6, 0.4, 0}, {1, 0, 0, 10})
     
@@ -81,17 +80,20 @@ tick :: proc() {
 }
 
 draw :: proc(a: f64, dt: f64) {
-    graphics.draw_scene(&brainstem, a, dt, &brainstem_anim)
-    graphics.draw_scene(&brainstem2, a, dt, &brainstem2_anim)
-    graphics.draw_directional_light(light)
+    f := graphics.Frame{}
+    graphics.draw_camera(&f, &cam, a)
+    graphics.draw_scene(&f, brainstem, a, dt, &brainstem_anim)
+    graphics.draw_scene(&f, brainstem2, a, dt, &brainstem2_anim)
+    graphics.draw_light(&f, light)
+    graphics.render_frame(f)
 }
 
 quit :: proc() {
     graphics.delete_camera(cam)
-    graphics.deanimate(&brainstem_anim)
-    graphics.delete_scene(&brainstem)
-    graphics.deanimate(&brainstem2_anim)
-    graphics.delete_scene(&brainstem2)
+    graphics.deanimate(brainstem_anim)
+    graphics.delete_scene(brainstem)
+    graphics.deanimate(brainstem2_anim)
+    graphics.delete_scene(brainstem2)
     graphics.unload_files()
 }
 

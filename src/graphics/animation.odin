@@ -85,8 +85,8 @@ animate :: proc(scene: ^Scene) -> (anim: Animation_State) {
     return
 }
 
-deanimate :: proc(anim: ^Animation_State) {
-    for &a in anim.animations {
+deanimate :: proc(anim: Animation_State) {
+    for a in anim.animations {
         delete(a.channels)
     }
     delete(anim.animations)

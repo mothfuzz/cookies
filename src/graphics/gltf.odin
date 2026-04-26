@@ -111,14 +111,16 @@ Scene :: struct {
     meshes: []Mesh, //'primitives'
     colliders: []spatial.Tri_Mesh,
     textures: []Texture,
-    materials: []CombinedMaterial,
+    materials: []Combined_Material,
     skeletons: []Skeleton, //'skins'
     animations: []Animation,
     //instanced data
     copied: bool,
     models: []Model, //'meshes'
     cameras: []Camera,
-    lights: []Light,
+    //point_lights: []Point_Light,
+    //directional_lights: []Directional_Light,
+    //spot_lights: []Spot_Light,
     //actual scene
     name: string,
     nodes: []Node,
@@ -138,15 +140,14 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     s.copied = true
     s.models = make([]Model, len(scene.models))
     for &model, i in s.models {
-        model.materials = make([]^CombinedMaterial, len(scene.models[i].materials))
+        model.materials = make([]^Combined_Material, len(scene.models[i].materials))
         copy(model.materials, scene.models[i].materials)
         model.meshes = make([]^Mesh, len(scene.models[i].meshes))
         copy(model.meshes, scene.models[i].meshes)
     }
     s.cameras = make([]Camera, len(scene.cameras))
     copy(s.cameras, scene.cameras)
-    s.lights = make([]Light, len(scene.lights))
-    copy(s.lights, scene.lights)
+    // TODO: lights...
     //actual scene
     if new_name != "" {
         s.name = new_name
@@ -179,6 +180,8 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     return
 }
 
+// TODO: rewrite load_image and load_material to load w/correct linear + premultiplied alpha depending on how the image is used in the material
+
 @(private)
 load_image :: proc(opts: cgltf.options, image: cgltf.image) -> Texture {
         //load textures
@@ -204,7 +207,7 @@ load_image :: proc(opts: cgltf.options, image: cgltf.image) -> Texture {
 }
 
 @(private)
-load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material) -> CombinedMaterial {
+load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material) -> Combined_Material {
     filtering := true
     tiling := [2]bool{false, false}
     base_color_tex: Texture = white_tex
@@ -242,7 +245,7 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
     }
 
     ret_material := make_material(base_color_tex, normal_tex, pbr_tex, emissive_tex, filtering, tiling)
-    return {ret_material, {tint=base_color_tint}}
+    return {ret_material, {base_color_tint=base_color_tint}}
 }
 
 @(private)
@@ -402,7 +405,7 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
         scene.textures[i] = load_image(opts, image)
     }
 
-    scene.materials = make([]CombinedMaterial, len(data.materials))
+    scene.materials = make([]Combined_Material, len(data.materials))
     for material, i in data.materials {
         scene.materials[i] = load_material(data, &scene, material)
     }
@@ -420,7 +423,7 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
     for mesh, i in data.meshes {
         model := &scene.models[i]
         model.meshes = make([]^Mesh, len(mesh.primitives))
-        model.materials = make([]^CombinedMaterial, len(mesh.primitives))
+        model.materials = make([]^Combined_Material, len(mesh.primitives))
         for primitive, j in mesh.primitives {
 
             material_index := cgltf.material_index(data, primitive.material)
@@ -528,13 +531,15 @@ node_from_transform :: proc(trans: ^transform.Transform) -> ^Node {
     return cast(^Node)(uintptr(trans) - offset_of(Node, transform))
 }
 
-draw_node :: proc(scene: ^Scene, node: ^Node, t: f64) {
+@(private)
+draw_node :: proc(frame: ^Frame, scene: Scene, node: ^Node, t: f64) {
     //draw self
     switch node.type {
     case .Node:
     case .Model:
         bones := calculate_skeleton(scene, node, t)
-        draw_model(scene.models[node.data], transform.smooth(&node.transform, t), bones)
+        defer delete(bones)
+        draw_model(frame, scene.models[node.data], transform.smooth(&node.transform, t), bones)
     case .Camera:
         //...
     case .Light:
@@ -542,19 +547,19 @@ draw_node :: proc(scene: ^Scene, node: ^Node, t: f64) {
     }
     //draw immediate sibling (will trigger subsequent draws)
     if node.transform.next_sibling != nil {
-        draw_node(scene, node_from_transform(node.transform.next_sibling), t)
+        draw_node(frame, scene, node_from_transform(node.transform.next_sibling), t)
     }
     //draw first child (will trigger subsequent draws)
     if node.transform.first_child != nil {
-        draw_node(scene, node_from_transform(node.transform.first_child), t)
+        draw_node(frame, scene, node_from_transform(node.transform.first_child), t)
     }
 }
-draw_scene :: proc(scene: ^Scene, alpha: f64, delta: f64, anim: ^Animation_State = nil) {
+draw_scene :: proc(frame: ^Frame, scene: Scene, alpha: f64, delta: f64, anim: ^Animation_State = nil) {
     if anim != nil {
         progress(anim, delta)
     }
     for i in scene.layouts[scene.active_layout].roots {
-        draw_node(scene, &scene.nodes[i], alpha)
+        draw_node(frame, scene, &scene.nodes[i], alpha)
     }
 }
 
@@ -571,49 +576,46 @@ unlink_scene_transform :: proc(scene: ^Scene) {
     }
 }
 
-delete_scene :: proc(scene: ^Scene) {
+delete_scene :: proc(scene: Scene) {
     if !scene.copied {
-        for &texture in scene.textures {
+        for texture in scene.textures {
             delete_texture(texture)
         }
         delete(scene.textures)
-        for &mesh in scene.meshes {
+        for mesh in scene.meshes {
             delete_mesh(mesh)
         }
         delete(scene.meshes)
-        for &material in scene.materials {
+        for material in scene.materials {
             delete_material(material.base)
         }
         delete(scene.materials)
-        for &tri_mesh in scene.colliders {
+        for tri_mesh in scene.colliders {
             spatial.delete_tri_mesh(tri_mesh)
         }
         delete(scene.colliders)
-        for &skeleton in scene.skeletons {
+        for skeleton in scene.skeletons {
             delete_skeleton(skeleton)
         }
         delete(scene.skeletons)
-        for &animation in scene.animations {
+        for animation in scene.animations {
             delete_animation(animation)
         }
         delete(scene.animations)
     }
 
-    for &model in scene.models {
+    for model in scene.models {
         delete(model.meshes)
         delete(model.materials)
     }
     delete(scene.models)
-    /*for &camera in scene.cameras {
+    /*for camera in scene.cameras {
         delete_camera(camera)
     }
-    delete(scene.cameras)
-    for &light in scene.lights {
-        delete_light(scene.lights)
-    }
-    delete(scene.lights)*/
+    delete(scene.cameras)*/
+    // TODO: lights
 
-    for &layout in scene.layouts {
+    for layout in scene.layouts {
         delete(layout.roots)
     }
     delete(scene.layouts)

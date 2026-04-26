@@ -58,9 +58,9 @@ struct Vertex {
     @location(9) modelview_2: vec4<f32>,
     @location(10) modelview_3: vec4<f32>,
     @location(11) clip_rect: vec4<f32>,
-    @location(12) tint: vec4<f32>,
-    //@location(13) pbr_tint: vec3<f32>, //ambient, metallic, roughness
-    //@location(14) emmissive_tint: vec4<f32>, //rgb + intensity
+    @location(12) base_color_tint: vec4<f32>,
+    @location(13) pbr_tint: vec4<f32>, //ambient, metallic, roughness
+    @location(14) emissive_tint: vec4<f32>, //rgb
 }
 
 struct VSOut {
@@ -70,7 +70,9 @@ struct VSOut {
     @location(2) tangent: vec4<f32>,
     @location(3) @interpolate(perspective) texcoord: vec2<f32>,
     @location(4) color: vec4<f32>,
-    @location(5) tint: vec4<f32>,
+    @location(5) base_color_tint: vec4<f32>,
+    @location(6) pbr_tint: vec4<f32>,
+    @location(7) emissive_tint: vec4<f32>,
 }
 
 fn ident() -> mat4x4<f32> {
@@ -111,14 +113,23 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     let tex_factor = vertex.clip_rect.zw;
     v.texcoord = vertex.texcoord*tex_factor+tex_offset;
     v.color = vertex.color;
-    v.tint = vertex.tint;
+    v.base_color_tint = vertex.base_color_tint;
+    v.pbr_tint = vertex.pbr_tint;
+    v.emissive_tint = vertex.emissive_tint;
     return v;
 }
 
-fn calculate_influence_phong(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>) -> vec3<f32> {
+struct LightingContribution {
+    diffuse: vec3<f32>,
+    transmission: vec3<f32>,
+    specular: vec3<f32>,
+    reflectance: f32,
+}
+
+fn calculate_influence_phong(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>) -> LightingContribution {
     let diffuse = max(dot(n, l), 0.0);
     let specular = pow(max(dot(v, reflect(-l, n)), 0.0), 256.0);
-    return (diffuse + specular)*radiance;
+    return LightingContribution(diffuse * radiance, vec3<f32>(0.0), specular * radiance, 0.0);
 }
 
 const PI = radians(180.0);
@@ -145,11 +156,12 @@ fn geometry_attenuation_smith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughnes
 
     return shadowing * masking;
 }
-fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>, base_color: vec3<f32>, roughness: f32, metallic: f32) -> vec3<f32> {
+
+fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>, base_color: vec4<f32>, roughness: f32, metallic: f32) -> LightingContribution {
     let h = normalize(v + l);
     let cos_theta = max(dot(h, v), 0.0);
     var base_reflectance = vec3<f32>(0.04); //base dielectric reflectance
-    base_reflectance = mix(base_reflectance, base_color, metallic);
+    base_reflectance = mix(base_reflectance, base_color.rgb, metallic);
     let reflectance = fresnel_schlick_reflectance(cos_theta, base_reflectance);
 
     let normal_distribution = normal_distribution_ggx(n, h, roughness);
@@ -159,10 +171,20 @@ fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: v
     let denominator = 4.0 * max(dot(n, v), 0.0) * max(dot(n, l), 0.0) + 0.0001; //extra epsilon to prevent divide-by-zero
     let specular = numerator / denominator;
 
-    let diffuse_ratio = (1.0 - metallic) * (vec3<f32>(1.0) - reflectance);
-    let diffuse = diffuse_ratio * base_color / PI;
+    let translucency = 1.0 - base_color.a;
+    let transmission = base_color.rgb * translucency;
 
-    return (diffuse + specular) * radiance * max(dot(n, l), 0.0);
+    let diffuse_ratio = (1.0 - metallic) * (vec3<f32>(1.0) - reflectance);
+    let diffuse = diffuse_ratio * base_color.rgb / PI * (1.0 - translucency);
+
+    let albedo = max(diffuse_ratio.r, max(diffuse_ratio.g, diffuse_ratio.b));
+
+    return LightingContribution(
+        diffuse * radiance * max(dot(n, l), 0.0),
+        specular * radiance * max(dot(n, l), 0.0),
+        transmission * radiance * max(dot(-n, l), 0.0),
+        1.0 - albedo
+    );
 }
 
 fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
@@ -209,6 +231,7 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
         let v = normalize(-in.position.xyz); //already in view space
 
         var light = vec3<f32>(0.03) * final_color.rgb * ambient_occlusion; //initial ambient value
+        var reflectance = 0.0;
         for (var i: u32 = 0; i < arrayLength(&point_lights); i++) {
             let l = normalize(point_lights[i].position.xyz - in.position.xyz);
 
@@ -218,15 +241,19 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
                 let attenuation = smoothstep(r, 0.0, d);
                 let radiance = point_lights[i].color.rgb * point_lights[i].color.a * attenuation;
                 //let attenuation = 1.0 / (d*d);
-                //light += calculate_influence_phong(n, v, l, radiance);
-                light += calculate_influence_pbr(n, v, l, radiance, final_color.rgb, roughness, metallic);
+                //let contribution = calculate_influence_phong(n, v, l, radiance);
+                let contribution = calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
+                light += contribution.diffuse + contribution.specular + contribution.transmission;
+                reflectance += contribution.reflectance;
             }
         }
         for (var i: u32 = 0; i < arrayLength(&directional_lights); i++) {
             let l = normalize(-directional_lights[i].direction.xyz);
             let radiance = directional_lights[i].color.rgb * directional_lights[i].color.a;
-            //light += calculate_influence_phong(n, v, l, radiance);
-            light += calculate_influence_pbr(n, v, l, radiance, final_color.rgb, roughness, metallic);
+            //let contribution = calculate_influence_phong(n, v, l, radiance);
+            let contribution = calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
+            light += contribution.diffuse + contribution.specular + contribution.transmission;
+            reflectance += contribution.reflectance;
         }
         for (var i: u32 = 0; i < arrayLength(&spot_lights); i++) {
             let l = normalize(spot_lights[i].position.xyz - in.position.xyz);
@@ -236,14 +263,20 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
             let epsilon = inner_cutoff - outer_cutoff;
             let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
             let radiance = spot_lights[i].color.rgb * spot_lights[i].color.a * falloff;
-            //light += calculate_influence_phong(n, v, l, radiance);
-            light += calculate_influence_pbr(n, v, l, radiance, final_color.rgb, roughness, metallic);
+            //let contribution = calculate_influence_phong(n, v, l, radiance);
+            let contribution = calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
+            light += contribution.diffuse + contribution.specular + contribution.transmission;
+            reflectance += contribution.reflectance;
         }
+
+        // TODO: switch to premultiplied I guess
 
         //reinhard tonemap for PBR
         //light = light / (light + vec3<f32>(1.0));
         //light = pow(light, vec3<f32>(1.0/2.2));
-        final_color = vec4<f32>(light, 1.0);
+        //reflectance = 0.0;
+        let total_lights = arrayLength(&point_lights) + arrayLength(&directional_lights) + arrayLength(&spot_lights);
+        final_color = vec4<f32>(light, mix(final_color.a, 1.0, min(reflectance/f32(total_lights), 1.0)));
     }
     return final_color;
 }
@@ -251,7 +284,7 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
 
 @fragment
 fn solid_main(in: VSOut) -> @location(0) vec4<f32> {
-    let base_color = textureSample(base_color, smp, in.texcoord) * in.tint;
+    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint;
     let screen_color = vec4<f32>(in.position.x/screen.size.x, in.position.y/screen.size.y, 1.0, 1.0);
     let color = mix(in.color, screen_color, 0.0);
     var final_color = base_color * color;
@@ -272,8 +305,8 @@ struct TransOut {
 @fragment
 fn trans_main(in: VSOut) -> TransOut {
     var out: TransOut;
-    let base_color = textureSample(base_color, smp, in.texcoord) * in.tint * in.color;
-    if !(base_color.a > 0) && !(base_color.a < 1) {
+    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint * in.color;
+    if !(base_color.a > 0 && base_color.a < 1) {
         discard;
     }
     var final_color = base_color;

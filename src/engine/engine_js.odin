@@ -68,7 +68,6 @@ step :: proc(delta_time: f64) -> bool {
     /*for hook in draw_hooks {
         hook(1.0)
     }*/
-    graphics.render(alpha)
     return true
 }
 

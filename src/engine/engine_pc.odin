@@ -111,7 +111,6 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
         if draw != nil {
             draw(alpha, delta)
         }
-        graphics.render(alpha)
         /*for hook in draw_hooks {
             hook(t)
         }*/

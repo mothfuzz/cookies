@@ -144,8 +144,8 @@ init :: proc() {
     cam2 = graphics.make_camera({screen_size.x/2 - 1, 0, screen_size.x/2, screen_size.y})
     //cam = graphics.make_camera({0, 0, screen_size.x, screen_size.y})
     //cam2 = graphics.make_camera({0, 0, screen_size.x, screen_size.y})
-    graphics.look_at(&cam, {0, 0, 0}, {0, 0, -graphics.z_2d(&cam)})
-    graphics.look_at(&cam2, {0, 0, 0}, {0, 0, -graphics.z_2d(&cam2)})
+    graphics.look_at(&cam, {0, 0, 0}, {0, 0, -graphics.z_2d(cam)})
+    graphics.look_at(&cam2, {0, 0, 0}, {0, 0, -graphics.z_2d(cam2)})
 
     //fmt.println("loading font...")
     unifont = graphics.make_font_from_file(#load("resources/unifont.otf"), 32)
@@ -173,7 +173,7 @@ init :: proc() {
     graphics.play(&brainstem_anim, 0, true)
 
     my_light = graphics.make_point_light({0, -160, -320}, 600, {1, 1, 0, 1})
-    sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 10})
+    sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 1})
     spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, math.to_radians_f32(45), math.to_radians_f32(60), {0, 0, 1, 1})
 
     brick_color = graphics.make_texture_from_image(#load("resources/brick4/basecolor.jpg"))
@@ -268,9 +268,9 @@ tick :: proc() {
     transform.rotatez(&triangle_trans, 0.01)
     transform.rotatez(&quad_trans, -0.01)
 
-    forward := [3]f32{camera_pos.x + math.cos(camera_angle)*graphics.z_2d(&cam),
+    forward := [3]f32{camera_pos.x + math.cos(camera_angle)*graphics.z_2d(cam),
                       camera_pos.y + camera_pitch,
-                      camera_pos.z - math.sin(camera_angle)*graphics.z_2d(&cam)}
+                      camera_pos.z - math.sin(camera_angle)*graphics.z_2d(cam)}
     offset_x := math.sin(camera_angle) * 50
     offset_z := math.cos(camera_angle) * 50
     graphics.look_to(&cam, {camera_pos.x+offset_x, camera_pos.y, camera_pos.z+offset_z}, forward)
@@ -288,19 +288,23 @@ tick :: proc() {
 }
 
 draw :: proc(a: f64, dt: f64) {
+    f := graphics.Frame{}
+    
     screen_size.x = f32(window.get_size().x)
     screen_size.y = f32(window.get_size().y)
     graphics.set_viewport(&cam, {0, 0, screen_size.x/2, screen_size.y})
     graphics.set_viewport(&cam2, {screen_size.x/2 - 1, 0, screen_size.x/2, screen_size.y})
 
-    graphics.set_cameras({&cam, &cam2})
+    graphics.draw_camera(&f, &cam, a)
+    graphics.draw_camera(&f, &cam2, a)
+
     scene.draw(&main_scene, a)
-    graphics.draw_mesh(triangle, brick_mat, transform.smooth(&triangle_trans, a))
-    graphics.draw_sprite(mat2, transform.smooth(&quad_trans, a), {64, 64, 128, 128}, {1, 0, 0, 0.9}) //frasier
-    graphics.draw_mesh(quad, metal_mat, transform.compute(&floor_trans))
+    graphics.draw_mesh(&f, triangle, brick_mat, trans=transform.smooth(&triangle_trans, a))
+    graphics.draw_sprite(&f, mat2, transform.smooth(&quad_trans, a), {64, 64, 128, 128}, {1, 0, 0, 0.9}) //frasier
+    graphics.draw_mesh(&f, quad, metal_mat, transform.compute(&floor_trans))
     plus_one := floor_trans
     transform.translate(&plus_one, {0, 2, 0})
-    //graphics.draw_mesh(quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'), tint={1, 0, 1, 1})
+    graphics.draw_mesh(&f, quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'), base_color_tint={1, 0, 1, 1})
 
     offset: [2]f32
     offset.x = -screen_size.x/2
@@ -311,16 +315,18 @@ draw :: proc(a: f64, dt: f64) {
 
     text_trans := transform.ORIGIN
     transform.translate(&text_trans, {-16*3, 0, 1})
-    graphics.draw_text("Hello!!", unifont, transform.compute(&text_trans), {0, 1, 1, 1})
+    graphics.draw_text(&f, "Hello!!", unifont, transform.compute(&text_trans), {0, 1, 1, 1})
 
-    graphics.draw_scene(&cheese1, a, dt)
-    graphics.draw_scene(&cheese2, a, dt, &cheese2_anim)
+    graphics.draw_scene(&f, cheese1, a, dt)
+    graphics.draw_scene(&f, cheese2, a, dt, &cheese2_anim)
 
-    graphics.draw_scene(&brainstem, a, dt, &brainstem_anim)
+    graphics.draw_scene(&f, brainstem, a, dt, &brainstem_anim)
 
-    graphics.draw_point_light(my_light)
-    graphics.draw_directional_light(sun_light)
-    graphics.draw_spot_light(spot_light)
+    graphics.draw_point_light(&f, my_light)
+    graphics.draw_directional_light(&f, sun_light)
+    graphics.draw_spot_light(&f, spot_light)
+
+    graphics.render_frame(f)
 }
 
 kill :: proc() {
@@ -340,13 +346,13 @@ kill :: proc() {
     graphics.delete_texture(brick_norm)
     graphics.delete_texture(brick_pbr)
 
-    graphics.delete_scene(&emantaller)
-    graphics.delete_scene(&cheese1)
-    graphics.deanimate(&cheese2_anim)
-    graphics.delete_scene(&cheese2)
+    graphics.delete_scene(emantaller)
+    graphics.delete_scene(cheese1)
+    graphics.deanimate(cheese2_anim)
+    graphics.delete_scene(cheese2)
 
-    graphics.deanimate(&brainstem_anim)
-    graphics.delete_scene(&brainstem)
+    graphics.deanimate(brainstem_anim)
+    graphics.delete_scene(brainstem)
     
     graphics.unload_files()
 }

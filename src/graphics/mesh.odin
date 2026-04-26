@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import "vendor:wgpu"
+import "base:runtime" //for hashing
 
 Vertex :: struct {
     position: [3]f32,
@@ -20,6 +21,8 @@ Extents :: struct {
     maxi: [3]f32,
 }
 
+Mesh_Hash :: distinct uintptr
+
 Mesh :: struct {
     size: u32,
     //buffers (currently at 8 - if we need more then we can interleave.)
@@ -34,10 +37,10 @@ Mesh :: struct {
     indices: wgpu.Buffer,
     //optimizations
     bounding_box: Extents,
-    bounding_center: [3]f32,
-    bounding_radius: f32,
-    transparent: bool, //at least one vertex alpha 0 < a < 1
-    solid: bool, //at least one vertex alpha a = 1
+    is_trans: bool, //at least one vertex alpha 0 < a < 1
+    is_solid: bool, //at least one vertex alpha a = 1
+    //
+    hash: Mesh_Hash,
 }
 
 /*make_mesh_from_array :: proc(vertices: [$i]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
@@ -86,10 +89,10 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mes
     mesh.bounding_box.maxi = math.NEG_INF_F32
     for v in vertices {
         if v.color.a > 0.0 && v.color.a < 1.0 {
-            mesh.transparent = true
+            mesh.is_trans = true
         }
         if v.color.a == 1.0 {
-            mesh.solid = true
+            mesh.is_solid = true
         }
         if v.position.x > mesh.bounding_box.maxi.x {
             mesh.bounding_box.maxi.x = v.position.x
@@ -110,8 +113,8 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mes
             mesh.bounding_box.mini.z = v.position.z
         }
     }
-    mesh.bounding_center = (mesh.bounding_box.mini + mesh.bounding_box.maxi)/2.0
-    mesh.bounding_radius = linalg.length(mesh.bounding_box.maxi - mesh.bounding_box.mini)/2.0
+
+    mesh.hash = Mesh_Hash(runtime.default_hasher(&mesh, 0, size_of(Mesh)))
     return
 }
 
@@ -238,11 +241,13 @@ instance_data_attributes := []wgpu.VertexAttribute{
     {format = .Float32x4, offset = 2 * size_of([4]f32), shaderLocation = instance_data_location + 2}, //modelview
     {format = .Float32x4, offset = 3 * size_of([4]f32), shaderLocation = instance_data_location + 3}, //modelview
     {format = .Float32x4, offset = 4 * size_of([4]f32), shaderLocation = instance_data_location + 4}, //clip_rect
-    {format = .Float32x4, offset = 5 * size_of([4]f32), shaderLocation = instance_data_location + 5}, //tint
+    {format = .Float32x4, offset = 5 * size_of([4]f32), shaderLocation = instance_data_location + 5}, //base_color_tint
+    {format = .Float32x4, offset = 6 * size_of([4]f32), shaderLocation = instance_data_location + 6}, //pbr_tint
+    {format = .Float32x4, offset = 7 * size_of([4]f32), shaderLocation = instance_data_location + 7}, //emissive_tint
 }
 instance_data_attribute := wgpu.VertexBufferLayout{
     stepMode = .Instance,
-    arrayStride = size_of(InstanceData),
+    arrayStride = size_of(Instance),
     attributeCount = len(instance_data_attributes),
     attributes = raw_data(instance_data_attributes),
 }
@@ -257,25 +262,16 @@ vertex_buffer_layouts := []wgpu.VertexBufferLayout{
     instance_data_attribute,
 }
 
-//all data needed to render a single instance
-MeshRenderItem :: struct {
-    mesh: Mesh,
-    material: Material,
-    using draw: MeshDraw,
-    //don't calculate these twice.
+Mesh_Draw :: struct {
+    using instance: Instance,
+    is_sprite: bool,
+    is_billboard: bool,
+    bones: []matrix[4,4]f32,
     bounding_box: [8][4]f32,
-    bounding_center: [4]f32,
-    bounding_radius: f32,
-    //model: matrix[4,4]f32,
-    local_calculated: bool,
-    modelview: matrix[4,4]f32,
-    modelview_calculated: bool,
 }
-
-//data that actually gets passed to the GPU
-InstanceData :: struct {
-    modelview: matrix[4,4]f32,
-    dynamic_material: DynamicMaterial,
+Instance :: struct {
+    transform: matrix[4,4]f32,
+    using dynamic_material: Dynamic_Material,
 }
 
 //this happens at an earlier stage than draw_instances i.e. multiple materials could be bound for one mesh
@@ -289,14 +285,11 @@ bind_mesh :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh) {
     wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 6, mesh.weights, 0, wgpu.BufferGetSize(mesh.weights))
 }
 
-//calculates local mesh data
-precalcs :: proc(instance: ^MeshRenderItem) {
-    if instance.local_calculated {
-        return
-    }
+//calculates local mesh data (i.e. not relative to camera)
+calculate_mesh_local :: proc(instance: ^Mesh_Draw, mesh: Mesh, material: Material) {
     //calculate clip_rect
-    w := f32(wgpu.TextureGetWidth(instance.material.base_color.image))
-    h := f32(wgpu.TextureGetHeight(instance.material.base_color.image))
+    w := f32(wgpu.TextureGetWidth(material.base_color.image))
+    h := f32(wgpu.TextureGetHeight(material.base_color.image))
     instance.clip_rect.x /= w
     instance.clip_rect.y /= h
     if instance.clip_rect[2] == 0 {
@@ -304,28 +297,28 @@ precalcs :: proc(instance: ^MeshRenderItem) {
     } else {
         instance.clip_rect[2] /= w
     }
-    if instance.draw.clip_rect[3] == 0 {
+    if instance.clip_rect[3] == 0 {
         instance.clip_rect[3] = 1.0
     } else {
         instance.clip_rect[3] /= h
     }
     //calculate model
-    if instance.draw.is_sprite {
-        temp_trans := instance.model[3]
-        instance.model[3] = {0, 0, 0, 1}
+    if instance.is_sprite {
+        temp_trans := instance.transform[3]
+        instance.transform[3] = {0, 0, 0, 1}
         scale_w := w*instance.clip_rect[2]
         scale_h := h*instance.clip_rect[3]
         scale_z := f32(1.0)
-        if instance.draw.is_billboard {
+        if instance.is_billboard {
             //since billboards face the camera, we want them to be thick from all angles
             scale_z = max(scale_w, scale_h)
         }
         scale := linalg.matrix4_scale([3]f32{scale_w, scale_h, scale_z})
-        instance.model *= scale
-        instance.model[3] = temp_trans
+        instance.transform *= scale
+        instance.transform[3] = temp_trans
     }
     //calculate bounding box
-    bb := instance.mesh.bounding_box
+    bb := mesh.bounding_box
     if instance.is_billboard && bb.mini.z == 0 && bb.maxi.z == 0 { //give it some thickness
         bb.mini.z = min(bb.mini.x, bb.mini.y)
         bb.maxi.z = max(bb.maxi.x, bb.maxi.y)
@@ -336,45 +329,27 @@ precalcs :: proc(instance: ^MeshRenderItem) {
             instance.bounding_box[i][j] = bb.maxi[j] if i % (1 << uint(j+1)) > (1 << uint(j) - 1) else bb.mini[j]
         }
         instance.bounding_box[i][3] = 1
-        instance.bounding_box[i] = instance.model * instance.bounding_box[i]
+        instance.bounding_box[i] = instance.transform * instance.bounding_box[i]
     }
-    instance.bounding_center.xyz = instance.mesh.bounding_center
-    instance.bounding_center.w = 1
-    instance.bounding_center = instance.model * instance.bounding_center
-    //get largest scale factor
-    scale := [3]f32{linalg.length(instance.model[0].xyz), linalg.length(instance.model[1].xyz), linalg.length(instance.model[2].xyz)}
-    instance.bounding_radius = instance.mesh.bounding_radius * max(scale.x, scale.y, scale.z)
-
-    instance.local_calculated = true
 }
 
 //calculates world mesh data (aka the modelview)
 //assumes local data already calculated
-calculate_modelview :: proc(instance: ^MeshRenderItem, cam: ^Camera) {
-    if instance.modelview_calculated {
-        return
-    }
+calculate_mesh_world :: proc(instance: ^Mesh_Draw, cam: Camera) {
     if instance.is_billboard {
-        rotation_scale := cast(matrix[3,3]f32)(instance.model)
-        instance.modelview = cam.view * instance.model;
-        trans := instance.modelview[3] //save produced translation vector
-        instance.modelview = cast(matrix[4,4]f32)(rotation_scale) //and then revert to untransformed scaling/rotation
-        instance.modelview[3] = trans
+        rotation_scale := cast(matrix[3,3]f32)(instance.transform) //isolate untransformed rotation/scale
+        instance.transform = cam.view * instance.transform; //transform to camera...
+        trans := instance.transform[3] //save produced translation vector
+        instance.transform = cast(matrix[4,4]f32)(rotation_scale) //and then revert to untransformed scaling/rotation
+        instance.transform[3] = trans //while keeping translation transformed to camera.
     } else {
-        instance.modelview = cam.view * instance.model
-    }
-    instance.modelview_calculated = true
-}
-
-reset_modelviews :: proc(instances: []MeshRenderItem) {
-    for &instance in instances {
-        instance.modelview_calculated = false
+        instance.transform = cam.view * instance.transform
     }
 }
 
 //assumes material, mesh, and camera are all already bound & calculations are all done.
 @(private)
-draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, instances: []InstanceData) {
+draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, instances: []Instance) {
     instance_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, instances)
     wgpu.RenderPassEncoderSetVertexBuffer(render_pass, instance_data_location, instance_buffer, 0, wgpu.BufferGetSize(instance_buffer))
     wgpu.BufferRelease(instance_buffer)

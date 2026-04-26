@@ -48,13 +48,13 @@ skeletons_layout: wgpu.BindGroupLayout
 skeletons_bind_group: wgpu.BindGroup
 skeletons_buffer: wgpu.Buffer
 
-calculate_skeleton :: proc(scene: ^Scene, node: ^Node, t: f64) -> []matrix[4,4]f32 {
+calculate_skeleton :: proc(scene: Scene, node: ^Node, t: f64) -> []matrix[4,4]f32 {
     bones: [dynamic]matrix[4,4]f32
     if node.animated {
         //look up the actual skeleton, and multiply with inv_bind
         //animation *should* be fully calculated at this point
         skeleton := &scene.skeletons[node.skin]
-        bones = make([dynamic]matrix[4,4]f32, context.temp_allocator)
+        bones = make([dynamic]matrix[4,4]f32)
         for &bone in skeleton.bones {
             inv_trans := linalg.inverse(transform.smooth(&node.transform, t))
             bone_trans := transform.smooth(&scene.nodes[bone.node].transform, t)
@@ -62,40 +62,32 @@ calculate_skeleton :: proc(scene: ^Scene, node: ^Node, t: f64) -> []matrix[4,4]f
         }
     } else {
         //just use identity
-        bones = make([dynamic]matrix[4,4]f32, context.temp_allocator)
+        bones = make([dynamic]matrix[4,4]f32)
         append(&bones, 1)
     }
     return bones[:]
 }
 
-import "core:fmt"
-skeletons_bound: bool = false
-current_skeletons_buffer: wgpu.Buffer
-current_skeletons_uniform_buffer: wgpu.Buffer
-current_skeletons_bind_group: wgpu.BindGroup
 bind_skeletons :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, skeletons: []matrix[4,4]f32, num_instances: u32) {
     //if len(skeletons) > 1 {
         //fmt.println("BINDING SKELETONS:", skeletons)
     //}
-    if skeletons_bound {
-        wgpu.BindGroupRelease(current_skeletons_bind_group)
-        wgpu.BufferRelease(current_skeletons_buffer)
-        wgpu.BufferRelease(current_skeletons_uniform_buffer)
-    }
 
-    current_skeletons_buffer = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Storage}}, skeletons)
-    current_skeletons_uniform_buffer = wgpu.DeviceCreateBufferWithData(ren.device, &{usage={.Uniform, .CopyDst}}, u32(len(skeletons))/num_instances)
+    skeletons_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Storage}}, skeletons)
+    defer wgpu.BufferRelease(skeletons_buffer)
+    skeletons_uniform_buffer := wgpu.DeviceCreateBufferWithData(ren.device, &{usage={.Uniform, .CopyDst}}, u32(len(skeletons))/num_instances)
+    defer wgpu.BufferRelease(skeletons_uniform_buffer)
 
     bindings := []wgpu.BindGroupEntry{
-        {binding = 0, buffer=current_skeletons_buffer, size=size_of(matrix[4,4]f32)*u64(len(skeletons))},
-        {binding = 1, buffer=current_skeletons_uniform_buffer, size=size_of(u32)},
+        {binding = 0, buffer=skeletons_buffer, size=size_of(matrix[4,4]f32)*u64(len(skeletons))},
+        {binding = 1, buffer=skeletons_uniform_buffer, size=size_of(u32)},
     }
-    current_skeletons_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+    skeletons_bind_group := wgpu.DeviceCreateBindGroup(ren.device, &{
         layout = skeletons_layout,
         entryCount = len(bindings),
         entries = raw_data(bindings),
     })
+    defer wgpu.BindGroupRelease(skeletons_bind_group)
 
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, current_skeletons_bind_group)
-    skeletons_bound = true
+    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, skeletons_bind_group)
 }

@@ -94,9 +94,8 @@ init :: proc() {
     window.set_size(Screen_Width, Screen_Height) //TODO: recenter window upon resizing
 
     cam = graphics.make_camera({0, 0, Screen_Width, Screen_Height})
-    graphics.look_at(&cam, {0, 0, graphics.z_2d(&cam)}, {0, 0, 0})
+    graphics.look_at(&cam, {0, 0, graphics.z_2d(cam)}, {0, 0, 0})
     graphics.set_viewport(&cam, {0, 0, Screen_Width, Screen_Height})
-    graphics.set_camera(&cam)
 
     unifont := #load("../resources/unifont.otf")
     big_font = graphics.make_font_from_file(unifont, Big_Font_Size*2)
@@ -287,28 +286,28 @@ tick :: proc() {
 }
 
 
-draw_player :: proc(t: f64) {
+draw_player :: proc(f: ^graphics.Frame, t: f64) {
     transform.smooth(&player.trans, t)
     pos := transform.get_position(&player.trans)
     for i in 0..<16 {
         trans := player.trans
         transform.set_position(&trans, {pos.x, pos.y + f32(i), f32(i)})
         model := transform.compute(&trans)
-        graphics.draw_sprite(player_mat, model, clip_rect={f32(i)*16, 0, 16, 16})
+        graphics.draw_sprite(f, player_mat, model, clip_rect={f32(i)*16, 0, 16, 16})
     }
     if debug_enabled {
         graphics.ui_draw_rect({pos.x, pos.y, 32, 32}, {1, 0, 0, 0.25})
     }
 }
 
-draw_bullets :: proc(t: f64) {
+draw_bullets :: proc(f: ^graphics.Frame, t: f64) {
     it := hm.iterator_make(&bullets)
     for bullet, handle in hm.iterate(&it) {
-        graphics.draw_sprite(bullet_mat, transform.smooth(&bullet.trans, t))
+        graphics.draw_sprite(f, bullet_mat, transform.smooth(&bullet.trans, t))
     }
 }
 
-draw_enemies :: proc(t: f64) {
+draw_enemies :: proc(f: ^graphics.Frame, t: f64) {
     it := hm.iterator_make(&enemies)
     for enemy, handle in hm.iterate(&it) {
         transform.smooth(&enemy.trans, t)
@@ -317,7 +316,7 @@ draw_enemies :: proc(t: f64) {
             trans := enemy.trans
             transform.set_position(&trans, {pos.x, pos.y + 2*f32(i), 2*f32(i)})
             model := transform.compute(&trans)
-            graphics.draw_sprite(enemy_mat, model, clip_rect={f32(i)*16, 0, 16, 16})
+            graphics.draw_sprite(f, enemy_mat, model, clip_rect={f32(i)*16, 0, 16, 16})
         }
         if debug_enabled {
             graphics.ui_draw_rect({pos.x, pos.y, 64, 64}, {1, 0, 0, 0.25})
@@ -327,6 +326,9 @@ draw_enemies :: proc(t: f64) {
 
 
 draw :: proc(t: f64, dt: f64) {
+
+    f := graphics.Frame{}
+    graphics.draw_camera(&f, &cam, t)
 
     bs := f32(Big_Font_Size)
     rs := f32(Regular_Font_Size)
@@ -354,9 +356,9 @@ draw :: proc(t: f64, dt: f64) {
             graphics.ui_draw_text(live_enemies_str, regular_font, {-Screen_Width/2, -Screen_Height/2 + rs*5}, {1, 1, 1, 1})
         }
 
-        draw_player(t)
-        draw_bullets(t)
-        draw_enemies(t)
+        draw_player(&f, t)
+        draw_bullets(&f, t)
+        draw_enemies(&f, t)
     case .Paused:
         pause_str := "(Paused)"
         graphics.ui_draw_text(pause_str, big_font, {0 - f32(len(pause_str))*bs/2, 0+2*bs}, {1, 1, 1, 1})
@@ -373,6 +375,8 @@ draw :: proc(t: f64, dt: f64) {
         score_str := fmt.tprint("final score: ", player.score)
         graphics.ui_draw_text(score_str, regular_font, {0 - f32(len(score_str))*rs/2, 0-2*rs}, {1, 1, 1, 1})
     }
+
+    graphics.render_frame(f)
 
 }
 
