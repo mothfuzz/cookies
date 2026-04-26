@@ -30,5 +30,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> CompositeOut {
 fn fs_main(in: CompositeOut) -> @location(0) vec4<f32> {
     let revealage = textureSample(revealage, smp, in.texcoord).r;
     let accum = textureSample(accum, smp, in.texcoord);
-    return vec4<f32>(accum.rgb / max(accum.a, 1e-5), revealage);
+    let avg_rgb = accum.rgb / max(accum.a, 1e-5);
+    let opacity = 1.0 - revealage;
+    return vec4<f32>(avg_rgb * opacity, opacity);
 }

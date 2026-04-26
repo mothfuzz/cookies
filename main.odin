@@ -301,7 +301,7 @@ draw :: proc(a: f64, dt: f64) {
     scene.draw(&main_scene, a)
     graphics.draw_mesh(&f, triangle, brick_mat, trans=transform.smooth(&triangle_trans, a))
     graphics.draw_sprite(&f, mat2, transform.smooth(&quad_trans, a), {64, 64, 128, 128}, {1, 0, 0, 0.9}) //frasier
-    graphics.draw_mesh(&f, quad, metal_mat, transform.compute(&floor_trans))
+    graphics.draw_mesh(&f, quad, metal_mat, transform.compute(&floor_trans), base_color_tint={1,1,1,0.9})
     plus_one := floor_trans
     transform.translate(&plus_one, {0, 2, 0})
     graphics.draw_mesh(&f, quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'), base_color_tint={1, 0, 1, 1})

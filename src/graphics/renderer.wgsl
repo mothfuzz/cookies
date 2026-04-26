@@ -126,10 +126,10 @@ struct LightingContribution {
     reflectance: f32,
 }
 
-fn calculate_influence_phong(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>) -> LightingContribution {
+fn calculate_influence_phong(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>) -> vec4<f32> {
     let diffuse = max(dot(n, l), 0.0);
     let specular = pow(max(dot(v, reflect(-l, n)), 0.0), 256.0);
-    return LightingContribution(diffuse * radiance, vec3<f32>(0.0), specular * radiance, 0.0);
+    return vec4<f32>((diffuse + specular) * radiance, 0.0);
 }
 
 const PI = radians(180.0);
@@ -157,7 +157,7 @@ fn geometry_attenuation_smith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughnes
     return shadowing * masking;
 }
 
-fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>, base_color: vec4<f32>, roughness: f32, metallic: f32) -> LightingContribution {
+fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>, base_color: vec4<f32>, roughness: f32, metallic: f32) -> vec3<f32> {
     let h = normalize(v + l);
     let cos_theta = max(dot(h, v), 0.0);
     var base_reflectance = vec3<f32>(0.04); //base dielectric reflectance
@@ -179,12 +179,11 @@ fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: v
 
     let albedo = max(diffuse_ratio.r, max(diffuse_ratio.g, diffuse_ratio.b));
 
-    return LightingContribution(
-        diffuse * radiance * max(dot(n, l), 0.0),
-        specular * radiance * max(dot(n, l), 0.0),
-        transmission * radiance * max(dot(-n, l), 0.0),
-        1.0 - albedo
-    );
+    let diffuse_color = diffuse * max(dot(n, l), 0.0) * radiance;
+    let specular_color = specular * max(dot(n, l), 0.0) * radiance;
+    let transmission_color = transmission * max(dot(-n, l), 0.0) * radiance;
+
+    return (diffuse_color + transmission_color)*base_color.a + specular_color;
 }
 
 fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
@@ -230,8 +229,8 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
         }
         let v = normalize(-in.position.xyz); //already in view space
 
-        var light = vec3<f32>(0.03) * final_color.rgb * ambient_occlusion; //initial ambient value
-        var reflectance = 0.0;
+        let ambient_color = vec3<f32>(0.03) * final_color.rgb * ambient_occlusion; //initial ambient value
+        var light = ambient_color * final_color.a;
         for (var i: u32 = 0; i < arrayLength(&point_lights); i++) {
             let l = normalize(point_lights[i].position.xyz - in.position.xyz);
 
@@ -241,19 +240,15 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
                 let attenuation = smoothstep(r, 0.0, d);
                 let radiance = point_lights[i].color.rgb * point_lights[i].color.a * attenuation;
                 //let attenuation = 1.0 / (d*d);
-                //let contribution = calculate_influence_phong(n, v, l, radiance);
-                let contribution = calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
-                light += contribution.diffuse + contribution.specular + contribution.transmission;
-                reflectance += contribution.reflectance;
+                //light += calculate_influence_phong(n, v, l, radiance);
+                light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
             }
         }
         for (var i: u32 = 0; i < arrayLength(&directional_lights); i++) {
             let l = normalize(-directional_lights[i].direction.xyz);
             let radiance = directional_lights[i].color.rgb * directional_lights[i].color.a;
-            //let contribution = calculate_influence_phong(n, v, l, radiance);
-            let contribution = calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
-            light += contribution.diffuse + contribution.specular + contribution.transmission;
-            reflectance += contribution.reflectance;
+            //light += calculate_influence_phong(n, v, l, radiance);
+            light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
         }
         for (var i: u32 = 0; i < arrayLength(&spot_lights); i++) {
             let l = normalize(spot_lights[i].position.xyz - in.position.xyz);
@@ -263,20 +258,14 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
             let epsilon = inner_cutoff - outer_cutoff;
             let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
             let radiance = spot_lights[i].color.rgb * spot_lights[i].color.a * falloff;
-            //let contribution = calculate_influence_phong(n, v, l, radiance);
-            let contribution = calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
-            light += contribution.diffuse + contribution.specular + contribution.transmission;
-            reflectance += contribution.reflectance;
+            //light += calculate_influence_phong(n, v, l, radiance);
+            light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
         }
-
-        // TODO: switch to premultiplied I guess
 
         //reinhard tonemap for PBR
         //light = light / (light + vec3<f32>(1.0));
         //light = pow(light, vec3<f32>(1.0/2.2));
-        //reflectance = 0.0;
-        let total_lights = arrayLength(&point_lights) + arrayLength(&directional_lights) + arrayLength(&spot_lights);
-        final_color = vec4<f32>(light, mix(final_color.a, 1.0, min(reflectance/f32(total_lights), 1.0)));
+        final_color = vec4<f32>(light, in_color.a);
     }
     return final_color;
 }
@@ -312,13 +301,13 @@ fn trans_main(in: VSOut) -> TransOut {
     var final_color = base_color;
     final_color = apply_lights(in, final_color);
     final_color = apply_fog(in.position, final_color);
-    final_color.a = base_color.a;
+    //final_color.a = base_color.a;
 
     let most_color = max(max(final_color.r, final_color.g), final_color.b);
     let weight = max(min(1.0, most_color * final_color.a), final_color.a) *
         clamp(0.03 / (1e-5 + pow(in.position.z / 200, 4.0)), 1e-2, 3e3);
 
-    out.accum = vec4<f32>(final_color.rgb * final_color.a, final_color.a) * weight;
+    out.accum = vec4<f32>(final_color.rgb, final_color.a) * weight;
     out.revealage = final_color.a;
 
     return out;

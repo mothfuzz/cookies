@@ -379,13 +379,17 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
                 blend = &{
                     color = wgpu.BlendComponent{
                         operation = .Add,
-                        srcFactor = .OneMinusSrcAlpha,
-                        dstFactor = .SrcAlpha,
+                        //srcFactor = .OneMinusSrcAlpha,
+                        //dstFactor = .SrcAlpha,
+                        srcFactor = .One,
+                        dstFactor = .OneMinusSrcAlpha,
                     },
                     alpha = wgpu.BlendComponent{
                         operation = .Add,
-                        srcFactor = .OneMinusSrcAlpha,
-                        dstFactor = .SrcAlpha,
+                        //srcFactor = .OneMinusSrcAlpha,
+                        //dstFactor = .SrcAlpha,
+                        srcFactor = .One,
+                        dstFactor = .OneMinusSrcAlpha,
                     },
                 },
             },
