@@ -18,13 +18,13 @@ Transform :: struct {
     prev_sibling: ^Transform,
     next_sibling: ^Transform,
     dirty: bool,
-    changed: bool, //separate from dirty flag because dirty might be false in case of requesting world transform during physics etc.
-    a_start: f64, //alpha value for 'starting point' so we can detect loops
+    prev_alpha: f64, //keep track of prior alpha value so we can detect loops, using -1 as a tick-boundary sentinel
 }
+ALPHA_BOUNDARY :: -1
 
 ORIGIN :: Transform{position=0, orientation=1, scale=1,
                     prev_local_trans=1, prev_world_trans=1,
-                    next_local_trans=1, next_world_trans=1}
+                    next_local_trans=1, next_world_trans=1, prev_alpha=ALPHA_BOUNDARY}
 
 link :: proc "contextless" (parent: ^Transform, child: ^Transform) {
     unlink(child)
@@ -132,30 +132,26 @@ compute :: proc "contextless" (trans: ^Transform) -> matrix[4, 4]f32 {
     return trans.next_world_trans
 }
 
-smooth :: proc "contextless" (trans: ^Transform, t: f64) -> matrix[4, 4]f32 {
+smooth :: proc "contextless" (trans: ^Transform, alpha: f64) -> matrix[4, 4]f32 {
     update_root(trans)
-    if trans.changed {
-        trans.a_start = t
-        trans.changed = false
-    }
-    if t < trans.a_start {
+    if trans.prev_alpha >= 0 && alpha < trans.prev_alpha {
         //loop detected, don't render motions twice
         reset(trans)
-        trans.a_start = t
     }
-    return linalg.matrix4_from_trs(interp(trans, f32(t)))
+    trans.prev_alpha = alpha
+    return linalg.matrix4_from_trs(interp(trans, f32(alpha)))
 }
 
 
 translate :: proc "contextless" (trans: ^Transform, translation: [3]f32) {
     trans.position += translation
     trans.dirty = true
-    trans.changed = true
+    trans.prev_alpha = ALPHA_BOUNDARY
 }
 set_position :: proc "contextless" (trans: ^Transform, position: [3]f32, interpolate: bool = false) {
     trans.position = position
     trans.dirty = true
-    trans.changed = true
+    trans.prev_alpha = ALPHA_BOUNDARY
     if !interpolate {
         reset(trans)
     }
@@ -168,27 +164,27 @@ get_position :: proc "contextless" (trans: ^Transform) -> [3]f32 {
 rotate :: proc "contextless" (trans: ^Transform, rotation: [3]f32) {
     trans.orientation = linalg.quaternion_from_euler_angles(expand_values(rotation), linalg.Euler_Angle_Order.XYZ) * trans.orientation
     trans.dirty = true
-    trans.changed = true
+    trans.prev_alpha = ALPHA_BOUNDARY
 }
 rotatex :: proc "contextless" (trans: ^Transform, rotation: f32) {
     trans.orientation = linalg.quaternion_from_euler_angle_x(rotation) * trans.orientation
     trans.dirty = true
-    trans.changed = true
+    trans.prev_alpha = ALPHA_BOUNDARY
 }
 rotatey :: proc "contextless" (trans: ^Transform, rotation: f32) {
     trans.orientation = linalg.quaternion_from_euler_angle_y(rotation) * trans.orientation
     trans.dirty = true
-    trans.changed = true
+    trans.prev_alpha = ALPHA_BOUNDARY
 }
 rotatez :: proc "contextless" (trans: ^Transform, rotation: f32) {
     trans.orientation = linalg.quaternion_from_euler_angle_z(rotation) * trans.orientation
     trans.dirty = true
-    trans.changed = true
+    trans.prev_alpha = ALPHA_BOUNDARY
 }
 set_orientation :: proc "contextless" (trans: ^Transform, orientation: [3]f32, interpolate: bool = false) {
     trans.orientation = linalg.quaternion_from_euler_angles(expand_values(orientation), .XYZ)
     trans.dirty = true
-    trans.changed = true
+    trans.prev_alpha = ALPHA_BOUNDARY
     if !interpolate {
         reset(trans)
     }
@@ -196,7 +192,7 @@ set_orientation :: proc "contextless" (trans: ^Transform, orientation: [3]f32, i
 set_orientation_quaternion :: proc "contextless" (trans: ^Transform, orientation: quaternion128, interpolate: bool = false) {
     trans.orientation = orientation
     trans.dirty = true
-    trans.changed = true
+    trans.prev_alpha = ALPHA_BOUNDARY
     if !interpolate {
         reset(trans)
     }
@@ -214,13 +210,13 @@ get_orientation_quaternion :: proc "contextless" (trans: ^Transform) -> quaterni
 scale :: proc "contextless" (trans: ^Transform, scale: [3]f32) {
     trans.scale *= scale
     trans.dirty = true
-    trans.changed = true
+    trans.prev_alpha = ALPHA_BOUNDARY
 }
 
 set_scale :: proc "contextless" (trans: ^Transform, scale: [3]f32, interpolate: bool = false) {
     trans.scale = scale
     trans.dirty = true
-    trans.changed = true
+    trans.prev_alpha = ALPHA_BOUNDARY
     if !interpolate {
         reset(trans)
     }
@@ -238,6 +234,7 @@ init :: proc "contextless" (trans: ^Transform,
     trans.position = position
     trans.orientation = orientation
     trans.scale = scale
+    trans.prev_alpha = ALPHA_BOUNDARY
     reset(trans)
 }
 
