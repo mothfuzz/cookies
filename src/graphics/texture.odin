@@ -16,6 +16,32 @@ Texture :: struct {
     is_solid: bool,
 }
 
+make_render_target_array :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Unorm, layers: uint) -> (tex: Texture) {
+    fmt.println("creating render target array:", size.x, "x", size.y, "x", layers)
+    tex.render_target = true
+    tex.image = wgpu.DeviceCreateTexture(ren.device, &{
+        usage = {.RenderAttachment, .TextureBinding, .CopyDst},
+        dimension = ._2D,
+        size = {
+            width = u32(size.x),
+            height = u32(size.y),
+            depthOrArrayLayers = u32(layers),
+        },
+        format = format,
+        mipLevelCount = 1,
+        sampleCount = 1
+    })
+    tex.view = wgpu.TextureCreateView(tex.image, &{
+        dimension = ._2DArray,
+        mipLevelCount = 1,
+        arrayLayerCount = u32(layers),
+    })
+    tex.size = size
+    tex.is_solid = true //I guess
+    tex.is_trans = false
+    return
+}
+
 make_render_target :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Unorm, resolve_format: wgpu.TextureFormat = .RGBA8UnormSrgb) -> (tex: Texture) {
     fmt.println("creating render target:", size.x, "x", size.y)
     tex.render_target = true
@@ -29,7 +55,7 @@ make_render_target :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Uno
         },
         format = format,
         mipLevelCount = 1,
-        sampleCount = 4,
+        sampleCount = 4
     })
     tex.view = wgpu.TextureCreateView(tex.image)
     tex.resolve = wgpu.DeviceCreateTexture(ren.device, &{
@@ -67,18 +93,18 @@ make_scaled_image_nearest :: proc(input: []u32, in_size, out_size: [2]uint) -> (
     return
 }
 
-to_bgra8 :: #force_inline proc(i: u32) -> (o: [4]f32) {
+to_rgba8 :: #force_inline proc(i: u32) -> (o: [4]f32) {
     o.a = f32(i & 0xff000000 >> (3*8))/255.0
-    o.r = f32(i & 0x00ff0000 >> (2*8))/255.0
+    o.b = f32(i & 0x00ff0000 >> (2*8))/255.0
     o.g = f32(i & 0x0000ff00 >> (1*8))/255.0
-    o.b = f32(i & 0x000000ff >> (0*8))/255.0
+    o.r = f32(i & 0x000000ff >> (0*8))/255.0
     return
 }
-from_bgra8 :: #force_inline proc(i: [4]f32) -> (o: u32) {
+from_rgba8 :: #force_inline proc(i: [4]f32) -> (o: u32) {
     o |= u32(i.a*255.0) << (3*8)
-    o |= u32(i.r*255.0) << (2*8)
+    o |= u32(i.b*255.0) << (2*8)
     o |= u32(i.g*255.0) << (1*8)
-    o |= u32(i.b*255.0) << (0*8)
+    o |= u32(i.r*255.0) << (0*8)
     return
 }
 
@@ -102,15 +128,15 @@ make_scaled_image_bilinear :: proc(input: []u32, in_size, out_size: [2]uint) -> 
             r := clamp(xi+1, 0, in_size.x-1)
             u := clamp(yi+0, 0, in_size.y-1)
             d := clamp(yi+1, 0, in_size.y-1)
-            ul := to_bgra8(input[u*in_size.x + l])
-            ur := to_bgra8(input[u*in_size.x + r])
-            dl := to_bgra8(input[d*in_size.x + l])
-            dr := to_bgra8(input[d*in_size.x + r])
+            ul := to_rgba8(input[u*in_size.x + l])
+            ur := to_rgba8(input[u*in_size.x + r])
+            dl := to_rgba8(input[d*in_size.x + l])
+            dr := to_rgba8(input[d*in_size.x + r])
             top := ul * (1 - dx) + ur * dx
             bot := dl * (1 - dx) + dr * dx
             mix := top * (1 - dy) + bot * dy
 
-            output[i*out_size.x+j] = from_bgra8(mix)
+            output[i*out_size.x+j] = from_rgba8(mix)
         }
     }
     return
@@ -133,7 +159,7 @@ make_mips :: proc(input: []u32, size: [2]uint, include_original: bool = false) -
     return
 }
 
-make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false, premultiply_alpha: bool = true) -> (tex: Texture) {
+make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (tex: Texture) {
     for pixel in input {
         if (pixel & 0xff000000) > 0 && (pixel & 0xff000000) < 0xff000000 {
             tex.is_trans = true
@@ -188,7 +214,7 @@ make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false, premu
 delete_texture :: proc(tex: Texture) {
     wgpu.TextureRelease(tex.image)
     wgpu.TextureViewRelease(tex.view)
-    if tex.render_target {
+    if wgpu.TextureGetSampleCount(tex.image) > 1 {
         wgpu.TextureRelease(tex.resolve)
         wgpu.TextureViewRelease(tex.resolve_view)
     }
@@ -221,9 +247,9 @@ load_data_2d :: proc(img: []byte) -> (img_u32: []u32, x, y: uint) {
 }
 
 //inherently 2D
-make_texture_from_image :: proc(img: []byte, linear: bool = false, premultiply_alpha: bool = true) -> (tex: Texture) {
+make_texture_from_image :: proc(img: []byte, linear: bool = false) -> (tex: Texture) {
     img_u32, x, y := load_data_2d(img)
-    tex = make_texture_2D(img_u32, {x, y}, linear, premultiply_alpha)
+    tex = make_texture_2D(img_u32, {x, y}, linear)
     delete(img_u32)
     return
 }
@@ -288,7 +314,7 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
         final_texture[i] |= (ambient_final[i] & 0xff) << (0*8)
     }
 
-    tex = make_texture_2D(final_texture, {uint(x), uint(y)}, true, false)
+    tex = make_texture_2D(final_texture, {uint(x), uint(y)}, true)
 
     return
 }

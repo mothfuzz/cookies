@@ -299,8 +299,8 @@ draw :: proc(a: f64, dt: f64) {
     graphics.draw_camera(&f, &cam2, a)
 
     scene.draw(&main_scene, a)
-    graphics.draw_mesh(&f, triangle, brick_mat, trans=transform.smooth(&triangle_trans, a))
-    graphics.draw_sprite(&f, mat2, transform.smooth(&quad_trans, a), {64, 64, 128, 128}, {1, 0, 0, 0.9}) //frasier
+    graphics.draw_mesh(&f, triangle, brick_mat, transform.smooth(&triangle_trans, a))
+    graphics.draw_sprite(&f, mat2, transform.smooth(&quad_trans, a), {64, 64, 128, 128}, {1, 0, 0, 0.2}) //frasier
     graphics.draw_mesh(&f, quad, metal_mat, transform.compute(&floor_trans), base_color_tint={1,1,1,0.9})
     plus_one := floor_trans
     transform.translate(&plus_one, {0, 2, 0})

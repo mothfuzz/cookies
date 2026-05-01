@@ -109,7 +109,7 @@ draw_text :: proc(frame: ^Frame, text: string, font: Font, model: matrix[4,4]f32
             (quad.s1 - quad.s0)*FONT_RES,
             (quad.t1 - quad.t0)*FONT_RES,
         }
-        draw_mesh(frame, char_quad, font.material, trans=model * trans, base_color_tint=color, clip_rect=clip_rect, sprite=sprite, billboard=billboard)
+        draw_mesh(frame, char_quad, font.material, transform=model * trans, base_color_tint=color, clip_rect=clip_rect, sprite=sprite, billboard=billboard)
     }
 
 }

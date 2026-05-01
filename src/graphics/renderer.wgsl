@@ -4,9 +4,6 @@ struct Screen {
 }
 @group(0) @binding(0) var<uniform> screen: Screen;
 
-// TODO: need to combine Sceen & Camera into one bind group.
-// this way we can have Camera, Material, Lighting, and Skeletons
-
 struct Camera {
     eye: vec4<f32>,
     center: vec4<f32>,
@@ -27,14 +24,15 @@ struct PointLight {
     color: vec4<f32>, //rgb+intensity
     view_to_shadow: mat4x4<f32>,
 }
-@group(2) @binding(0) var<storage, read> point_lights: array<PointLight>;
+@group(3) @binding(0) var<storage, read> point_lights: array<PointLight>;
 
 struct DirectionalLight {
     direction: vec4<f32>, //view space xyz+radius
     color: vec4<f32>, //rgb+intensity
-    view_to_shadow: mat4x4<f32>,
+    view_to_shadow_near: mat4x4<f32>,
+    view_to_shadow_far: mat4x4<f32>,
 }
-@group(2) @binding(1) var<storage, read> directional_lights: array<DirectionalLight>;
+@group(3) @binding(1) var<storage, read> directional_lights: array<DirectionalLight>;
 
 struct SpotLight {
     position: vec4<f32>,//xyz+inner angle
@@ -42,8 +40,11 @@ struct SpotLight {
     color: vec4<f32>,
     view_to_shadow: mat4x4<f32>,
 }
-@group(2) @binding(2) var<storage, read> spot_lights: array<SpotLight>;
-
+@group(3) @binding(2) var<storage, read> spot_lights: array<SpotLight>;
+@group(3) @binding(3) var shadow_depth_sampler: sampler_comparison;
+@group(3) @binding(4) var shadow_color_sampler: sampler;
+@group(3) @binding(5) var spot_light_shadow_depth: texture_depth_2d_array;
+@group(3) @binding(6) var spot_light_shadow_color: texture_2d_array<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -84,8 +85,8 @@ fn ident() -> mat4x4<f32> {
     );
 }
 
-@group(3) @binding(0) var<storage, read> skeletons: array<mat4x4<f32>>;
-@group(3) @binding(1) var<uniform> skeleton_len: u32;
+@group(2) @binding(0) var<storage, read> skeletons: array<mat4x4<f32>>;
+@group(2) @binding(1) var<uniform> skeleton_len: u32;
 fn calculate_bones(vertex: Vertex, instance_index: u32) -> mat4x4<f32> {
     if(all(vertex.weights == vec4<f32>(0.0))) {
         return ident();
@@ -117,13 +118,6 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     v.pbr_tint = vertex.pbr_tint;
     v.emissive_tint = vertex.emissive_tint;
     return v;
-}
-
-struct LightingContribution {
-    diffuse: vec3<f32>,
-    transmission: vec3<f32>,
-    specular: vec3<f32>,
-    reflectance: f32,
 }
 
 fn calculate_influence_phong(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>) -> vec4<f32> {
@@ -186,22 +180,6 @@ fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: v
     return (diffuse_color + transmission_color)*base_color.a + specular_color;
 }
 
-fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
-    var final_color = in_color;
-    let near = select(screen.size[2], 0.1, screen.size[2] == 0);
-    let far = select(screen.size[3], 2048.0, screen.size[3] == 0);
-    let fog_max = far;
-    var fog_min = screen.color[3];
-    if fog_min == 0.0 {
-        fog_min = (far - near)*0.5; //fog starts at halfway by default
-    }
-    let dist = abs(in_position.z / in_position.w);
-    let fog_factor = clamp((fog_max - dist) / (fog_max - fog_min), 0, 1);
-    var fog_color = vec4<f32>(screen.color.rgb, final_color.a);
-    final_color = mix(fog_color, final_color, fog_factor);
-    return final_color;
-}
-
 fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
     var final_color = in_color;
     var lights: bool = true;
@@ -251,15 +229,39 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
             light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
         }
         for (var i: u32 = 0; i < arrayLength(&spot_lights); i++) {
+            if(spot_lights[i].color.a == 0) {
+                continue;
+            }
             let l = normalize(spot_lights[i].position.xyz - in.position.xyz);
             let theta = dot(l, normalize(-spot_lights[i].direction.xyz));
             let inner_cutoff = spot_lights[i].position.w;
             let outer_cutoff = spot_lights[i].direction.w;
-            let epsilon = inner_cutoff - outer_cutoff;
-            let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
-            let radiance = spot_lights[i].color.rgb * spot_lights[i].color.a * falloff;
-            //light += calculate_influence_phong(n, v, l, radiance);
-            light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
+            if(theta < outer_cutoff) {
+                continue;
+            }
+            var shadow = 0.0;
+            if(i < textureNumLayers(spot_light_shadow_depth)) {
+                let frag_in_light = spot_lights[i].view_to_shadow * vec4<f32>(in.position.xyz, 1.0);
+                let ndc = frag_in_light.xyz / frag_in_light.w;
+                let shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
+                let depth_ref = ndc.z;
+                let bias = max(0.05 * (1.0 - dot(n, l)), 0.005);
+                let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(spot_light_shadow_depth));
+                for(var x = -1; x <= 1; x++) {
+                    for(var y = -1; y <= 1; y++) {
+                        let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
+                        shadow += textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, i, depth_ref - bias);
+                    }
+                }
+                shadow /= 9.0;
+            }
+            if(shadow > 0) {
+                let epsilon = inner_cutoff - outer_cutoff;
+                let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
+                let radiance = spot_lights[i].color.rgb * spot_lights[i].color.a * falloff;
+                //light += calculate_influence_phong(n, v, l, radiance) * shadow;
+                light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic) * shadow;
+            }
         }
 
         //reinhard tonemap for PBR
@@ -269,6 +271,23 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
     }
     return final_color;
 }
+
+fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
+    var final_color = in_color;
+    let near = select(screen.size[2], 0.1, screen.size[2] == 0);
+    let far = select(screen.size[3], 2048.0, screen.size[3] == 0);
+    let fog_max = far;
+    var fog_min = screen.color[3];
+    if fog_min == 0.0 {
+        fog_min = (far - near)*0.5; //fog starts at halfway by default
+    }
+    let dist = abs(in_position.z / in_position.w);
+    let fog_factor = clamp((fog_max - dist) / (fog_max - fog_min), 0, 1);
+    var fog_color = vec4<f32>(screen.color.rgb, final_color.a);
+    final_color = mix(fog_color, final_color, fog_factor);
+    return final_color;
+}
+
 
 
 @fragment
@@ -311,4 +330,9 @@ fn trans_main(in: VSOut) -> TransOut {
     out.revealage = final_color.a;
 
     return out;
+}
+
+@fragment
+fn shadow_main(in: VSOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(0, 0, 0, 0);
 }

@@ -19,6 +19,7 @@ Camera :: struct {
     center_next: [3]f32,
     viewport: [4]f32,
     using uniforms: Camera_Uniforms,
+    near, far, fov: f32, //custom overrides
 }
 
 Screen_Uniforms :: struct {
@@ -29,8 +30,6 @@ screen_uniforms: Screen_Uniforms = {
     size={0, 0, 0.1, 0},
 }
 screen_uniforms_buffer: wgpu.Buffer
-
-default_camera: Camera
 
 set_background_color :: proc(color: [3]f32) {
     screen_uniforms.color.rgb = linalg.vector4_srgb_to_linear([4]f32{color.r, color.g, color.b, 1.0}).rgb
@@ -69,7 +68,7 @@ camera_layout_entries := []wgpu.BindGroupLayoutEntry{
 }
 camera_layout: wgpu.BindGroupLayout
 
-make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}) -> (cam: Camera) {
+make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = -1, fov: f32 = 0) -> (cam: Camera) {
     cam.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Uniform, .CopyDst}, size=size_of(Camera_Uniforms)})
     bindings := []wgpu.BindGroupEntry{
         {binding = 0, buffer = screen_uniforms_buffer, size = size_of(Screen_Uniforms)},
@@ -81,17 +80,20 @@ make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}) -> (cam: Camera) {
         entries = raw_data(bindings),
     })
     cam.viewport = viewport
+    cam.near = near
+    cam.far = far
+    cam.fov = fov
     calculate_projection(&cam)
     return
 }
 
-calculate_camera :: proc(cam: ^Camera, a: f64) {
+calculate_camera :: proc(cam: ^Camera, a: f64 = 1.0, up: [3]f32 = {0, 1, 0}) {
     a := f32(a)
     eye := linalg.lerp(cam.eye_prev, cam.eye_next, [3]f32{a, a, a})
     center := linalg.lerp(cam.center_prev, cam.center_next, [3]f32{a, a, a})
     cam.eye = {eye.x, eye.y, eye.z, 1.0}
     cam.center = {center.x, center.y, center.z, 1.0}
-    cam.view = linalg.matrix4_look_at(cam.eye.xyz, cam.center.xyz, [3]f32{0, 1, 0})
+    cam.view = linalg.matrix4_look_at(cam.eye.xyz, cam.center.xyz, up)
     if cam.viewport[2] == 0 || cam.viewport[3] == 0 {
         calculate_projection(cam)
     }
@@ -107,8 +109,10 @@ bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera)
     w, h := get_viewport_size(cam)
     x = max(x, 0)
     y = max(y, 0)
-    w = min(w, screen_uniforms.size.x)
-    h = min(h, screen_uniforms.size.y)
+    if cam.viewport[2] == 0 && cam.viewport[3] == 0 {
+        w = min(w, screen_uniforms.size.x)
+        h = min(h, screen_uniforms.size.y)
+    }
     wgpu.RenderPassEncoderSetViewport(render_pass, x, y, w, h, 0, 1)
     wgpu.RenderPassEncoderSetScissorRect(render_pass, u32(x), u32(y), u32(w), u32(h))
     
@@ -119,6 +123,12 @@ bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera)
     screen_uniforms_temp.size.y = cam_height
     if screen_uniforms_temp.color.rgb == 0 {
         screen_uniforms_temp.color.rgb = 1
+    }
+    if cam.near != 0 {
+        screen_uniforms_temp.size[2] = cam.near
+    }
+    if cam.far != -1 {
+        screen_uniforms_temp.size[3] = cam.far
     }
     wgpu.QueueWriteBuffer(ren.queue, screen_uniforms_buffer, 0, &screen_uniforms_temp, size_of(Screen_Uniforms))
 
@@ -165,9 +175,22 @@ get_viewport_size :: proc(cam: Camera) -> (width, height: f32) {
 FOV :: 60.0
 calculate_projection :: proc(cam: ^Camera) {
     width, height := get_viewport_size(cam^)
-    fov := f32(linalg.to_radians(FOV))
-    near := screen_uniforms.size[2]
-    far := screen_uniforms.size[3]
+    near, far, fov: f32
+    if cam.near == 0 {
+        near = screen_uniforms.size[2]
+    } else {
+        near = cam.near
+    }
+    if cam.far == -1 {
+        far = screen_uniforms.size[3]
+    } else {
+        far = cam.far
+    }
+    if cam.fov == 0 {
+        fov = f32(linalg.to_radians(FOV))
+    } else {
+        fov = cam.fov
+    }
     if far == 0 {
         cam.projection = linalg.matrix4_infinite_perspective(fov, width/height, near)
     } else {
@@ -175,6 +198,8 @@ calculate_projection :: proc(cam: ^Camera) {
     }
 }
 
+//returns the z coordinate which the camera should be at to have sprites rendered at z=0 be pixel-perfect
+//(assumes FOV = default of 60 degrees)
 z_2d :: proc(cam: Camera) -> f32 {
     width, height := get_viewport_size(cam)
     return linalg.sqrt(linalg.pow(height, 2) - linalg.pow(height/2.0, 2))
