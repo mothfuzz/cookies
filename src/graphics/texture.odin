@@ -16,7 +16,7 @@ Texture :: struct {
     is_solid: bool,
 }
 
-make_render_target_array :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Unorm, layers: uint) -> (tex: Texture) {
+make_render_target_array :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Unorm, layers: uint, cubemap: bool = false) -> (tex: Texture) {
     fmt.println("creating render target array:", size.x, "x", size.y, "x", layers)
     tex.render_target = true
     tex.image = wgpu.DeviceCreateTexture(ren.device, &{
@@ -25,14 +25,14 @@ make_render_target_array :: proc(size: [2]uint, format: wgpu.TextureFormat = .RG
         size = {
             width = u32(size.x),
             height = u32(size.y),
-            depthOrArrayLayers = u32(layers),
+            depthOrArrayLayers = cubemap?u32(6*layers):u32(layers),
         },
         format = format,
         mipLevelCount = 1,
         sampleCount = 1
     })
     tex.view = wgpu.TextureCreateView(tex.image, &{
-        dimension = ._2DArray,
+        dimension = cubemap?.CubeArray:._2DArray,
         mipLevelCount = 1,
         arrayLayerCount = u32(layers),
     })

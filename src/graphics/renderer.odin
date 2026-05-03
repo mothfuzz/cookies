@@ -776,17 +776,14 @@ render_frame :: proc(frame: Frame) {
             })
             wgpu.RenderPassEncoderSetPipeline(shadow_pass, ren.shadow_pipeline)
 
-            //build orthonormal basis for look_at to avoid degenerate matrices at grazing angles
+            //handle parallel-to-up case
             dir := linalg.normalize(spot_light.direction)
-            default_up := [3]f32{0, 0, 1} //orthogonal to camera-up
-            right := linalg.cross(default_up, dir)
-            if linalg.length(right) < 0.0001 {
-                default_up = {1, 0, 0} //if it's grazing, pick another one
-                right = linalg.cross(default_up, dir)
+            world_up: [3]f32 = {0, 1, 0}
+            if linalg.abs(linalg.dot(dir, world_up)) == 1.0 {
+                world_up = {0, 0, 1}
             }
-            right = linalg.normalize(right)
-            up := linalg.normalize(linalg.cross(dir, right))
-            calculate_camera(&spot_light.shadow_camera, up=up)
+            
+            calculate_camera(&spot_light.shadow_camera, up=world_up)
             bind_camera(shadow_pass, 0, spot_light.shadow_camera)
             draws := compute_draw_calls(batches, spot_light.shadow_camera)
             defer delete_draw_calls(draws)

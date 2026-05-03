@@ -241,7 +241,7 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
             }
             var shadow = 0.0;
             if(i < textureNumLayers(spot_light_shadow_depth)) {
-                let frag_in_light = spot_lights[i].view_to_shadow * vec4<f32>(in.position.xyz, 1.0);
+                let frag_in_light = spot_lights[i].view_to_shadow * in.position;
                 let ndc = frag_in_light.xyz / frag_in_light.w;
                 let shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
                 let depth_ref = ndc.z;

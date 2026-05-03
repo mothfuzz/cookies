@@ -33,21 +33,20 @@ Point_Light :: struct {
     radius: f32,
     color: [4]f32,
     render_shadows: bool,
-    shadow_map: Texture,
+    shadow_cameras: [6]Camera,
 }
-Point_Light_Uniforms :: struct {
+Point_Light_Uniforms :: struct #packed {
     position: [4]f32, //view space xyz + radius
     color: [4]f32, //rgb+intensity
-    view_to_shadow: matrix[4,4]f32,
+    view_to_shadow: matrix[4,4]f32, //just inverse view
 }
 Directional_Light :: struct {
     direction: [3]f32,
     color: [4]f32,
     render_shadows: bool,
-    shadow_map_near: Texture,
-    shadow_map_far: Texture,
+    shadow_camera: Camera,
 }
-Directional_Light_Uniforms :: struct {
+Directional_Light_Uniforms :: struct #packed {
     direction: [4]f32,
     color: [4]f32,
     view_to_shadow_near: matrix[4,4]f32,
@@ -60,13 +59,8 @@ Spot_Light :: struct {
     outer_angle: f32,
     color: [4]f32,
     render_shadows: bool,
-    shadow_depth: Texture,
-    shadow_color: Texture,
     shadow_camera: Camera,
 }
-// WGSL storage layout: three vec4s (48 B) then mat4x4 at offset 48 (112 B total).
-// Default Odin layout aligns matrix[4,4] to 64 B, inserting 16 B before the matrix
-// (view_to_shadow ends up at 64), so GPU reads the wrong bytes for mat4 → broken shadows.
 Spot_Light_Uniforms :: struct #packed {
     position: [4]f32, //xyz + inner angle
     direction: [4]f32, //xyz + outer angle
@@ -135,6 +129,14 @@ make_point_light :: proc(position: [3]f32, radius: f32, color: [4]f32 = 1, rende
         //render_to_texture(^Texture, ^Camera)
     }
     return
+}
+
+delete_point_light :: proc(pl: Point_Light) {
+    if pl.render_shadows {
+        #unroll for cam in pl.shadow_cameras {
+            delete_camera(cam)
+        }
+    }
 }
 
 DIRECTIONAL_LIGHT_NEAR_SHADOW_MAP_RES :: 1024
