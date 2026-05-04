@@ -777,9 +777,8 @@ render_frame :: proc(frame: Frame) {
             wgpu.RenderPassEncoderSetPipeline(shadow_pass, ren.shadow_pipeline)
 
             //handle parallel-to-up case
-            dir := linalg.normalize(spot_light.direction)
-            world_up: [3]f32 = {0, 1, 0}
-            if linalg.abs(linalg.dot(dir, world_up)) == 1.0 {
+            world_up := [3]f32{0, 1, 0}
+            if linalg.abs(linalg.dot(spot_light.direction, world_up)) >= 0.9 {
                 world_up = {0, 0, 1}
             }
             

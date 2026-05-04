@@ -243,7 +243,8 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
             if(i < textureNumLayers(spot_light_shadow_depth)) {
                 let frag_in_light = spot_lights[i].view_to_shadow * in.position;
                 let ndc = frag_in_light.xyz / frag_in_light.w;
-                let shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
+                var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
+                shadow_uv.y = 1.0 - shadow_uv.y;
                 let depth_ref = ndc.z;
                 let bias = max(0.05 * (1.0 - dot(n, l)), 0.005);
                 let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(spot_light_shadow_depth));
