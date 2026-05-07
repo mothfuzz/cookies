@@ -35,6 +35,10 @@ class AudioInterface {
             "pause_sound": (playingSoundPtr, fadeOut) => this.pauseSound(playingSoundPtr, fadeOut),
             "resume_sound": (playingSoundPtr, fadeIn) => this.resumeSound(playingSoundPtr, fadeIn),
             "quit": () => this.quit(),
+
+            "set_sound_position_xyz": (playingSoundPtr, x, y, z) => this.setSoundPosition(playingSoundPtr, x, y, z),
+            "set_listener_position_xyz": (x, y, z) => this.setListenerPosition(x, y, z),
+            "set_listener_orientation_xyz": (fx, fy, fz, ux, uy, uz) => this.setListenerOrientation(fx, fy, fz, ux, uy, uz),
         };
     }
 
@@ -67,6 +71,14 @@ class AudioInterface {
     //assumes id is valid, etc.
     startSound(id, fadeIn) {
         let snd = this.playingSounds[id-1];
+        //create nodes, but don't fill them with stuff until loaded
+        snd.source = this.ctx.createBufferSource();
+        snd.source.loop = snd.looping;
+        snd.gain = this.ctx.createGain();
+        snd.gain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+        snd.source.connect(snd.gain);
+        snd.gain.connect(this.ctx.destination);
+        
         //the sound might not be loaded, but the function will return anyway because of async.
         //so we gotta do a custom callback
         let whenLoaded = new Promise(resolve => {
@@ -78,14 +90,8 @@ class AudioInterface {
             }, 1);
         });
         whenLoaded.then(() => {
-            snd.source = this.ctx.createBufferSource();
-            snd.source.loop = snd.looping;
+            //actually load the buffer & start the fadein
             snd.source.buffer = this.loadedSounds[snd.soundId-1];
-            //snd.source.connect(this.ctx.destination);
-            snd.gain = this.ctx.createGain();
-            snd.gain.gain.setValueAtTime(0.0, this.ctx.currentTime);
-            snd.source.connect(snd.gain);
-            snd.gain.connect(this.ctx.destination);
             snd.gain.gain.setValueAtTime(0.0, this.ctx.currentTime);
             snd.gain.gain.linearRampToValueAtTime(1.0, this.ctx.currentTime + fadeIn/1000);
             snd.source.addEventListener("ended", () => {
@@ -229,6 +235,53 @@ class AudioInterface {
             let soundId = this.mem.loadU32(playingSoundPtr+6);
             //looping false because that's the only way the sound would have died.
             this.playSoundPtr(soundId, false, fadeIn, playingSoundPtr);
+        }
+    }
+
+    setSoundPosition(playingSoundPtr, x, y, z) {
+        let snd = this.getPlayingSound(playingSoundPtr);
+        if(snd) {
+            console.log(snd);
+            if(!snd.panner) {
+                //create panner & link it
+                snd.panner = new PannerNode(this.ctx, {
+                    panningModel: "equalpower",
+                    distanceModel: "inverse",
+                    refDistance: 1.0,
+                    maxDistance: 20.0,
+                });
+                snd.gain.disconnect();
+                snd.gain.connect(snd.panner);
+                snd.panner.connect(this.ctx.destination);
+            }
+            if(snd.panner.positionX) {
+                snd.panner.positionX.value = x;
+                snd.panner.positionY.value = y;
+                snd.panner.positionZ.value = z;
+            } else {
+                snd.panner.setPosition(x, y, z);
+            }
+        }
+    }
+    setListenerPosition(x, y, z) {
+        if(this.ctx.listener.positionX) {
+            this.ctx.listener.positionX.value = x;
+            this.ctx.listener.positionY.value = y;
+            this.ctx.listener.positionZ.value = z;
+        } else {
+            this.ctx.listener.setPosition(x, y, z);
+        }
+    }
+    setListenerOrientation(fx, fy, fz, ux, uy, uz) {
+        if(this.ctx.listener.forwardX) {
+            this.ctx.listener.forwardX.value = x;
+            this.ctx.listener.forwardY.value = y;
+            this.ctx.listener.forwardZ.value = z;
+            this.ctx.listener.upX.value = x;
+            this.ctx.listener.upY.value = y;
+            this.ctx.listener.upZ.value = z;
+        } else {
+            this.ctx.listener.setOrientation(fx, fy, fz, ux, uy, uz);
         }
     }
 }

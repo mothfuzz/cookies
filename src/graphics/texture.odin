@@ -212,12 +212,12 @@ make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (t
 }
 
 delete_texture :: proc(tex: Texture) {
-    wgpu.TextureRelease(tex.image)
-    wgpu.TextureViewRelease(tex.view)
     if wgpu.TextureGetSampleCount(tex.image) > 1 {
         wgpu.TextureRelease(tex.resolve)
         wgpu.TextureViewRelease(tex.resolve_view)
     }
+    wgpu.TextureRelease(tex.image)
+    wgpu.TextureViewRelease(tex.view)
 }
 
 pixels_byte_to_word :: proc(in_pixels: []byte, x, y: uint) -> (out_pixels: []u32) {

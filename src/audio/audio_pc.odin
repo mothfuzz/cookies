@@ -18,6 +18,8 @@ Playing_Sound :: struct {
     data: Sound,
     sound: ^ma.sound,
     audio_buffer: ^ma.audio_buffer,
+    is_spatial: bool,
+    //position: [3]f32,
 }
 
 ctx: runtime.Context
@@ -51,10 +53,6 @@ init :: proc() {
     if engine_init_result != .SUCCESS {
         fmt.panicf("failed to init audio engine: %v", engine_init_result)
     }
-    /*engine_start_result := ma.engine_start(&engine)
-    if engine_start_result != .SUCCESS {
-        fmt.panicf("failed to start audio engine: %v", engine_start_result)
-    }*/
 
     ctx = context
     spec := sdl3.AudioSpec{.F32, i32(ma.engine_get_channels(&engine)), i32(ma.engine_get_sample_rate(&engine))}
@@ -204,5 +202,29 @@ resume_sound :: proc(playing_sound: ^Playing_Sound, fade_in: uint = 0) {
         }
     } else {
         playing_sound^ = play_sound(playing_sound.data, false, fade_in)
+    }
+}
+
+set_sound_position :: proc(playing_sound: ^Playing_Sound, position: [3]f32) {
+    ma.sound_set_position(playing_sound.sound, position.x, position.y, position.z)
+    playing_sound.is_spatial = true
+    ma.sound_set_min_distance(playing_sound.sound, 1.0)
+    ma.sound_set_max_distance(playing_sound.sound, 20.0)
+}
+
+play_sound_spatial :: proc(sound: Sound, position: [3]f32, looped: bool = false, fade_in: uint = 0) -> (ps: Playing_Sound) {
+    ps = play_sound(sound, looped, fade_in)
+    set_sound_position(&ps, position)
+    return ps
+}
+
+set_listener_position :: proc(position: [3]f32, listener_index: uint = 0) {
+    ma.engine_listener_set_position(&engine, u32(listener_index), expand_values(position))
+}
+
+set_listener_orientation :: proc(direction: [3]f32, up: [3]f32 = {0, 1, 0}, listener_index: uint = 0) {
+    ma.engine_listener_set_direction(&engine, u32(listener_index), expand_values(direction))
+    if up != {0, 1, 0} {
+        ma.engine_listener_set_world_up(&engine, u32(listener_index), expand_values(up))
     }
 }

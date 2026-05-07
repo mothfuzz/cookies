@@ -23,14 +23,28 @@ foreign audio {
     resume_sound :: proc(playing_sound: ^Playing_Sound, fade_in: uint = 0) ---
     quit :: proc() ---
 
-    /*
-    play_sound_spatial :: proc(sound: Sound, position: [3]f32, looped: bool = false) -> Playing_Sound ---
-    set_sound_position :: proc(playing_sound: ^Playing_Sound, position: [3]f32) ---
-    set_listener_position :: proc(position: [3]f32) ---
-    */
+    set_sound_position_xyz :: proc(playing_sound: ^Playing_Sound, x, y, z: f32) ---
+    set_listener_position_xyz :: proc(x, y, z: f32) ---
+    set_listener_orientation_xyz :: proc(fx, fy, fz, ux, uy, uz: f32) ---
 }
 
 play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (playing_sound: Playing_Sound) {
     play_sound_ptr(sound, looped, fade_in, &playing_sound)
     return
+}
+
+set_sound_position :: proc(ps: ^Playing_Sound, position: [3]f32) {
+    set_sound_position_xyz(ps, expand_values(position))
+}
+play_sound_spatial :: proc(sound: Sound, position: [3]f32, looped: bool = false, fade_in: uint = 0) -> (playing_sound: Playing_Sound) {
+    play_sound_ptr(sound, looped, fade_in, &playing_sound)
+    set_sound_position(&playing_sound, position)
+    return
+}
+
+set_listener_position :: proc(position: [3]f32) {
+    set_listener_position_xyz(expand_values(position))
+}
+set_listener_orientation :: proc(direction: [3]f32, up: [3]f32 = {0, 1, 0}) {
+    set_listener_orientation_xyz(expand_values(direction), expand_values(up))
 }
