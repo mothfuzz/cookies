@@ -19,6 +19,8 @@ class AudioInterface {
     }
 
     constructor(mem) {
+        this.minDistance = 1.0;
+        this.maxDistance = 20.0;
         this.mem = mem;
         this.reset();
     }
@@ -37,8 +39,12 @@ class AudioInterface {
             "quit": () => this.quit(),
 
             "set_sound_position_xyz": (playingSoundPtr, x, y, z) => this.setSoundPosition(playingSoundPtr, x, y, z),
+            "set_sound_min_distance": (playingSoundPtr, d) => this.setSoundMinDistance(playingSoundPtr, d),
+            "set_sound_max_distance": (playingSoundPtr, d) => this.setSoundMaxDistance(playingSoundPtr, d),
             "set_listener_position_xyz": (x, y, z) => this.setListenerPosition(x, y, z),
             "set_listener_orientation_xyz": (fx, fy, fz, ux, uy, uz) => this.setListenerOrientation(fx, fy, fz, ux, uy, uz),
+            "set_global_min_distance": (d) => this.setGlobalMinDistance(d),
+            "set_global_max_distance": (d) => this.setGlobalMaxDistance(d),
         };
     }
 
@@ -144,6 +150,20 @@ class AudioInterface {
         this.mem.storeU32(playingSoundPtr, id);
         this.mem.storeU16(playingSoundPtr+4, gen);
         this.mem.storeU32(playingSoundPtr+6, soundId);
+
+        //handle spatial cases
+        let spatial = this.mem.loadU32(playingSoundPtr+10) == 1;
+        if(spatial) {
+            let positionX = this.mem.loadF32(playingSoundPtr+14);
+            let positionY = this.mem.loadF32(playingSoundPtr+18);
+            let positionZ = this.mem.loadF32(playingSoundPtr+22);
+            let minDistance = this.mem.loadF32(playingSoundPtr+26);
+            let maxDistance = this.mem.loadF32(playingSoundPtr+30);
+            snd.position = {x:positionX, y:positionY, z:positionZ};
+            snd.minDistance = minDistance;
+            snd.maxDistance = maxDistance;
+            this.setSoundSpatial(snd);
+        }
     }
 
     getPlayingSound(playingSoundPtr) {
@@ -169,7 +189,6 @@ class AudioInterface {
             let soundId = this.mem.loadU32(playingSoundPtr+6);
             this.playSoundPtr(soundId, looped, playingSoundPtr);
         }
-
     }
 
     soundIsLooping(playingSoundPtr) {
@@ -238,29 +257,56 @@ class AudioInterface {
         }
     }
 
+    setSoundSpatial(snd) {
+        if(!snd.panner) {
+            //create panner & link it
+            snd.panner = new PannerNode(this.ctx, {
+                panningModel: "equalpower",
+                distanceModel: "inverse",
+            });
+            snd.gain.disconnect();
+            snd.gain.connect(snd.panner);
+            snd.panner.connect(this.ctx.destination);
+        }
+
+        snd.panner.refDistance = snd.minDistance?snd.minDistance:this.minDistance;
+        snd.panner.maxDistance = snd.maxDistance?snd.maxDistance:this.maxDistance;
+        if(snd.panner.positionX) {
+            snd.panner.positionX.value = snd.position.x;
+            snd.panner.positionY.value = snd.position.y;
+            snd.panner.positionZ.value = snd.position.z;
+        } else {
+            snd.panner.setPosition(snd.position.x, snd.position.y, snd.position.z);
+        }
+    }
+
     setSoundPosition(playingSoundPtr, x, y, z) {
+        this.mem.storeU32(playingSoundPtr+10, 1);
+        this.mem.storeF32(playingSoundPtr+14, x);
+        this.mem.storeF32(playingSoundPtr+18, y);
+        this.mem.storeF32(playingSoundPtr+22, z);
         let snd = this.getPlayingSound(playingSoundPtr);
         if(snd) {
-            console.log(snd);
-            if(!snd.panner) {
-                //create panner & link it
-                snd.panner = new PannerNode(this.ctx, {
-                    panningModel: "equalpower",
-                    distanceModel: "inverse",
-                    refDistance: 1.0,
-                    maxDistance: 20.0,
-                });
-                snd.gain.disconnect();
-                snd.gain.connect(snd.panner);
-                snd.panner.connect(this.ctx.destination);
-            }
-            if(snd.panner.positionX) {
-                snd.panner.positionX.value = x;
-                snd.panner.positionY.value = y;
-                snd.panner.positionZ.value = z;
-            } else {
-                snd.panner.setPosition(x, y, z);
-            }
+            snd.position = {x: x, y: y, z: z};
+            this.setSoundSpatial(snd);
+        }
+    }
+    setSoundMinDistance(playingSoundPtr, d) {
+        this.mem.storeU32(playingSoundPtr+10, 1);
+        this.mem.storeF32(playingSoundPtr+26, d);
+        let snd = this.getPlayingSound(playingSoundPtr);
+        if(snd) {
+            snd.minDistance = d;
+            this.setSoundSpatial(snd);
+        }
+    }
+    setSoundMaxDistance(playingSoundPtr, d) {
+        this.mem.storeU32(playingSoundPtr+10, 1);
+        this.mem.storeF32(playingSoundPtr+30, d);
+        let snd = this.getPlayingSound(playingSoundPtr);
+        if(snd) {
+            snd.maxDistance = d;
+            this.setSoundSpatial(snd);
         }
     }
     setListenerPosition(x, y, z) {
@@ -282,6 +328,22 @@ class AudioInterface {
             this.ctx.listener.upZ.value = z;
         } else {
             this.ctx.listener.setOrientation(fx, fy, fz, ux, uy, uz);
+        }
+    }
+    setGlobalMinDistance(d) {
+        this.minDistance = d;
+        for(var sound in this.playingSounds) {
+            if(sound.panner) {
+                sound.panner.refDistance = sound.minDistance?sound.minDistance:this.minDistance;
+            }
+        }
+    }
+    setGlobalMaxDistance(d) {
+        this.maxDistance = d;
+        for(var sound in this.playingSounds) {
+            if(sound.panner) {
+                sound.panner.maxDistance = sound.maxDistance?sound.minDistance:this.maxDistance;
+            }
         }
     }
 }

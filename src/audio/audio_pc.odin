@@ -19,13 +19,18 @@ Playing_Sound :: struct {
     sound: ^ma.sound,
     audio_buffer: ^ma.audio_buffer,
     is_spatial: bool,
-    //position: [3]f32,
+    position: [3]f32,
+    //0 = use global distance
+    min_distance: f32,
+    max_distance: f32,
 }
 
 ctx: runtime.Context
 engine: ma.engine
 live_sounds: map[^ma.sound]Playing_Sound
 dead_sounds: map[^ma.sound]Playing_Sound
+global_min_distance: f32 = 1.0
+global_max_distance: f32 = 20.0
 
 data_callback :: proc "c" (userdata: rawptr, buffer: [^]u8, buffer_size_bytes: i32) {
     context = (^runtime.Context)(userdata)^
@@ -147,11 +152,27 @@ play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (pl
     return
 }
 
+@(private)
+replay_sound :: proc(playing_sound: ^Playing_Sound, looped: bool, fade_in: uint) {
+    if playing_sound.is_spatial {
+        position := playing_sound.position
+        min_distance := playing_sound.min_distance
+        max_distance := playing_sound.max_distance
+        playing_sound^ = play_sound(playing_sound.data, looped, fade_in)
+        playing_sound.position = position
+        playing_sound.min_distance = min_distance
+        playing_sound.max_distance = max_distance
+        set_sound_spatial(playing_sound)
+    } else {
+        playing_sound^ = play_sound(playing_sound.data, looped, fade_in)
+    }
+}
+
 loop_sound :: proc(playing_sound: ^Playing_Sound, looped: bool = true) {
     if playing_sound.sound in live_sounds {
         ma.sound_set_looping(playing_sound.sound, b32(looped))
     } else {
-        playing_sound^ = play_sound(playing_sound.data, looped)
+        replay_sound(playing_sound, looped, 0)
     }
 }
 sound_is_looping :: proc(playing_sound: ^Playing_Sound) -> bool {
@@ -201,21 +222,32 @@ resume_sound :: proc(playing_sound: ^Playing_Sound, fade_in: uint = 0) {
             ma.sound_start(playing_sound.sound)
         }
     } else {
-        playing_sound^ = play_sound(playing_sound.data, false, fade_in)
+        replay_sound(playing_sound, false, fade_in)
     }
 }
 
-set_sound_position :: proc(playing_sound: ^Playing_Sound, position: [3]f32) {
-    ma.sound_set_position(playing_sound.sound, position.x, position.y, position.z)
+@(private)
+set_sound_spatial :: proc(playing_sound: ^Playing_Sound) {
     playing_sound.is_spatial = true
-    ma.sound_set_min_distance(playing_sound.sound, 1.0)
-    ma.sound_set_max_distance(playing_sound.sound, 20.0)
+    ma.sound_set_position(playing_sound.sound, expand_values(playing_sound.position))
+    mnd := playing_sound.min_distance==0?global_min_distance:playing_sound.min_distance
+    mxd := playing_sound.max_distance==0?global_max_distance:playing_sound.max_distance
+    ma.sound_set_min_distance(playing_sound.sound, mnd)
+    ma.sound_set_max_distance(playing_sound.sound, mxd)
 }
 
-play_sound_spatial :: proc(sound: Sound, position: [3]f32, looped: bool = false, fade_in: uint = 0) -> (ps: Playing_Sound) {
-    ps = play_sound(sound, looped, fade_in)
-    set_sound_position(&ps, position)
-    return ps
+set_sound_position :: proc(playing_sound: ^Playing_Sound, position: [3]f32) {
+    playing_sound.position = position
+    set_sound_spatial(playing_sound)
+}
+
+set_sound_min_distance :: proc(playing_sound: ^Playing_Sound, d: f32) {
+    playing_sound.min_distance = d
+    set_sound_spatial(playing_sound)
+}
+set_sound_max_distance :: proc(playing_sound: ^Playing_Sound, d: f32) {
+    playing_sound.max_distance = d
+    set_sound_spatial(playing_sound)
 }
 
 set_listener_position :: proc(position: [3]f32, listener_index: uint = 0) {
@@ -226,5 +258,18 @@ set_listener_orientation :: proc(direction: [3]f32, up: [3]f32 = {0, 1, 0}, list
     ma.engine_listener_set_direction(&engine, u32(listener_index), expand_values(direction))
     if up != {0, 1, 0} {
         ma.engine_listener_set_world_up(&engine, u32(listener_index), expand_values(up))
+    }
+}
+
+set_global_min_distance :: proc(d: f32) {
+    global_min_distance = d
+    for ma_sound, sound in live_sounds {
+        ma.sound_set_min_distance(ma_sound, sound.min_distance==0?global_min_distance:sound.min_distance)
+    }
+}
+set_global_max_distance :: proc(d: f32) {
+    global_max_distance = d
+    for ma_sound, sound in live_sounds {
+        ma.sound_set_max_distance(ma_sound, sound.max_distance==0?global_max_distance:sound.max_distance)
     }
 }

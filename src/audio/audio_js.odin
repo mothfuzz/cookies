@@ -6,7 +6,14 @@ Sound :: distinct u32
 Playing_Sound :: struct #packed {
     id: u32, //4
     gen: u16, //2
-    sound_id: Sound,
+    sound_id: Sound, //4
+    //local data needed to 'reset' sound if it was freed
+    is_spatial: u32, //4
+    position_x: f32, //4
+    position_y: f32, //4
+    position_z: f32, //4
+    min_distance: f32, //4
+    max_distance: f32, //4
 }
 
 foreign import audio "audio"
@@ -24,8 +31,12 @@ foreign audio {
     quit :: proc() ---
 
     set_sound_position_xyz :: proc(playing_sound: ^Playing_Sound, x, y, z: f32) ---
+    set_sound_min_distance :: proc(playing_sound: ^Playing_Sound, d: f32) ---
+    set_sound_max_distance :: proc(playing_sound: ^Playing_Sound, d: f32) ---
     set_listener_position_xyz :: proc(x, y, z: f32) ---
     set_listener_orientation_xyz :: proc(fx, fy, fz, ux, uy, uz: f32) ---
+    set_global_min_distance :: proc(d: f32) ---
+    set_global_max_distance :: proc(d: f32) ---
 }
 
 play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (playing_sound: Playing_Sound) {
