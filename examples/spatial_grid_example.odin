@@ -46,8 +46,7 @@ init :: proc() {
     engine.set_tick_rate(30)
 
     cam = graphics.make_camera({0, 0, Screen_Width, Screen_Height})
-    graphics.look_at(&cam, {0, 0, graphics.z_2d(&cam)}, {0, 0, 0})
-    graphics.set_camera(&cam)
+    graphics.look_at(&cam, {0, 0, graphics.z_2d(cam)}, {0, 0, 0})
 
     graphics.set_background_color({0, 0, 1})
 
@@ -100,16 +99,19 @@ calculate_collisions :: proc() {
     }
 }
 
-draw_guys :: proc(t: f64, dt: f64) {
+draw_guys :: proc(alpha, delta: f64) {
+    f := graphics.Frame{}
+    graphics.draw_camera(&f, &cam, alpha)
     it := handle_map.iterator_make(&guys)
     for guy, handle in handle_map.iterate(&it) {
-        trans := transform.smooth(&guy.trans, t)
+        trans := transform.smooth(&guy.trans, alpha)
         hitbox := spatial.transform(guy.hitbox, trans)
         position := (hitbox.min + hitbox.max)/2
         scale := hitbox.max - hitbox.min
-        graphics.draw_sprite(guy_mat, trans)
+        graphics.draw_sprite(&f, guy_mat, trans)
         graphics.ui_draw_rect({position.x, position.y, scale.x, scale.y}, guy.colliding?{0,1,0,0.5}:{1,0,0,0.5})
     }
+    graphics.render_frame(f)
 }
 
 main :: proc() {
