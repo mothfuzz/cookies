@@ -31,22 +31,17 @@ screen_uniforms: Screen_Uniforms = {
 }
 screen_uniforms_buffer: wgpu.Buffer
 
+@(export)
 set_background_color :: proc(color: [3]f32) {
     screen_uniforms.color.rgb = linalg.vector4_srgb_to_linear([4]f32{color.r, color.g, color.b, 1.0}).rgb
 }
-get_background_color :: proc() -> [3]f32 {
-    c := screen_uniforms.color.rgb
-    return linalg.vector4_linear_to_srgb([4]f32{c.r, c.g, c.b, 1.0}).rgb
-}
 
+@(export)
 set_render_distance :: proc(far: f32) {
     screen_uniforms.size[3] = far
 }
 
-get_screen_size :: proc() -> [2]f32 {
-    return screen_uniforms.size.xy
-}
-
+@(export)
 set_fog_distance :: proc(fog_start: f32) {
     screen_uniforms.color[3] = fog_start
 }
@@ -68,6 +63,7 @@ camera_layout_entries := []wgpu.BindGroupLayoutEntry{
 }
 camera_layout: wgpu.BindGroupLayout
 
+@(export)
 make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = -1, fov: f32 = 0) -> (cam: Camera) {
     cam.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Uniform, .CopyDst}, size=size_of(Camera_Uniforms)})
     bindings := []wgpu.BindGroupEntry{
@@ -136,18 +132,21 @@ bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera)
     wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, cam.bind_group)
 }
 
+@(export)
 delete_camera :: proc(cam: Camera) {
     wgpu.BufferRelease(cam.buffer)
     wgpu.BindGroupRelease(cam.bind_group)
 }
 
 //look_at is instant, look_to is interpolated.
+@(export)
 look_at :: proc(cam: ^Camera, eye: [3]f32, center: [3]f32) {
     cam.eye_prev = eye
     cam.center_prev = center
     cam.eye_next = eye
     cam.center_next = center
 }
+@(export)
 look_to :: proc(cam: ^Camera, eye: [3]f32, center: [3]f32) {
     cam.eye_prev = cam.eye_next
     cam.center_prev = cam.center_next
@@ -155,6 +154,7 @@ look_to :: proc(cam: ^Camera, eye: [3]f32, center: [3]f32) {
     cam.center_next = center
 }
 
+@(export)
 set_viewport :: proc(cam: ^Camera, viewport: [4]f32) {
     cam.viewport = viewport
     calculate_projection(cam)
@@ -200,6 +200,7 @@ calculate_projection :: proc(cam: ^Camera) {
 
 //returns the z coordinate which the camera should be at to have sprites rendered at z=0 be pixel-perfect
 //(assumes FOV = default of 60 degrees)
+@(export)
 z_2d :: proc(cam: Camera) -> f32 {
     width, height := get_viewport_size(cam)
     return linalg.sqrt(linalg.pow(height, 2) - linalg.pow(height/2.0, 2))

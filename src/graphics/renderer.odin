@@ -148,6 +148,7 @@ configure_render_targets :: proc() {
     fmt.println("MSAA HEIGHT:", wgpu.TextureGetHeight(ren.msaa_tex))
 }
 
+@(private)
 request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Adapter, message: string, userdata1, userdata2: rawptr) {
     context = (^runtime.Context)(userdata1)^
     if status != .Success || adapter == nil {
@@ -157,7 +158,7 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
     wgpu.AdapterRequestDevice(ren.adapter, nil, {callback = request_device, userdata1=userdata1})
 }
 
-
+@(private)
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
     context = (^runtime.Context)(userdata1)^
     if status != .Success || device == nil {
@@ -479,6 +480,7 @@ Frame :: struct {
     materials: map[Material_Hash]Material,
 }
 
+@(private)
 delete_frame :: proc(frame: Frame) {
     delete(frame.lights)
     delete(frame.cameras)
@@ -498,22 +500,27 @@ delete_frame :: proc(frame: Frame) {
     delete(frame.materials)
 }
 
+@(export)
 draw_point_light :: proc(frame: ^Frame, light: Point_Light, trans: matrix[4,4]f32 = 1) {
     append(&frame.lights, Light_Draw{light, trans})
 }
+@(export)
 draw_directional_light :: proc(frame: ^Frame, light: Directional_Light, trans: matrix[4,4]f32 = 1) {
     append(&frame.lights, Light_Draw{light, trans})
 }
+@(export)
 draw_spot_light :: proc(frame: ^Frame, light: Spot_Light, trans: matrix[4,4]f32 = 1) {
     append(&frame.lights, Light_Draw{light, trans})
 }
 draw_light :: proc{draw_point_light, draw_directional_light, draw_spot_light}
 
+@(export)
 draw_camera :: proc(frame: ^Frame, camera: ^Camera, a: f64 = 1.0) {
     calculate_camera(camera, a)
     append(&frame.cameras, camera^)
 }
 
+@(export)
 draw_mesh :: proc(f: ^Frame, mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
                   clip_rect: [4]f32 = 0,
                   base_color_tint: [4]f32 = 1,
@@ -546,6 +553,13 @@ draw_mesh :: proc(f: ^Frame, mesh: Mesh, material: Material, transform: matrix[4
     emissive_tint := [4]f32{emissive_tint.r, emissive_tint.g, emissive_tint.b, 1}
     dynamic_material := Dynamic_Material{clip_rect, base_color_tint, pbr_tint, emissive_tint}
 
+    bones := bones
+    if bones != nil {
+        //hate this but we gotta
+        owned_bones := make([]matrix[4,4]f32, len(bones))
+        copy(owned_bones, bones)
+        bones = owned_bones
+    }
     draw := Mesh_Draw{{transform, dynamic_material}, sprite, billboard, bones, {}}
     calculate_mesh_local(&draw, mesh, material)
 
@@ -553,6 +567,7 @@ draw_mesh :: proc(f: ^Frame, mesh: Mesh, material: Material, transform: matrix[4
 }
 
 //sprites are just special kinds of meshes
+@(export)
 draw_sprite :: proc(frame: ^Frame, material: Material, transform: matrix[4, 4]f32 = 1,
                     clip_rect: [4]f32 = 0,
                     base_color_tint: [4]f32 = 1,
@@ -563,11 +578,13 @@ draw_sprite :: proc(frame: ^Frame, material: Material, transform: matrix[4, 4]f3
               base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint, true, billboard)
 }
 
+@(private)
 Mesh_Batch :: struct {
     mesh: Mesh,
     material: Material,
     instances: []Mesh_Draw,
 }
+@(private)
 flatten_action :: proc(f: Frame) -> []Mesh_Batch {
     batches := make([dynamic]Mesh_Batch)
     for material_hash, meshes in f.action {
@@ -579,6 +596,7 @@ flatten_action :: proc(f: Frame) -> []Mesh_Batch {
     }
     return batches[:]
 }
+@(private)
 clear_action :: proc(f: ^Frame) {
     for material, &meshes in f.action {
         for mesh, &instances in meshes {
@@ -592,6 +610,7 @@ clear_action :: proc(f: ^Frame) {
     }
 }
 
+@(private)
 Draw_Call :: struct {
     mesh: Mesh,
     material: Material,
@@ -600,6 +619,7 @@ Draw_Call :: struct {
 }
 
 //embarassingly parallel.
+@(private)
 compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera) -> []Draw_Call {
     draws := make([dynamic]Draw_Call)
     for batch, i in batches {
@@ -635,6 +655,7 @@ compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera) -> []Draw_Call
     }
     return draws[:]
 }
+@(private)
 delete_draw_calls :: proc(draws: []Draw_Call) {
     for d in draws {
         delete(d.instances)
@@ -643,11 +664,13 @@ delete_draw_calls :: proc(draws: []Draw_Call) {
     delete(draws)
 }
 
+@(private)
 Draw_Call_Filter :: enum {
     Both,
     Solid,
     Trans,
 }
+@(private)
 filter_draw_calls :: proc(in_draws: []Draw_Call, filter: Draw_Call_Filter) -> []Draw_Call {
     out_draws := make([dynamic]Draw_Call)
     for draw in in_draws {
@@ -687,6 +710,7 @@ filter_draw_calls :: proc(in_draws: []Draw_Call, filter: Draw_Call_Filter) -> []
     return out_draws[:]
 }
 
+@(private)
 execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Call) {
     //lights and cameras are already bound at this point.
     prev_material: Material_Hash
@@ -705,6 +729,7 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
 
 import "core:math/linalg"
 
+@(export)
 render_frame :: proc(frame: Frame) {
 
     //context.allocator = context.temp_allocator
@@ -716,7 +741,7 @@ render_frame :: proc(frame: Frame) {
     //prepare the screen surface
     surface_tex := wgpu.SurfaceGetCurrentTexture(ren.surface)
     switch surface_tex.status {
-    case .SuccessOptimal, .SuccessSuboptimal:
+    case .SuccessOptimal, .SuccessSuboptimal, .Occluded:
         //yay...!
     case .Timeout, .Outdated, .Lost:
         if surface_tex.texture != nil {
@@ -724,7 +749,7 @@ render_frame :: proc(frame: Frame) {
         }
         configure_surface()
         return
-    case .OutOfMemory, .DeviceLost, .Error:
+    case .Error:
         fmt.eprintln(surface_tex.status)
         panic("Surface texture lost! Unable to draw to screen.")
     }

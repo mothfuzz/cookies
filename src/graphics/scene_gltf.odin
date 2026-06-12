@@ -7,6 +7,7 @@ import "core:strings"
 import "core:encoding/base64"
 import "core:slice"
 import "core:mem"
+import "core:math/linalg"
 
 Loaded_File :: struct {
     data: []u8,
@@ -87,12 +88,13 @@ Node_Type :: enum {
 
 Node :: struct {
     name: string,
-    transform: transform.Transform,
-    original_position: [3]f32, //to be used when not-animated
-    original_orientation: quaternion128,
-    original_scale: [3]f32,
+    using trans: transform.Node,
+    original_trans: transform.Transform, //to be used when not-animated
+    //for easier copying/traversal
     has_parent: bool,
-    parent_node: uint, //for easier copying
+    parent_node: uint,
+    children: []uint,
+    //for rendering
     type: Node_Type,
     data: uint, //index into Models/Cameras/Lights
     animated: bool,
@@ -107,9 +109,9 @@ Layout :: struct {
 
 
 Scene :: struct {
-    //assets
+    //assets (TODO: move to resource manager)
     meshes: []Mesh, //'primitives'
-    colliders: []spatial.Tri_Mesh,
+    colliders: []spatial.Tri_Mesh, // TODO: get this out of here.
     textures: []Texture,
     materials: []Combined_Material,
     skeletons: []Skeleton, //'skins'
@@ -122,6 +124,7 @@ Scene :: struct {
     //directional_lights: []Directional_Light,
     //spot_lights: []Spot_Light,
     //actual scene
+    tree: ^transform.Tree,
     name: string,
     nodes: []Node,
     layouts: []Layout, //'scenes'
@@ -140,9 +143,9 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     s.copied = true
     s.models = make([]Model, len(scene.models))
     for &model, i in s.models {
-        model.materials = make([]^Combined_Material, len(scene.models[i].materials))
+        model.materials = make([]Combined_Material, len(scene.models[i].materials))
         copy(model.materials, scene.models[i].materials)
-        model.meshes = make([]^Mesh, len(scene.models[i].meshes))
+        model.meshes = make([]Mesh, len(scene.models[i].meshes))
         copy(model.meshes, scene.models[i].meshes)
     }
     s.cameras = make([]Camera, len(scene.cameras))
@@ -154,20 +157,26 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     } else {
         s.name = scene.name
     }
+    s.tree = scene.tree
     s.nodes = make([]Node, len(scene.nodes))
     copy(s.nodes, scene.nodes)
     //have to do this in 2 passes to preserve relationships
-    for &node in s.nodes {
-        //can't use 'unlink' bc we don't want to mess up the original's hierarchy
-        node.transform.parent = nil
-        node.transform.first_child = nil
-        node.transform.last_child = nil
-        node.transform.prev_sibling = nil
-        node.transform.next_sibling = nil
+    for &node, i in s.nodes {
+        node.trans = transform.create_node(s.tree)
+        trans := transform.write(s.tree, node)
+        orig_trans := transform.read(scene.tree, scene.nodes[i])
+        trans.translation = orig_trans.translation
+        trans.rotation = orig_trans.rotation
+        trans.scale = orig_trans.scale
+        orig_children := scene.nodes[i].children
+        if orig_children != nil {
+            node.children = make([]uint, len(orig_children))
+            copy(node.children, orig_children)
+        }
     }
     for &node in s.nodes {
         if node.has_parent {
-            transform.link(&s.nodes[node.parent_node].transform, &node.transform)
+            transform.link(s.tree, s.nodes[node.parent_node].trans, node.trans)
         }
     }
     s.layouts = make([]Layout, len(scene.layouts))
@@ -181,6 +190,8 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
 }
 
 // TODO: rewrite load_image and load_material to load w/correct linear + premultiplied alpha depending on how the image is used in the material
+// skip loading textures not used in any material.
+// if the user wants to load arbitrary data they can load the texture themselves :P
 
 @(private)
 load_image :: proc(opts: cgltf.options, image: cgltf.image) -> Texture {
@@ -203,7 +214,7 @@ load_image :: proc(opts: cgltf.options, image: cgltf.image) -> Texture {
             return make_texture_from_image(img_data)
         }
         //lastly but not leastly... it's a file. use the file manager
-        return make_texture_from_image(load(image.uri))
+    return make_texture_from_image(load(image.uri))
 }
 
 @(private)
@@ -377,7 +388,7 @@ load_skeleton :: proc(data: ^cgltf.data, scene: ^Scene, skin: cgltf.skin) -> (sk
     return
 }
 
-make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: bool = false) -> (scene: Scene) {
+make_scene_from_file :: proc(filename: cstring, filedata: []u8, tree: ^transform.Tree, make_tri_mesh: bool = false) -> (scene: Scene) {
 
     ctx := context
     opts := cgltf.options{
@@ -422,65 +433,73 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
     current_mesh := 0
     for mesh, i in data.meshes {
         model := &scene.models[i]
-        model.meshes = make([]^Mesh, len(mesh.primitives))
-        model.materials = make([]^Combined_Material, len(mesh.primitives))
+        model.meshes = make([]Mesh, len(mesh.primitives))
+        model.materials = make([]Combined_Material, len(mesh.primitives))
         for primitive, j in mesh.primitives {
 
             material_index := cgltf.material_index(data, primitive.material)
-            model.materials[j] = &scene.materials[material_index]
+            model.materials[j] = scene.materials[material_index]
 
             mesh, collider := load_mesh(primitive, make_tri_mesh)
             scene.meshes[current_mesh] = mesh
             if make_tri_mesh {
                 scene.colliders[current_mesh] = collider
             }
-            model.meshes[j] = &scene.meshes[current_mesh]
+            model.meshes[j] = scene.meshes[current_mesh]
             current_mesh += 1
         }
     }
 
     //load scene
+    scene.tree = tree
     scene.nodes = make([]Node, len(data.nodes))
     for &node in scene.nodes {
-        node.transform = transform.ORIGIN
+        node.trans = transform.create_node(scene.tree)
     }
     for node, i in data.nodes {
         if node.parent != nil {
             p := cgltf.node_index(data, node.parent)
             scene.nodes[i].has_parent = true
             scene.nodes[i].parent_node = p //otherwise 0
-            transform.link(&scene.nodes[p].transform, &scene.nodes[i].transform) //this should work but if it doesn't I guess I'll fix it
+            transform.link(scene.tree, scene.nodes[p].trans, scene.nodes[i].trans)
         }
+        if node.children != nil && len(node.children) > 0 {
+            scene.nodes[i].children = make([]uint, len(node.children))
+            for child, c in node.children {
+                scene.nodes[i].children[c] = cgltf.node_index(data, child)
+            }
+        }
+        trans := transform.write(scene.tree, scene.nodes[i].trans)
         if node.has_matrix {
             //extract TRS from matrix
             mat := transmute(matrix[4,4]f32)(node.matrix_)
-            position, orientation, scale := transform.extract(mat)
-            transform.set_position(&scene.nodes[i].transform, position)
-            transform.set_orientation_quaternion(&scene.nodes[i].transform, orientation)
-            transform.set_scale(&scene.nodes[i].transform, scale)
-            scene.nodes[i].original_position = position
-            scene.nodes[i].original_orientation = orientation
-            scene.nodes[i].original_scale = scale
+            translation, rotation, scale := transform.get_world_trs(mat)
+            trans.translation = translation
+            trans.rotation = rotation
+            trans.scale = scale
+            scene.nodes[i].original_trans.translation = translation
+            scene.nodes[i].original_trans.rotation = rotation
+            scene.nodes[i].original_trans.scale = scale
         } else {
             //load TRS directly
             if node.has_translation {
-                transform.set_position(&scene.nodes[i].transform, node.translation)
-                scene.nodes[i].original_position = node.translation
+                trans.translation = node.translation
+                scene.nodes[i].original_trans.translation = node.translation
             } else {
-                scene.nodes[i].original_position = 0
+                scene.nodes[i].original_trans.translation = 0
             }
             if node.has_rotation {
                 rot := transmute(quaternion128)(node.rotation) //both are xyzw
-                transform.set_orientation_quaternion(&scene.nodes[i].transform, rot)
-                scene.nodes[i].original_orientation = rot
+                trans.rotation = rot
+                scene.nodes[i].original_trans.rotation = rot
             } else {
-                scene.nodes[i].original_orientation = 1
+                scene.nodes[i].original_trans.rotation = 1
             }
             if node.has_scale {
-                transform.set_scale(&scene.nodes[i].transform, node.scale)
-                scene.nodes[i].original_scale = node.scale
+                trans.scale = node.scale
+                scene.nodes[i].original_trans.scale = node.scale
             } else {
-                scene.nodes[i].original_scale = 1
+                scene.nodes[i].original_trans.scale = 1
             }
         }
         scene.nodes[i].type = .Node //by default
@@ -527,31 +546,45 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
     return
 }
 
-node_from_transform :: proc(trans: ^transform.Transform) -> ^Node {
-    return cast(^Node)(uintptr(trans) - offset_of(Node, transform))
+@(private)
+calculate_skeleton :: proc(scene: Scene, node: Node, alpha: f64) -> []matrix[4,4]f32 {
+    bones: [dynamic]matrix[4,4]f32
+    if node.animated {
+        //look up the actual skeleton, and multiply with inv_bind
+        //animation *should* be fully calculated at this point
+        skeleton := &scene.skeletons[node.skin]
+        bones = make([dynamic]matrix[4,4]f32)
+        for &bone in skeleton.bones {
+            inv_trans := linalg.inverse(transform.get_world_smooth(scene.tree, node, alpha))
+            bone_trans := transform.get_world_smooth(scene.tree, scene.nodes[bone.node], alpha)
+            append(&bones, inv_trans * bone_trans * bone.inv_bind)
+        }
+    } else {
+        //just use identity
+        bones = make([dynamic]matrix[4,4]f32)
+        append(&bones, 1)
+    }
+    return bones[:]
 }
 
+
 @(private)
-draw_node :: proc(frame: ^Frame, scene: Scene, node: ^Node, t: f64) {
+draw_node :: proc(frame: ^Frame, scene: Scene, node: Node, alpha: f64) {
     //draw self
     switch node.type {
     case .Node:
     case .Model:
-        bones := calculate_skeleton(scene, node, t)
+        bones := calculate_skeleton(scene, node, alpha)
         defer delete(bones)
-        draw_model(frame, scene.models[node.data], transform.smooth(&node.transform, t), bones)
+        draw_model(frame, scene.models[node.data], transform.get_world_smooth(scene.tree, node, alpha), bones)
     case .Camera:
         //...
     case .Light:
         //...
     }
-    //draw immediate sibling (will trigger subsequent draws)
-    if node.transform.next_sibling != nil {
-        draw_node(frame, scene, node_from_transform(node.transform.next_sibling), t)
-    }
-    //draw first child (will trigger subsequent draws)
-    if node.transform.first_child != nil {
-        draw_node(frame, scene, node_from_transform(node.transform.first_child), t)
+    //draw children (will trigger subsequent draws)
+    for child in node.children {
+        draw_node(frame, scene, scene.nodes[child], alpha)
     }
 }
 draw_scene :: proc(frame: ^Frame, scene: Scene, alpha: f64, delta: f64, anim: ^Animation_State = nil) {
@@ -559,20 +592,18 @@ draw_scene :: proc(frame: ^Frame, scene: Scene, alpha: f64, delta: f64, anim: ^A
         progress(anim, delta)
     }
     for i in scene.layouts[scene.active_layout].roots {
-        draw_node(frame, scene, &scene.nodes[i], alpha)
+        draw_node(frame, scene, scene.nodes[i], alpha)
     }
 }
 
-link_scene_transform :: proc(scene: ^Scene, parent: ^transform.Transform) {
+link_scene_transform :: proc(scene: ^Scene, parent: transform.Node) {
     for i in scene.layouts[scene.active_layout].roots {
-        node := &scene.nodes[i]
-        transform.link(parent, &node.transform)
+        transform.link(scene.tree, parent, scene.nodes[i])
     }
 }
 unlink_scene_transform :: proc(scene: ^Scene) {
     for i in scene.layouts[scene.active_layout].roots {
-        node := &scene.nodes[i]
-        transform.unlink(&node.transform)
+        transform.unlink(scene.tree, scene.nodes[i])
     }
 }
 
@@ -620,5 +651,11 @@ delete_scene :: proc(scene: Scene) {
     }
     delete(scene.layouts)
 
+    for node in scene.nodes {
+        transform.delete_node(scene.tree, node)
+        if node.children != nil {
+            delete(node.children)
+        }
+    }
     delete(scene.nodes)
 }

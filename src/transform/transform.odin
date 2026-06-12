@@ -1,255 +1,297 @@
 package transform
 
-//interpolated transform hierarchy
-
 import "core:math/linalg"
+import hm "core:container/handle_map"
+
+Node :: struct {
+    idx: u32,
+    gen: u32,
+}
 
 Transform :: struct {
-    position: [3]f32,
-    orientation: quaternion128,
+    translation: [3]f32,
+    rotation: quaternion128,
     scale: [3]f32,
-    prev_local_trans: matrix[4, 4]f32,
-    prev_world_trans: matrix[4, 4]f32,
-    next_local_trans: matrix[4, 4]f32,
-    next_world_trans: matrix[4, 4]f32,
-    parent: ^Transform,
-    first_child: ^Transform,
-    last_child: ^Transform,
-    prev_sibling: ^Transform,
-    next_sibling: ^Transform,
+}
+ORIGIN :: Transform{0, 0, 1}
+
+//helper procs
+translate :: proc(t: ^Transform, translation: [3]f32) {
+    t.translation += translation
+}
+rotation_from_angles :: proc(rotation: [3]f32) -> quaternion128 {
+    return linalg.quaternion_from_euler_angles(expand_values(rotation), .XYZ)
+}
+rotate :: proc(t: ^Transform, rotation: [3]f32) {
+    t.rotation = linalg.quaternion_from_euler_angles(expand_values(rotation), .XYZ) * t.rotation
+}
+rotatex :: proc(t: ^Transform, rotation: f32) {
+    t.rotation = linalg.quaternion_from_euler_angle_x(rotation) * t.rotation
+}
+rotatey :: proc(t: ^Transform, rotation: f32) {
+    t.rotation = linalg.quaternion_from_euler_angle_y(rotation) * t.rotation
+}
+rotatez :: proc(t: ^Transform, rotation: f32) {
+    t.rotation = linalg.quaternion_from_euler_angle_z(rotation) * t.rotation
+}
+scale :: proc(t: ^Transform, scale: [3]f32) {
+    t.scale *= scale
+}
+
+compute :: proc(t: Transform) -> matrix[4,4]f32 {
+    return linalg.matrix4_from_trs(expand_values(t))
+}
+
+lerp :: proc(a, b: Transform, alpha: f64) -> Transform {
+    alpha := f32(alpha)
+    return {
+        translation = linalg.lerp(a.translation, b.translation, alpha),
+        rotation = linalg.quaternion_slerp(a.rotation, b.rotation, alpha),
+        scale = linalg.lerp(a.scale, b.scale, alpha),
+    }
+}
+
+smooth :: proc(a, b: Transform, alpha: f64) -> matrix[4,4]f32 {
+    return compute(lerp(a, b, alpha))
+}
+
+Node_Transform :: struct {
+    handle: Node,
+
+    prev_trans: Transform,
+    next_trans: Transform,
+    world: matrix[4,4]f32,
     dirty: bool,
-    prev_alpha: f64, //keep track of prior alpha value so we can detect loops, using -1 as a tick-boundary sentinel
+    alpha: f64,
+
+    parent: Node,
+    first_child: Node,
+    last_child: Node,
+    prev_sibling: Node,
+    next_sibling: Node,
 }
-ALPHA_BOUNDARY :: -1
 
-ORIGIN :: Transform{position=0, orientation=1, scale=1,
-                    prev_local_trans=1, prev_world_trans=1,
-                    next_local_trans=1, next_world_trans=1, prev_alpha=ALPHA_BOUNDARY}
+Tree :: struct {
+    transforms: hm.Dynamic_Handle_Map(Node_Transform, Node),
+    //roots: map[Node]struct{},
+}
 
-link :: proc "contextless" (parent: ^Transform, child: ^Transform) {
-    unlink(child)
-    child.parent = parent
-    if parent.first_child == nil {
-        parent.first_child = child
+make_tree :: proc() -> (tt: Tree) {
+    hm.dynamic_init(&tt.transforms, context.allocator)
+    return
+}
+
+delete_tree :: proc(tt: ^Tree) {
+    hm.dynamic_destroy(&tt.transforms)
+}
+
+create_node :: proc(tt:  ^Tree, t: Transform = ORIGIN, parent: Node = {0, 0}) -> (node: Node) {
+    t := t
+    if t.scale == 0 {
+        t.scale = 1
+    }
+    if t.rotation == 0 {
+        t.rotation = 1
+    }
+    node = hm.add(&tt.transforms, Node_Transform{prev_trans = t, next_trans = t, dirty = true})
+    if parent == {0, 0} {
+        //tt.roots[node] = {}
     } else {
-        parent.last_child.next_sibling = child
-        child.prev_sibling =  parent.last_child
+        link(tt, parent, node)
     }
-    parent.last_child = child
-    child.dirty = true
+    return
 }
 
-unlink :: proc "contextless" (node: ^Transform) {
-    if node.parent != nil {
-        if node.parent.first_child == node {
-            node.parent.first_child = nil
+delete_node :: proc(tt: ^Tree, node: Node, delete_children: bool = false) {
+    //delete_key(&tt.roots, node)
+    if t, ok := hm.get(&tt.transforms, node); ok {
+        unlink(tt, node) //removes from parent, adjusts siblings
+        if delete_children && t.first_child != {0,0} {
+            delete_node(tt, t.first_child, true)
         }
-        if node.parent.last_child == node {
-            node.parent.last_child = nil
-        }
-        node.parent = nil
-    }
-    if node.prev_sibling != nil {
-        node.prev_sibling.next_sibling = nil
-        node.prev_sibling = nil
-    }
-    if node.next_sibling != nil {
-        node.next_sibling.prev_sibling = nil
-        node.next_sibling = nil
+        hm.remove(&tt.transforms, node)
     }
 }
 
-//to compute a transform immediately and 'cancel' interpolation
-reset :: proc "contextless" (node: ^Transform) {
-    node.dirty = true
-    update_root(node, reset=true)
-    //node.prev_local_trans = node.next_local_trans
-    //node.prev_world_trans = node.next_world_trans
+link :: proc(tt: ^Tree, parent: Node, child: Node) {
+    //delete_key(&s.roots, child)
+    unlink(tt, child)
+    parent_trans := hm.get(&tt.transforms, parent)
+    child_trans := hm.get(&tt.transforms, child)
+    child_trans.parent = parent
+    if parent_trans.first_child == {0,0} {
+        parent_trans.first_child = child
+    } else {
+        last_child_trans := hm.get(&tt.transforms, parent_trans.last_child)
+        last_child_trans.next_sibling = child
+        child_trans.prev_sibling = parent_trans.last_child
+    }
+    parent_trans.last_child = child
+}
+
+unlink :: proc(tt: ^Tree, node: Node) {
+    t := hm.get(&tt.transforms, node)
+    if t.parent != {0,0} {
+        if parent, ok := hm.get(&tt.transforms, t.parent); ok {
+            if parent.first_child == node {
+                parent.first_child = {0,0}
+            }
+            if parent.last_child == node {
+                parent.last_child = {0,0}
+            }
+        }
+        t.parent = {0,0}
+    }
+    if t.prev_sibling != {0,0} {
+        if prev_sibling, ok := hm.get(&tt.transforms, t.prev_sibling); ok {
+            prev_sibling.next_sibling = {0,0}
+        }
+        t.prev_sibling = {0,0}
+    }
+    if t.next_sibling != {0,0} {
+        if next_sibling, ok := hm.get(&tt.transforms, t.next_sibling); ok {
+            next_sibling.prev_sibling = {0,0}
+        }
+        t.next_sibling = {0,0}
+    }
+    //tt.roots[node] = {}
+}
+
+read :: proc(tt: ^Tree, n: Node) -> Transform {
+    if t, ok := hm.get(&tt.transforms, n); ok {
+        return t.next_trans
+    }
+    return ORIGIN
+}
+
+write :: proc(tt: ^Tree, n: Node) -> ^Transform {
+    if t, ok := hm.get(&tt.transforms, n); ok {
+        if !t.dirty {
+            t.dirty = true
+            t.prev_trans = t.next_trans
+        }
+        t.alpha = 0
+        return &t.next_trans
+    }
+    return nil
+}
+
+find_root :: proc(tt: ^Tree, n: Node) -> Node {
+    if t, ok := hm.get(&tt.transforms, n); ok {
+        if t.parent != {0,0} {
+            return find_root(tt, t.parent)
+        }
+        return n
+    }
+    return {0, 0}
 }
 
 @(private)
-update_root :: proc "contextless" (node: ^Transform, reset: bool = false) {
-    if node == nil {
-        return
-    }
-    if node.parent != nil {
-        update_root(node.parent, reset)
-    } else {
-        update(node, reset=reset)
+update_root :: proc(tt: ^Tree, n: Node, dirty: bool = false, parent_world: matrix[4,4]f32 = 1) {
+    if t, ok := hm.get(&tt.transforms, n); ok {
+        dirty := t.dirty || dirty
+        t.world = parent_world * compute(t.next_trans)
+        t.dirty = false
+        update_root(tt, t.next_sibling, dirty, parent_world)
+        update_root(tt, t.first_child, dirty, t.world)
     }
 }
 
-@(private)
-update :: proc "contextless" (node: ^Transform, dirty: bool = false, reset: bool = false) {
-    if node == nil {
-        return
-    }
-    dirty := dirty || node.dirty
-    if dirty {
-        //fmt.println("recalculating trans:", node,"\n")
-        node.prev_local_trans = node.next_local_trans
-        node.prev_world_trans = node.next_world_trans
-        node.next_local_trans = linalg.matrix4_from_trs(node.position, node.orientation, node.scale)
-        if node.parent != nil {
-            node.next_world_trans = node.parent.next_world_trans * node.next_local_trans
-        } else {
-            node.next_world_trans = node.next_local_trans
+get_world :: proc(tt: ^Tree, n: Node) -> matrix[4,4]f32 {
+    if t, ok := hm.get(&tt.transforms, n); ok {
+        if t.dirty {
+            root := find_root(tt, n)
+            update_root(tt, root)
         }
-        node.dirty = false
+        return t.world
     }
-    if reset {
-        node.prev_local_trans = node.next_local_trans
-        node.prev_world_trans = node.next_world_trans
-    }
-    update(node.next_sibling, dirty, reset)
-    update(node.first_child, dirty, reset)
+    return 1
 }
-extract :: proc "contextless" (m: matrix[4, 4]f32) -> (position: [3]f32, orientation: quaternion128, scale: [3]f32) {
-    position = m[3].xyz
-    basis := cast(matrix[3, 3]f32)(m)
+
+@(private)
+update_root_smooth :: proc(tt: ^Tree, n: Node, alpha: f64, dirty: bool = false, parent_world: matrix[4,4]f32 = 1) {
+    if t, ok := hm.get(&tt.transforms, n); ok {
+        dirty := t.dirty || dirty
+        if alpha < t.alpha {
+            //avoid looping/jittering
+            t.prev_trans = t.next_trans
+        }
+        t.world = parent_world * smooth(t.prev_trans, t.next_trans, alpha)
+        t.dirty = false
+        t.alpha = alpha
+        update_root_smooth(tt, t.next_sibling, alpha, dirty, parent_world)
+        update_root_smooth(tt, t.first_child, alpha, dirty, t.world)
+    }
+}
+
+get_world_smooth :: proc(tt: ^Tree, n: Node, alpha: f64) -> matrix[4,4]f32 {
+    if t, ok := hm.get(&tt.transforms, n); ok {
+        if t.dirty || t.alpha != alpha {
+            root := find_root(tt, n)
+            update_root_smooth(tt, root, alpha)
+        }
+        return t.world
+    }
+    return 1
+}
+
+get_world_translation :: proc(world: matrix[4,4]f32) -> [3]f32 {
+    return world[3].xyz
+}
+
+get_world_scale :: proc(world: matrix[4,4]f32) -> [3]f32 {
+    basis := cast(matrix[3,3]f32)(world)
+    return {linalg.length(basis[0]), linalg.length(basis[1]), linalg.length(basis[2])}
+}
+
+get_world_rotation :: proc(world: matrix[4,4]f32) -> quaternion128 {
+    basis := cast(matrix[3,3]f32)(world)
+    basis[0] = linalg.normalize(basis[0])
+    basis[1] = linalg.normalize(basis[1])
+    basis[2] = linalg.normalize(basis[2])
+    return linalg.to_quaternion(basis)
+}
+
+get_world_trs :: proc(world: matrix[4,4]f32) -> (translation: [3]f32, rotation: quaternion128, scale: [3]f32) {
+    translation = world[3].xyz
+    basis := cast(matrix[3,3]f32)(world)
     scale.x = linalg.length(basis[0])
     scale.y = linalg.length(basis[1])
     scale.z = linalg.length(basis[2])
     basis[0] /= scale.x
     basis[1] /= scale.y
     basis[2] /= scale.z
-    orientation = linalg.to_quaternion(basis)
+    rotation = linalg.to_quaternion(basis)
     return
 }
 
-@(private)
-interp :: proc "contextless" (trans: ^Transform, t: f32) -> (position: [3]f32, orientation: quaternion128, scale: [3]f32) {
-    prev_position, prev_orientation, prev_scale := extract(trans.prev_world_trans)
-    next_position, next_orientation, next_scale := extract(trans.next_world_trans)
-    position = linalg.lerp(prev_position, next_position, t)
-    orientation = linalg.quaternion_slerp(prev_orientation, next_orientation, t)
-    scale = linalg.lerp(prev_scale, next_scale, t)
-    return
-}
-
-compute :: proc "contextless" (trans: ^Transform) -> matrix[4, 4]f32 {
-    update_root(trans)
-    return trans.next_world_trans
-}
-
-smooth :: proc "contextless" (trans: ^Transform, alpha: f64) -> matrix[4, 4]f32 {
-    update_root(trans)
-    if trans.prev_alpha >= 0 && alpha < trans.prev_alpha {
-        //loop detected, don't render motions twice
-        reset(trans)
+get_parent :: proc(tree: ^Tree, node: Node) -> Node {
+    if t, ok := hm.get(&tree.transforms, node); ok {
+        return t.parent
     }
-    trans.prev_alpha = alpha
-    return linalg.matrix4_from_trs(interp(trans, f32(alpha)))
+    return {0, 0}
 }
-
-
-translate :: proc "contextless" (trans: ^Transform, translation: [3]f32) {
-    trans.position += translation
-    trans.dirty = true
-    trans.prev_alpha = ALPHA_BOUNDARY
-}
-set_position :: proc "contextless" (trans: ^Transform, position: [3]f32, interpolate: bool = false) {
-    trans.position = position
-    trans.dirty = true
-    trans.prev_alpha = ALPHA_BOUNDARY
-    if !interpolate {
-        reset(trans)
+get_first_child :: proc(tree: ^Tree, node: Node) -> Node {
+    if t, ok := hm.get(&tree.transforms, node); ok {
+        return t.first_child
     }
+    return {0, 0}
 }
-get_position :: proc "contextless" (trans: ^Transform) -> [3]f32 {
-    t, r, s := extract(trans.prev_world_trans)
-    return t
-}
-
-rotate :: proc "contextless" (trans: ^Transform, rotation: [3]f32) {
-    trans.orientation = linalg.quaternion_from_euler_angles(expand_values(rotation), linalg.Euler_Angle_Order.XYZ) * trans.orientation
-    trans.dirty = true
-    trans.prev_alpha = ALPHA_BOUNDARY
-}
-rotatex :: proc "contextless" (trans: ^Transform, rotation: f32) {
-    trans.orientation = linalg.quaternion_from_euler_angle_x(rotation) * trans.orientation
-    trans.dirty = true
-    trans.prev_alpha = ALPHA_BOUNDARY
-}
-rotatey :: proc "contextless" (trans: ^Transform, rotation: f32) {
-    trans.orientation = linalg.quaternion_from_euler_angle_y(rotation) * trans.orientation
-    trans.dirty = true
-    trans.prev_alpha = ALPHA_BOUNDARY
-}
-rotatez :: proc "contextless" (trans: ^Transform, rotation: f32) {
-    trans.orientation = linalg.quaternion_from_euler_angle_z(rotation) * trans.orientation
-    trans.dirty = true
-    trans.prev_alpha = ALPHA_BOUNDARY
-}
-set_orientation :: proc "contextless" (trans: ^Transform, orientation: [3]f32, interpolate: bool = false) {
-    trans.orientation = linalg.quaternion_from_euler_angles(expand_values(orientation), .XYZ)
-    trans.dirty = true
-    trans.prev_alpha = ALPHA_BOUNDARY
-    if !interpolate {
-        reset(trans)
+get_last_child :: proc(tree: ^Tree, node: Node) -> Node {
+    if t, ok := hm.get(&tree.transforms, node); ok {
+        return t.last_child
     }
+    return {0, 0}
 }
-set_orientation_quaternion :: proc "contextless" (trans: ^Transform, orientation: quaternion128, interpolate: bool = false) {
-    trans.orientation = orientation
-    trans.dirty = true
-    trans.prev_alpha = ALPHA_BOUNDARY
-    if !interpolate {
-        reset(trans)
+get_next_sibling :: proc(tree: ^Tree, node: Node) -> Node {
+    if t, ok := hm.get(&tree.transforms, node); ok {
+        return t.next_sibling
     }
+    return {0, 0}
 }
-get_orientation :: proc "contextless" (trans: ^Transform) -> [3]f32 {
-    t, r, s := extract(trans.prev_world_trans)
-    x, y, z := linalg.euler_angles_from_quaternion(r, .XYZ)
-    return {x, y, z}
-}
-get_orientation_quaternion :: proc "contextless" (trans: ^Transform) -> quaternion128 {
-    t, r, s := extract(trans.prev_world_trans)
-    return r
-}
-
-scale :: proc "contextless" (trans: ^Transform, scale: [3]f32) {
-    trans.scale *= scale
-    trans.dirty = true
-    trans.prev_alpha = ALPHA_BOUNDARY
-}
-
-set_scale :: proc "contextless" (trans: ^Transform, scale: [3]f32, interpolate: bool = false) {
-    trans.scale = scale
-    trans.dirty = true
-    trans.prev_alpha = ALPHA_BOUNDARY
-    if !interpolate {
-        reset(trans)
+get_prev_sibling :: proc(tree: ^Tree, node: Node) -> Node {
+    if t, ok := hm.get(&tree.transforms, node); ok {
+        return t.prev_sibling
     }
+    return {0, 0}
 }
-
-get_scale :: proc "contextless" (trans: ^Transform) -> [3]f32 {
-    t, r, s := extract(trans.prev_world_trans)
-    return s
-}
-
-init :: proc "contextless" (trans: ^Transform,
-                            position: [3]f32 = 0,
-                            orientation: quaternion128 = 1,
-                            scale: [3]f32 = 1) {
-    trans.position = position
-    trans.orientation = orientation
-    trans.scale = scale
-    trans.prev_alpha = ALPHA_BOUNDARY
-    reset(trans)
-}
-
-
-/*
-world_model, world_translation, world_rotation, and world_scale are ALWAYS CACHED.
-that means any other entities are reading the back-tick and not the forward-tick
-this is good for multithreading.
-
-transforms will only be updated once per tick, but may or may not be used in each draw.
-*/
-
-//computed ONCE globally at the end of a tick, after all is said and done.
-
-/*since transforms are optimized to only be computed once when necessary, that means we can also smoothly interpolate between the last time a transform was computed and now.
-this will provide smooth frame-by-frame visuals even when your tick rate is lower than your draw rate.
-to use this functionality, simply call transform.smooth() with a delta time instead of transform.compute() in your draw procedure.
-*/

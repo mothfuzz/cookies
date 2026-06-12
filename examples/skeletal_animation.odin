@@ -6,18 +6,19 @@ import "cookies:input"
 import "cookies:graphics"
 import "cookies:transform"
 import "core:fmt"
-import "core:math"
+
+tree: transform.Tree
 
 cam: graphics.Camera
 
 light: graphics.Directional_Light
 
 brainstem: graphics.Scene
-brainstem_trans := transform.ORIGIN
+brainstem_trans: transform.Node
 brainstem_anim: graphics.Animation_State
 
 brainstem2: graphics.Scene
-brainstem2_trans := transform.ORIGIN
+brainstem2_trans: transform.Node
 brainstem2_anim: graphics.Animation_State
 
 init :: proc() {
@@ -27,22 +28,23 @@ init :: proc() {
     graphics.set_render_distance(0)
     graphics.set_fog_distance(0)
 
+    tree = transform.make_tree()
+
     cam = graphics.make_camera()
     graphics.look_at(&cam, {0, 0, 10}, {0, 0, 0})
 
     light = graphics.make_directional_light({0.6, 0.4, 0}, {1, 0, 0, 10})
     
-    brainstem = graphics.make_scene_from_file("BrainStem.gltf", #load("../resources/BrainStem.gltf"))
-    graphics.link_scene_transform(&brainstem, &brainstem_trans)
-    transform.set_position(&brainstem_trans, {0, -1, 5})
+    brainstem = graphics.make_scene_from_file("BrainStem.gltf", #load("../resources/BrainStem.gltf"), &tree)
+    brainstem_trans = transform.create_node(&tree, {translation={0, -1, 5}})
+    graphics.link_scene_transform(&brainstem, brainstem_trans)
     brainstem_anim = graphics.animate(&brainstem)
     graphics.play(&brainstem_anim, 0, true, 0.5)
     fmt.printfln("%#v", brainstem.nodes[0])
 
     brainstem2 = graphics.copy_scene(&brainstem)
-    graphics.link_scene_transform(&brainstem2, &brainstem2_trans)
-    transform.set_position(&brainstem2_trans, {2, -1, 2})
-    transform.set_scale(&brainstem2_trans, 0.5)
+    brainstem2_trans = transform.create_node(&tree, {translation={2, -1, 2}, scale=0.5})
+    graphics.link_scene_transform(&brainstem2, brainstem2_trans)
     brainstem2_anim = graphics.animate(&brainstem2)
     graphics.play(&brainstem2_anim, 0, true)
     fmt.printfln("%#v", brainstem2.nodes[0])
@@ -53,27 +55,28 @@ tick :: proc() {
     if input.key_pressed(.Key_Escape) {
         window.close()
     }
-    //transform.rotatex(&brainstem_trans, math.to_radians(f32(-5)))
+    brainstem_trans := transform.write(&tree, brainstem_trans)
+    //transform.rotatex(brainstem_trans, math.to_radians(f32(-5)))
     if input.key_down(.Key_Up) {
-        transform.translate(&brainstem_trans, {0, 0, -0.25})
+        brainstem_trans.translation -= {0, 0, 0.25}
     }
     if input.key_down(.Key_Down) {
-        transform.translate(&brainstem_trans, {0, 0, 0.25})
+        brainstem_trans.translation += {0, 0, 0.25}
     }
     if input.key_down(.Key_Left) {
-        transform.translate(&brainstem_trans, {-0.25, 0, 0.0})
+        brainstem_trans.translation -= {0.25, 0, 0}
     }
     if input.key_down(.Key_Right) {
-        transform.translate(&brainstem_trans, {0.25, 0, 0.0})
+        brainstem_trans.translation += {0.25, 0, 0}
     }
     if up_or_down {
-        //transform.scale(&brainstem_trans, 0.99)
-        if transform.get_scale(&brainstem_trans).x < 0.5 {
+        //brainstem_trans.scale *= 0.99
+        if brainstem_trans.scale.x < 0.5 {
             up_or_down = false
         }
     } else {
-        //transform.scale(&brainstem_trans, 1.11)
-        if transform.get_scale(&brainstem_trans).x > 1.5 {
+        //brainstem_trans.scale *= 1.11
+        if brainstem_trans.scale.x > 1.5 {
             up_or_down = true
         }
     }
@@ -95,6 +98,7 @@ quit :: proc() {
     graphics.deanimate(brainstem2_anim)
     graphics.delete_scene(brainstem2)
     graphics.unload_files()
+    transform.delete_tree(&tree)
 }
 
 main :: proc() {
