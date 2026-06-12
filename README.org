@@ -15,14 +15,17 @@ Current features:
 - window/context creation
 - keyboard & mouse input
 - main loop with fixed timestep for game updates & variable rate for drawing
-- basic audio (sound + music loading, playback, looping, and fading)
+- basic audio (sound + music loading, playback, looping, fading, spatialization)
 - parallel actor system for in-game entities
 - spatial querying/collision detection
 
 Planned features:
-- 3D audio
 - gamepad support
 - exporting engine functionality to shared libraries
 - FFI wrappers for various scripting languages (Python for my wife)
 - dynamic mod loading on desktop platforms
 - deterministic gamestate, serializability, saving and loading
+
+Not planned:
+- level editors/high level format support (other than glTF)
+- GPU/vendor/OS specific features
