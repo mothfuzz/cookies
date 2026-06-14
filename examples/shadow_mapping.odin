@@ -10,20 +10,24 @@ import "core:math/linalg"
 cam: graphics.Camera
 cam_pos: [3]f32 = {0, 0.5, 1}
 
+tree: transform.Tree
+
 quad: graphics.Mesh
 quad_tex: graphics.Texture
 quad_mat: graphics.Material
 
 teapot: graphics.Scene
-teapot_trans: transform.Transform
+teapot_trans: transform.Node
 
 spot_light: graphics.Spot_Light
-spot_light_trans: transform.Transform
+spot_light_trans: transform.Node
 
 init :: proc() {
     window.set_size(800, 800)
 
     cam = graphics.make_camera()
+
+    tree = transform.make_tree()
 
     quad = graphics.make_mesh([]graphics.Vertex{
         {position={-0.5, 0.0, -0.5}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
@@ -40,12 +44,12 @@ init :: proc() {
     quad_tex = graphics.make_texture_2D(img, {4, 4})
     quad_mat = graphics.make_material(quad_tex, filtering=false)
 
-    teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
-    transform.init(&teapot_trans, position={0, 0.2, 0}, scale=0.01)
-    graphics.link_scene_transform(&teapot, &teapot_trans)
+    teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"), &tree)
+    teapot_trans = transform.create_node(&tree, {translation={0, 0.2, 0}, scale=0.01})
+    graphics.link_scene_transform(&teapot, teapot_trans)
 
     spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, 0.1, 0.2, {1, 1, 1, 5})
-    transform.init(&spot_light_trans, position={0, 2, 0})
+    spot_light_trans = transform.create_node(&tree, {translation={0, 2, 0}})
 }
 
 tick :: proc() {
@@ -71,18 +75,16 @@ tick :: proc() {
     counter += 0.01
     light_angle_range: f32 = 10
     sin := linalg.sin(counter)*linalg.to_radians(light_angle_range)
-    transform.set_orientation(&spot_light_trans, {sin, 0, sin}, true)
+    trans := transform.write(&tree, spot_light_trans)
+    trans.rotation = transform.rotation_from_angles({sin, 0, sin})
+
 }
 
 draw :: proc(alpha, delta: f64) {
-    f := graphics.Frame{}
-
-    graphics.draw_camera(&f, &cam, alpha)
-    graphics.draw_mesh(&f, quad, quad_mat)
-    graphics.draw_scene(&f, teapot, alpha, delta)
-    graphics.draw_spot_light(&f, spot_light, transform.smooth(&spot_light_trans, alpha))
-    
-    graphics.render_frame(f)
+    graphics.draw_camera(&cam, alpha)
+    graphics.draw_mesh(quad, quad_mat)
+    graphics.draw_scene(teapot, alpha, delta)
+    graphics.draw_spot_light(spot_light, transform.get_world_smooth(&tree, spot_light_trans, alpha))
 }
 
 quit :: proc() {

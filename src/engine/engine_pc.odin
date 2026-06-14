@@ -9,6 +9,7 @@ import "cookies:graphics"
 import "cookies:input"
 import "cookies:audio"
 
+@(export)
 boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
     success := sdl3.Init({.VIDEO, .AUDIO})
     if !success {
@@ -24,13 +25,16 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
     sdl3.DestroySurface(icon)
 
     audio.init()
+    defer audio.quit()
 
     graphics.init(window.get_wgpu_surface, window.get_size())
-    //for hook in init_hooks {
-        //hook()
-    //}
+    defer graphics.quit()
+
     if init != nil {
         init()
+    }
+    defer if quit != nil {
+        quit()
     }
 
     then := sdl3.GetTicks()
@@ -44,9 +48,6 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
             if e.type == .WINDOW_RESIZED {
                 graphics.configure_surface(window.get_size())
                 graphics.configure_render_targets()
-                /*for hook in resize_hooks {
-                    hook()
-                }*/
             }
             if e.type == .KEY_DOWN {
                 input.keys_pressed[input.sdl2key(e)] = true
@@ -96,32 +97,16 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
         then = now //when will then be now? soon.
         time_step := 1.0/f64(tick_rate)
         for ; accumulator >= time_step; accumulator -= time_step {
-            /*for hook in pre_tick_hooks {
-                hook()
-            }*/
             if tick != nil {
                 tick()
             }
-            /*for hook in post_tick_hooks {
-                hook()
-            }*/
             input.update()
         }
         alpha := accumulator / time_step
         if draw != nil {
             draw(alpha, delta)
         }
-        /*for hook in draw_hooks {
-            hook(t)
-        }*/
-    }
 
-    if quit != nil {
-        quit()
+        graphics.render_frame()
     }
-    /*for hook in quit_hooks {
-        hook()
-    }*/
-    graphics.quit()
-    audio.quit()
 }

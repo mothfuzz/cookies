@@ -445,6 +445,7 @@ init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
 }
 
 quit :: proc() {
+    delete_frame()
     delete_ui_batches()
     delete_defaults()
     wgpu.RenderPipelineRelease(ren.solid_pipeline)
@@ -481,7 +482,7 @@ Frame :: struct {
 }
 
 @(private)
-delete_frame :: proc(frame: Frame) {
+delete_frame :: proc() {
     delete(frame.lights)
     delete(frame.cameras)
     for material, meshes in frame.action {
@@ -500,28 +501,40 @@ delete_frame :: proc(frame: Frame) {
     delete(frame.materials)
 }
 
+@(private)
+clear_frame :: proc() {
+    clear(&frame.lights)
+    clear(&frame.cameras)
+    clear_action(&frame)
+    clear(&frame.meshes)
+    clear(&frame.materials)
+}
+
+//static frame so commands can be called context-free
+frame: Frame
+
 @(export)
-draw_point_light :: proc(frame: ^Frame, light: Point_Light, trans: matrix[4,4]f32 = 1) {
+draw_point_light :: proc(light: Point_Light, trans: matrix[4,4]f32 = 1) {
     append(&frame.lights, Light_Draw{light, trans})
 }
 @(export)
-draw_directional_light :: proc(frame: ^Frame, light: Directional_Light, trans: matrix[4,4]f32 = 1) {
+draw_directional_light :: proc(light: Directional_Light, trans: matrix[4,4]f32 = 1) {
     append(&frame.lights, Light_Draw{light, trans})
 }
 @(export)
-draw_spot_light :: proc(frame: ^Frame, light: Spot_Light, trans: matrix[4,4]f32 = 1) {
+draw_spot_light :: proc(light: Spot_Light, trans: matrix[4,4]f32 = 1) {
     append(&frame.lights, Light_Draw{light, trans})
 }
 draw_light :: proc{draw_point_light, draw_directional_light, draw_spot_light}
 
 @(export)
-draw_camera :: proc(frame: ^Frame, camera: ^Camera, a: f64 = 1.0) {
+draw_camera :: proc(camera: ^Camera, a: f64 = 1.0) {
     calculate_camera(camera, a)
     append(&frame.cameras, camera^)
 }
 
 @(export)
-draw_mesh :: proc(f: ^Frame, mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
+draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
                   clip_rect: [4]f32 = 0,
                   base_color_tint: [4]f32 = 1,
                   ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
@@ -529,21 +542,21 @@ draw_mesh :: proc(f: ^Frame, mesh: Mesh, material: Material, transform: matrix[4
                   sprite: bool = false, billboard: bool = false,
                   bones: []matrix[4,4]f32 = nil) {
     //make sure resources are set
-    if !(mesh.hash in f.meshes) {
-        f.meshes[mesh.hash] = mesh
+    if !(mesh.hash in frame.meshes) {
+        frame.meshes[mesh.hash] = mesh
     }
-    if !(material.hash in f.materials) {
-        f.materials[material.hash] = material
+    if !(material.hash in frame.materials) {
+        frame.materials[material.hash] = material
     }
 
     //get the batch
-    if f.action == nil {
-        f.action = make(map[Material_Hash]map[Mesh_Hash][dynamic]Mesh_Draw)
+    if frame.action == nil {
+        frame.action = make(map[Material_Hash]map[Mesh_Hash][dynamic]Mesh_Draw)
     }
-    if !(material.hash in f.action) {
-        f.action[material.hash] = make(map[Mesh_Hash][dynamic]Mesh_Draw)
+    if !(material.hash in frame.action) {
+        frame.action[material.hash] = make(map[Mesh_Hash][dynamic]Mesh_Draw)
     }
-    meshes := &f.action[material.hash]
+    meshes := &frame.action[material.hash]
     if !(mesh.hash in meshes) {
         meshes[mesh.hash] = make([dynamic]Mesh_Draw)
     }
@@ -568,13 +581,13 @@ draw_mesh :: proc(f: ^Frame, mesh: Mesh, material: Material, transform: matrix[4
 
 //sprites are just special kinds of meshes
 @(export)
-draw_sprite :: proc(frame: ^Frame, material: Material, transform: matrix[4, 4]f32 = 1,
+draw_sprite :: proc(material: Material, transform: matrix[4, 4]f32 = 1,
                     clip_rect: [4]f32 = 0,
                     base_color_tint: [4]f32 = 1,
                     ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
                     emissive_tint: [3]f32 = 1,
                     billboard: bool = true) {
-    draw_mesh(frame, quad_mesh, material, transform, clip_rect,
+    draw_mesh(quad_mesh, material, transform, clip_rect,
               base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint, true, billboard)
 }
 
@@ -730,13 +743,13 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
 import "core:math/linalg"
 
 @(export)
-render_frame :: proc(frame: Frame) {
+render_frame :: proc() {
 
     //context.allocator = context.temp_allocator
     //defer free_all(context.temp_allocator)
     //^in order for this to work I'd need to remove all the real deletes
 
-    defer delete_frame(frame)
+    defer clear_frame()
 
     //prepare the screen surface
     surface_tex := wgpu.SurfaceGetCurrentTexture(ren.surface)
@@ -991,9 +1004,4 @@ render_frame :: proc(frame: Frame) {
 
     wgpu.QueueSubmit(ren.queue, {command_buffer})
     wgpu.SurfacePresent(ren.surface)
-
-    //cleanup...
-    //clear(&frame.cameras)
-    //clear(&frame.lights)
-    //clear_action(frame)
 }

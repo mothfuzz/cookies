@@ -83,12 +83,10 @@ tick :: proc() {
 }
 
 draw :: proc(a: f64, dt: f64) {
-    f := graphics.Frame{}
-    graphics.draw_camera(&f, &cam, a)
-    graphics.draw_scene(&f, brainstem, a, dt, &brainstem_anim)
-    graphics.draw_scene(&f, brainstem2, a, dt, &brainstem2_anim)
-    graphics.draw_light(&f, light)
-    graphics.render_frame(f)
+    graphics.draw_camera(&cam, a)
+    graphics.draw_scene(brainstem, a, dt, &brainstem_anim)
+    graphics.draw_scene(brainstem2, a, dt, &brainstem2_anim)
+    graphics.draw_light(light)
 }
 
 quit :: proc() {
