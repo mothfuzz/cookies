@@ -8,7 +8,7 @@ import "cookies:transform"
 import "core:math/linalg"
 
 cam: graphics.Camera
-cam_pos: [3]f32 = {0, 0.5, 1}
+cam_trans: transform.Node
 
 tree: transform.Tree
 
@@ -25,9 +25,10 @@ spot_light_trans: transform.Node
 init :: proc() {
     window.set_size(800, 800)
 
-    cam = graphics.make_camera()
-
     tree = transform.make_tree()
+
+    cam = graphics.make_camera()
+    cam_trans = transform.create_node(&tree, {translation={0, 0.5, 1}})
 
     quad = graphics.make_mesh([]graphics.Vertex{
         {position={-0.5, 0.0, -0.5}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
@@ -57,19 +58,21 @@ tick :: proc() {
         window.close()
     }
 
+    cam_trans := transform.write(&tree, cam_trans)
     if input.key_down(.Key_W) {
-        cam_pos.z -= 0.01
+        cam_trans.translation.z -= 0.01
     }
     if input.key_down(.Key_S) {
-        cam_pos.z += 0.01
+        cam_trans.translation.z += 0.01
     }
     if input.key_down(.Key_A) {
-        cam_pos.x -= 0.01
+        cam_trans.translation.x -= 0.01
     }
     if input.key_down(.Key_D) {
-        cam_pos.x += 0.01
+        cam_trans.translation.x += 0.01
     }
-    graphics.look_to(&cam, cam_pos, {0, 0.2, 0})
+    //graphics.look_at(&cam, cam_pos, {0, 0.2, 0})
+    transform.look_at(cam_trans, {0, 0.2, 0})
 
     @static counter: f32 = 0.0
     counter += 0.01
@@ -81,7 +84,7 @@ tick :: proc() {
 }
 
 draw :: proc(alpha, delta: f64) {
-    graphics.draw_camera(&cam, alpha)
+    graphics.draw_camera(&cam, transform.get_world_smooth(&tree, cam_trans, alpha))
     graphics.draw_mesh(quad, quad_mat)
     graphics.draw_scene(teapot, alpha, delta)
     graphics.draw_spot_light(spot_light, transform.get_world_smooth(&tree, spot_light_trans, alpha))

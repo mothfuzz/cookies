@@ -5,6 +5,7 @@ import "cookies:window"
 import "cookies:input"
 import "cookies:graphics"
 import "cookies:transform"
+import "cookies:resources"
 import "core:fmt"
 
 tree: transform.Tree
@@ -83,7 +84,7 @@ tick :: proc() {
 }
 
 draw :: proc(a: f64, dt: f64) {
-    graphics.draw_camera(&cam, a)
+    graphics.draw_camera(&cam)
     graphics.draw_scene(brainstem, a, dt, &brainstem_anim)
     graphics.draw_scene(brainstem2, a, dt, &brainstem2_anim)
     graphics.draw_light(light)
@@ -95,7 +96,7 @@ quit :: proc() {
     graphics.delete_scene(brainstem)
     graphics.deanimate(brainstem2_anim)
     graphics.delete_scene(brainstem2)
-    graphics.unload_files()
+    resources.unload_files()
     transform.delete_tree(&tree)
 }
 

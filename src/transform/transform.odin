@@ -38,6 +38,13 @@ scale :: proc(t: ^Transform, scale: [3]f32) {
     t.scale *= scale
 }
 
+look_at :: proc(viewer: ^Transform, target: [3]f32, up: [3]f32 = {0, 1, 0}) {
+    forward := linalg.normalize(target - viewer.translation)
+    right := linalg.normalize(linalg.cross(up, forward))
+    up := linalg.cross(forward, right)
+    viewer.rotation = linalg.quaternion_from_forward_and_up(forward, up)
+}
+
 compute :: proc(t: Transform) -> matrix[4,4]f32 {
     return linalg.matrix4_from_trs(expand_values(t))
 }

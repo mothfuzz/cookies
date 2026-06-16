@@ -229,7 +229,14 @@ calculate_lights :: proc(lights: []Light_Draw) -> Lights {
             sl.direction = (light.transform * vecdir(sl.direction)).xyz
             if sl.render_shadows {
                 num_spot_lights_shadows += 1
-                look_at(&sl.shadow_camera, sl.position, sl.position + sl.direction)
+
+                //handle parallel-to-up case
+                world_up := [3]f32{0, 1, 0}
+                if linalg.abs(linalg.dot(sl.direction, world_up)) >= 0.9 {
+                    world_up = {0, 0, 1}
+                }
+
+                look_at(&sl.shadow_camera, sl.position, sl.position + sl.direction, world_up)
                 inject_at(&spot_lights, 0, sl)
             } else {
                 append(&spot_lights, sl)
@@ -271,7 +278,6 @@ Lights_Uniforms :: struct {
     spot_lights: []Spot_Light_Uniforms,
 }
 
-import "core:fmt"
 calculate_lights_uniforms :: proc(lights: Lights, camera: Camera) -> Lights_Uniforms {
     //convert lights to view-space & pack into uniform buffers
 
@@ -300,9 +306,7 @@ calculate_lights_uniforms :: proc(lights: Lights, camera: Camera) -> Lights_Unif
         sl.color = lights.spot_lights[i].color;
         if lights.spot_lights[i].render_shadows {
             light_cam := lights.spot_lights[i].shadow_camera
-            //fmt.println("camera view in shade:", camera.view)
-            //fmt.println("inverse cam in shade:", linalg.inverse(camera.view))
-            //fmt.println("multiplied:", camera.view * linalg.inverse(camera.view))
+            // TODO: instead of linalg.inverse here use rigid body inversion instead
             sl.view_to_shadow = light_cam.projection * light_cam.view * linalg.inverse(camera.view)
         }
     }

@@ -2,23 +2,18 @@ package graphics
 
 import "vendor:wgpu"
 import "core:math/linalg"
-import "core:fmt"
 
 Camera_Uniforms :: struct {
-    eye: [4]f32,
-    center: [4]f32,
     view: matrix[4,4]f32,
     projection: matrix[4,4]f32,
 }
 Camera :: struct {
     bind_group: wgpu.BindGroup,
     buffer: wgpu.Buffer,
-    eye_prev: [3]f32,
-    eye_next: [3]f32,
-    center_prev: [3]f32,
-    center_next: [3]f32,
     viewport: [4]f32,
     using uniforms: Camera_Uniforms,
+    translation: [3]f32,
+    rotation: quaternion128,
     near, far, fov: f32, //custom overrides
 }
 
@@ -79,17 +74,30 @@ make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = -
     cam.near = near
     cam.far = far
     cam.fov = fov
+    cam.rotation = 1
     calculate_projection(&cam)
     return
 }
 
-calculate_camera :: proc(cam: ^Camera, a: f64 = 1.0, up: [3]f32 = {0, 1, 0}) {
-    a := f32(a)
-    eye := linalg.lerp(cam.eye_prev, cam.eye_next, [3]f32{a, a, a})
-    center := linalg.lerp(cam.center_prev, cam.center_next, [3]f32{a, a, a})
-    cam.eye = {eye.x, eye.y, eye.z, 1.0}
-    cam.center = {center.x, center.y, center.z, 1.0}
-    cam.view = linalg.matrix4_look_at(cam.eye.xyz, cam.center.xyz, up)
+look_at :: proc(cam: ^Camera, eye, center: [3]f32, up: [3]f32 = {0, 1, 0}) {
+    cam.translation = eye
+    cam.rotation = linalg.quaternion_look_at(eye, center, up)
+}
+
+inverse_view :: proc(trans: matrix[4,4]f32) -> (inv_view: matrix[4,4]f32) {
+    translation := trans[3].xyz
+    rotation := cast(matrix[3,3]f32)(trans)
+    inv_r := linalg.transpose(rotation)
+    inv_t := -(inv_r * translation)
+    inv_view[0] = {expand_values(inv_r[0]), 0}
+    inv_view[1] = {expand_values(inv_r[1]), 0}
+    inv_view[2] = {expand_values(inv_r[2]), 0}
+    inv_view[3] = {expand_values(inv_t), 1}
+    return
+}
+
+calculate_camera :: proc(cam: ^Camera, trans: matrix[4,4]f32 = 1) {
+    cam.view = inverse_view(trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1))
     if cam.viewport[2] == 0 || cam.viewport[3] == 0 {
         calculate_projection(cam)
     }
@@ -136,22 +144,6 @@ bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera)
 delete_camera :: proc(cam: Camera) {
     wgpu.BufferRelease(cam.buffer)
     wgpu.BindGroupRelease(cam.bind_group)
-}
-
-//look_at is instant, look_to is interpolated.
-@(export)
-look_at :: proc(cam: ^Camera, eye: [3]f32, center: [3]f32) {
-    cam.eye_prev = eye
-    cam.center_prev = center
-    cam.eye_next = eye
-    cam.center_next = center
-}
-@(export)
-look_to :: proc(cam: ^Camera, eye: [3]f32, center: [3]f32) {
-    cam.eye_prev = cam.eye_next
-    cam.center_prev = cam.center_next
-    cam.eye_next = eye
-    cam.center_next = center
 }
 
 @(export)

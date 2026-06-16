@@ -528,8 +528,8 @@ draw_spot_light :: proc(light: Spot_Light, trans: matrix[4,4]f32 = 1) {
 draw_light :: proc{draw_point_light, draw_directional_light, draw_spot_light}
 
 @(export)
-draw_camera :: proc(camera: ^Camera, a: f64 = 1.0) {
-    calculate_camera(camera, a)
+draw_camera :: proc(camera: ^Camera, trans: matrix[4,4]f32 = 1) {
+    calculate_camera(camera, trans) //don't need to defer this one
     append(&frame.cameras, camera^)
 }
 
@@ -814,13 +814,7 @@ render_frame :: proc() {
             })
             wgpu.RenderPassEncoderSetPipeline(shadow_pass, ren.shadow_pipeline)
 
-            //handle parallel-to-up case
-            world_up := [3]f32{0, 1, 0}
-            if linalg.abs(linalg.dot(spot_light.direction, world_up)) >= 0.9 {
-                world_up = {0, 0, 1}
-            }
-            
-            calculate_camera(&spot_light.shadow_camera, up=world_up)
+            calculate_camera(&spot_light.shadow_camera)
             bind_camera(shadow_pass, 0, spot_light.shadow_camera)
             draws := compute_draw_calls(batches, spot_light.shadow_camera)
             defer delete_draw_calls(draws)
