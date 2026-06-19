@@ -343,7 +343,7 @@ draw_enemies :: proc(a: f64) {
 
 draw :: proc(t: f64, dt: f64) {
 
-    graphics.draw_camera(&cam, t)
+    graphics.draw_camera(&cam)
 
     bs := f32(Big_Font_Size)
     rs := f32(Regular_Font_Size)

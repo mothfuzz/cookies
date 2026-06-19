@@ -2,11 +2,18 @@
 
 package audio
 
-Sound :: distinct u32
+Sound_Id :: distinct u32
+Sound_Key :: struct {
+    path: cstring,
+}
+Sound :: struct {
+    using key: Sound_Key,
+    id: Sound_Id,
+}
 Playing_Sound :: struct #packed {
     id: u32, //4
     gen: u16, //2
-    sound_id: Sound, //4
+    sound_id: Sound_Id, //4
     //local data needed to 'reset' sound if it was freed
     is_spatial: u32, //4
     position_x: f32, //4
@@ -19,9 +26,9 @@ Playing_Sound :: struct #packed {
 foreign import audio "audio"
 @(default_calling_convention="contextless")
 foreign audio {
-    make_sound_from_file :: proc(filedata: []u8) -> Sound ---
-    delete_sound :: proc(sound: Sound) ---
-    play_sound_ptr :: proc(sound: Sound, looped: bool, fade_in: uint, playing_sound: ^Playing_Sound) ---
+    make_sound_id_from_file :: proc(filedata: []u8) -> Sound_Id ---
+    delete_sound_id :: proc(sound: Sound_Id) ---
+    play_sound_ptr :: proc(sound: Sound_Id, looped: bool, fade_in: uint, playing_sound: ^Playing_Sound) ---
     loop_sound :: proc(playing_sound: ^Playing_Sound, looped: bool = true) ---
     sound_is_looping :: proc(playing_sound: ^Playing_Sound) -> bool ---
     stop_sound :: proc(playing_sound: ^Playing_Sound, finish_playing: bool = false) ---
@@ -39,8 +46,16 @@ foreign audio {
     set_global_max_distance :: proc(d: f32) ---
 }
 
+make_sound_from_file :: proc(filedata: []u8) -> (snd: Sound) {
+    snd.id = make_sound_id_from_file(filedata)
+    return
+}
+delete_sound :: proc(snd: Sound) {
+    delete_sound_id(snd.id)
+}
+
 play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (playing_sound: Playing_Sound) {
-    play_sound_ptr(sound, looped, fade_in, &playing_sound)
+    play_sound_ptr(sound.id, looped, fade_in, &playing_sound)
     return
 }
 
@@ -48,7 +63,7 @@ set_sound_position :: proc(ps: ^Playing_Sound, position: [3]f32) {
     set_sound_position_xyz(ps, expand_values(position))
 }
 play_sound_spatial :: proc(sound: Sound, position: [3]f32, looped: bool = false, fade_in: uint = 0) -> (playing_sound: Playing_Sound) {
-    play_sound_ptr(sound, looped, fade_in, &playing_sound)
+    play_sound_ptr(sound.id, looped, fade_in, &playing_sound)
     set_sound_position(&playing_sound, position)
     return
 }

@@ -27,8 +27,8 @@ class AudioInterface {
 
     getInterface() {
         return {
-            "make_sound_from_file": (ptr, len) => this.makeSoundFromFile(ptr, len),
-            "delete_sound": (soundId) => this.deleteSound(soundId),
+            "make_sound_id_from_file": (ptr, len) => this.makeSoundIdFromFile(ptr, len),
+            "delete_sound_id": (soundId) => this.deleteSoundId(soundId),
             "play_sound_ptr": (soundId, looped, fadeIn, playingSoundPtr) => this.playSoundPtr(soundId, looped, fadeIn, playingSoundPtr),
             "loop_sound": (playingSoundPtr, looped) => this.loopSound(playingSoundPtr, looped),
             "sound_is_looping": (playingSoundPtr) => this.soundIsLooping(playingSoundPtr),
@@ -48,7 +48,7 @@ class AudioInterface {
         };
     }
 
-    makeSoundFromFile(filedataPtr, filedataLen) {
+    makeSoundIdFromFile(filedataPtr, filedataLen) {
         let filedata = this.mem.loadBytes(filedataPtr, filedataLen);
         //decodeAudioData complains about 'detached' memory so copy it over to a pure JS environment.
         let filedata2 = new Uint8Array(filedata);
@@ -62,7 +62,7 @@ class AudioInterface {
         return soundId;
     }
 
-    deleteSound(soundId) {
+    deleteSoundId(soundId) {
         delete this.loadedSounds[soundId-1];
     }
 

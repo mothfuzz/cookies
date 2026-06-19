@@ -7,6 +7,7 @@ import "cookies:window"
 import "cookies:graphics"
 import "cookies:input"
 import "cookies:audio"
+import "cookies:resources"
 
 user_init: proc() = nil
 user_tick: proc() = nil
@@ -24,6 +25,7 @@ step :: proc(delta_time: f64) -> bool {
     }
 
     if !initialized {
+        resources.register_loaders()
         if user_init != nil {
             user_init()
         }
@@ -39,6 +41,8 @@ step :: proc(delta_time: f64) -> bool {
         }
         graphics.quit()
         audio.quit()
+        resources.unregister_loaders()
+        resources.unload_files()
         return false
     }
     accumulator += delta_time

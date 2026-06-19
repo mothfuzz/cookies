@@ -430,6 +430,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     fmt.println("renderer SAYS it's ready.")
     fmt.println(status)
     fmt.println("GPU device address:", ren.device)
+
 }
 
 ctx: runtime.Context
@@ -636,8 +637,8 @@ Draw_Call :: struct {
 compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera) -> []Draw_Call {
     draws := make([dynamic]Draw_Call)
     for batch, i in batches {
-        trans := batch.mesh.is_trans || batch.material.base_color.is_trans
-        solid := batch.mesh.is_solid || batch.material.base_color.is_solid
+        trans := batch.mesh.is_trans || batch.material.base_color_tex.is_trans
+        solid := batch.mesh.is_solid || batch.material.base_color_tex.is_solid
         instances := make([dynamic]Instance)
         skeletons := make([dynamic]matrix[4,4]f32)
         for instance in batch.instances {
@@ -699,10 +700,10 @@ filter_draw_calls :: proc(in_draws: []Draw_Call, filter: Draw_Call_Filter) -> []
             case .Both:
                 do_draw = true
             case .Solid:
-                do_draw = (draw.mesh.is_solid || draw.material.base_color.is_solid) &&
+                do_draw = (draw.mesh.is_solid || draw.material.base_color_tex.is_solid) &&
                     instance.base_color_tint.a == 1
             case .Trans:
-                do_draw = draw.mesh.is_trans || draw.material.base_color.is_trans ||
+                do_draw = draw.mesh.is_trans || draw.material.base_color_tex.is_trans ||
                     (instance.base_color_tint.a > 0 && instance.base_color_tint.a < 1) 
             }
             if do_draw {

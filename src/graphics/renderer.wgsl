@@ -5,8 +5,6 @@ struct Screen {
 @group(0) @binding(0) var<uniform> screen: Screen;
 
 struct Camera {
-    eye: vec4<f32>,
-    center: vec4<f32>,
     view: mat4x4<f32>,
     projection: mat4x4<f32>,
 }

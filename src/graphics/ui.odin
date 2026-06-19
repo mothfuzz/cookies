@@ -156,8 +156,8 @@ ui_draw_rect :: proc(rect: [4]f32, color: [4]f32 = 1, texture: Texture = white_t
         rect[2]/sx,
         rect[3]/sy,
     }
-    tx := f32(texture.size.x)
-    ty := f32(texture.size.y)
+    tx := f32(wgpu.TextureGetWidth(texture.image))
+    ty := f32(wgpu.TextureGetHeight(texture.image))
     clip_rect := [4]f32{
         clip_rect[0]/tx,
         clip_rect[1]/ty,

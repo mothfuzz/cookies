@@ -9,75 +9,22 @@ import "core:slice"
 import "core:mem"
 import "core:math/linalg"
 
-Loaded_File :: struct {
-    data: []u8,
-    preloaded: bool,
-}
+import "cookies:resources/file_map" //needed since gltf references sub-data
+import "cookies:transform"
+import "cookies:spatial"
 
-loaded_files: map[cstring]Loaded_File
-loaded_paths: map[rawptr]cstring
-
-unload_files :: proc() {
-    delete(loaded_files)
-    delete(loaded_paths)
-}
-
-check :: proc() {
-    if loaded_files == nil {
-        loaded_files = make(map[cstring]Loaded_File)
-    }
-    if loaded_paths == nil {
-        loaded_paths = make(map[rawptr]cstring)
-    }
-}
-
+//loader procs so cgltf can read from engine resources
 read :: proc "c" (memory_options: ^cgltf.memory_options, file_options: ^cgltf.file_options, path: cstring, size: ^uint, data: ^rawptr) -> (res: cgltf.result) {
     context = (^runtime.Context)(file_options.user_data)^
-    check()
-    if !(path in loaded_files) {
-        data := make([]u8, 500)
-        loaded_files[path] = {data, false}
-        loaded_paths[raw_data(data)] = path
-    }
-    data^ = raw_data(loaded_files[path].data)
-    size^ = len(loaded_files[path].data)
+    file := file_map.read(path)
+    data^ = raw_data(file)
+    size^ = len(file)
     return
 }
 release :: proc "c" (memory_options: ^cgltf.memory_options, file_options: ^cgltf.file_options, data: rawptr) {
     context = (^runtime.Context)(file_options.user_data)^
-    check()
-    file := loaded_files[loaded_paths[data]]
-    if !file.preloaded {
-        delete(file.data)
-        delete_key(&loaded_files, loaded_paths[data])
-        delete_key(&loaded_paths, data)
-    }
+    file_map.release(data)
 }
-
-preload :: proc(path: cstring, file: []u8) {
-    check()
-    loaded_files[path] = {file, true}
-    loaded_paths[raw_data(file)] = path
-}
-
-
-load :: proc(path: cstring) -> []u8 {
-    check()
-    if path in loaded_files {
-        return loaded_files[path].data
-    }
-    data := read_from_disk(path)
-    if data == nil {
-        fmt.eprintln("failed to read file:", path)
-        return nil
-    }
-    loaded_files[path] = {data, false}
-    loaded_paths[raw_data(data)] = path
-    return data
-}
-
-import "cookies:transform"
-import "cookies:spatial"
 
 Node_Type :: enum {
     Node, //i.e. non-renderable
@@ -107,8 +54,13 @@ Layout :: struct {
     roots: []uint,
 }
 
+Scene_Key :: struct {
+    path: cstring,
+    tree: ^transform.Tree,
+}
 
 Scene :: struct {
+    using key: Scene_Key,
     //assets (TODO: move to resource manager)
     meshes: []Mesh, //'primitives'
     colliders: []spatial.Tri_Mesh, // TODO: get this out of here.
@@ -124,7 +76,6 @@ Scene :: struct {
     //directional_lights: []Directional_Light,
     //spot_lights: []Spot_Light,
     //actual scene
-    tree: ^transform.Tree,
     name: string,
     nodes: []Node,
     layouts: []Layout, //'scenes'
@@ -194,27 +145,31 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
 // if the user wants to load arbitrary data they can load the texture themselves :P
 
 @(private)
-load_image :: proc(opts: cgltf.options, image: cgltf.image) -> Texture {
-        //load textures
-        if prefix, ok := strings.substring(string(image.uri), 0, 5); ok {
-            if prefix == "data:" {
-                //load base64
-                header, comma, img_base64 := strings.partition(string(image.uri), ",")
-                img_size := base64.decoded_len(img_base64)
-                img_base64_cstring := strings.clone_to_cstring(img_base64)
-                img_data, res := cgltf.load_buffer_base64(opts, uint(img_size), img_base64_cstring)
-                delete(img_base64_cstring)
-                return make_texture_from_image(slice.bytes_from_ptr(img_data, img_size))
-            }
+load_image :: proc(gltf_path: cstring, opts: cgltf.options, image: cgltf.image) -> (tex: Texture) {
+    //load textures
+    if prefix, ok := strings.substring(string(image.uri), 0, 5); ok {
+        if prefix == "data:" {
+            //load base64
+            header, comma, img_base64 := strings.partition(string(image.uri), ",")
+            img_size := base64.decoded_len(img_base64)
+            img_base64_cstring := strings.clone_to_cstring(img_base64)
+            img_data, res := cgltf.load_buffer_base64(opts, uint(img_size), img_base64_cstring)
+            delete(img_base64_cstring)
+            return make_texture_from_image(slice.bytes_from_ptr(img_data, img_size))
         }
-        //load texture from buffer
-        if image.buffer_view != nil {
-            buffer_data := slice.bytes_from_ptr(image.buffer_view.buffer.data, int(image.buffer_view.buffer.size))
-            img_data := buffer_data[image.buffer_view.offset:image.buffer_view.size]
-            return make_texture_from_image(img_data)
-        }
-        //lastly but not leastly... it's a file. use the file manager
-    return make_texture_from_image(load(image.uri))
+    }
+    //load texture from buffer
+    if image.buffer_view != nil {
+        buffer_data := slice.bytes_from_ptr(image.buffer_view.buffer.data, int(image.buffer_view.buffer.size))
+        img_data := buffer_data[image.buffer_view.offset:image.buffer_view.size]
+        return make_texture_from_image(img_data)
+    }
+    //lastly but not leastly... it's a file. use the file manager
+    
+    path := resolve_image_path(gltf_path, image.uri)
+    tex = make_texture_from_image(file_map.read(path))
+    file_map.release(path)
+    return
 }
 
 @(private)
@@ -413,7 +368,7 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, tree: ^transform
 
     scene.textures = make([]Texture, len(data.images))
     for image, i in data.images {
-        scene.textures[i] = load_image(opts, image)
+        scene.textures[i] = load_image(filename, opts, image)
     }
 
     scene.materials = make([]Combined_Material, len(data.materials))

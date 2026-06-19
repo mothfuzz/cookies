@@ -5,13 +5,18 @@ import stbi "vendor:stb/image"
 import "core:math"
 import "core:fmt"
 
+Texture_Key :: struct {
+    path: cstring,
+    linear: bool,
+}
+
 Texture :: struct {
+    using key: Texture_Key,
     image: wgpu.Texture,
     view: wgpu.TextureView,
     render_target: bool,
     resolve: wgpu.Texture,
     resolve_view: wgpu.TextureView,
-    size: [2]uint,
     is_trans: bool,
     is_solid: bool,
 }
@@ -36,7 +41,6 @@ make_render_target_array :: proc(size: [2]uint, format: wgpu.TextureFormat = .RG
         mipLevelCount = 1,
         arrayLayerCount = u32(layers),
     })
-    tex.size = size
     tex.is_solid = true //I guess
     tex.is_trans = false
     return
@@ -71,7 +75,6 @@ make_render_target :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Uno
         sampleCount = 1,
     })
     tex.resolve_view = wgpu.TextureCreateView(tex.resolve)
-    tex.size = size
     tex.is_solid = true //I guess
     tex.is_trans = false
     return
@@ -183,7 +186,6 @@ make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (t
         mipLevelCount = u32(len(mips)),
         sampleCount = 1,
     })
-    tex.size = size
     mip_size := size
     for mip, i in mips {
         if mip_size.x == 0 || mip_size.y == 0 {

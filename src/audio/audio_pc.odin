@@ -7,7 +7,12 @@ import "vendor:sdl3"
 import ma "vendor:miniaudio"
 import "core:fmt"
 
+Sound_Key :: struct {
+    path: cstring,
+}
+
 Sound :: struct {
+    using key: Sound_Key,
     frames_len: u64,
     frames_ptr: rawptr, //should be freed
     format: ma.format,

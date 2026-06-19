@@ -306,8 +306,7 @@ calculate_lights_uniforms :: proc(lights: Lights, camera: Camera) -> Lights_Unif
         sl.color = lights.spot_lights[i].color;
         if lights.spot_lights[i].render_shadows {
             light_cam := lights.spot_lights[i].shadow_camera
-            // TODO: instead of linalg.inverse here use rigid body inversion instead
-            sl.view_to_shadow = light_cam.projection * light_cam.view * linalg.inverse(camera.view)
+            sl.view_to_shadow = light_cam.projection * light_cam.view * inverse_view(camera.view)
         }
     }
 

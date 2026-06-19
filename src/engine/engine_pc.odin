@@ -3,14 +3,28 @@ package engine
 
 import "core:fmt"
 import "vendor:sdl3"
+import "core:os"
 
 import "cookies:window"
 import "cookies:graphics"
 import "cookies:input"
 import "cookies:audio"
+import "cookies:resources"
+
+@(private)
+set_exe_working_dir :: proc() -> os.Error {
+    exe_dir := os.get_executable_directory(context.temp_allocator) or_return
+    os.set_working_directory(exe_dir) or_return
+    return os.ERROR_NONE
+}
 
 @(export)
 boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
+
+    if err := set_exe_working_dir(); err != nil {
+        fmt.eprintln("Failed to set working directory, files may not load")
+    }
+    
     success := sdl3.Init({.VIDEO, .AUDIO})
     if !success {
         fmt.panicf("Unable to initialize SDL3")
@@ -29,6 +43,10 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
 
     graphics.init(window.get_wgpu_surface, window.get_size())
     defer graphics.quit()
+
+    resources.register_loaders()
+    defer resources.unregister_loaders()
+    defer resources.unload_files()
 
     if init != nil {
         init()

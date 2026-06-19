@@ -45,13 +45,21 @@ Dynamic_Material :: struct {
 
 Material_Hash :: distinct uintptr
 
+Material_Key :: struct {
+    base_color: cstring,
+    normal: cstring,
+    pbr: cstring,
+    emissive: cstring,
+}
+
 Material :: struct {
+    using key: Material_Key,
     bind_group: wgpu.BindGroup,
     sampler: wgpu.Sampler,
-    base_color: Texture,
-    normal: Texture,
-    pbr: Texture,
-    emissive: Texture,
+    base_color_tex: Texture,
+    normal_tex: Texture,
+    pbr_tex: Texture,
+    emissive_tex: Texture,
     //
     hash: Material_Hash,
 }
@@ -59,10 +67,10 @@ Material :: struct {
 rebuild_material :: proc(mat: ^Material) {
     bindings := []wgpu.BindGroupEntry{
         {binding = 0, sampler = mat.sampler},
-        {binding = 1, textureView = mat.base_color.view},
-        {binding = 2, textureView = mat.normal.view},
-        {binding = 3, textureView = mat.pbr.view},
-        {binding = 4, textureView = mat.emissive.view},
+        {binding = 1, textureView = mat.base_color_tex.view},
+        {binding = 2, textureView = mat.normal_tex.view},
+        {binding = 3, textureView = mat.pbr_tex.view},
+        {binding = 4, textureView = mat.emissive_tex.view},
     }
     mat.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
         layout = material_layout,
@@ -82,10 +90,10 @@ make_material :: proc(base_color: Texture=white_tex, normal: Texture=normal_tex,
         addressModeU = .Repeat if tiling.x else .ClampToEdge,
         addressModeV = .Repeat if tiling.y else .ClampToEdge,
     })
-    mat.base_color = base_color
-    mat.normal = normal
-    mat.pbr = pbr
-    mat.emissive = emissive
+    mat.base_color_tex = base_color
+    mat.normal_tex = normal
+    mat.pbr_tex = pbr
+    mat.emissive_tex = emissive
     rebuild_material(&mat)
     return
 }

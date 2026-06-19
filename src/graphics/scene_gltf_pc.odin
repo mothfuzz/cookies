@@ -2,15 +2,15 @@
 
 package graphics
 
-import "core:fmt"
-import "core:os"
+import "core:path/filepath"
+import "core:strings"
 
-read_from_disk :: proc(path: cstring) -> []u8 {
-    data, err := os.read_entire_file(string(path), context.allocator)
-    if err != nil {
-        fmt.eprintln(err)
-        fmt.eprintln("failed to read file:", path)
-        return nil
+resolve_image_path :: proc(gltf_path: cstring, uri: cstring) -> (path: cstring){
+    base_dir := filepath.dir(string(gltf_path))
+    path = uri
+    if base_dir != "" {
+        full_path := strings.concatenate({base_dir, "/", string(uri)}, context.temp_allocator)
+        path = strings.clone_to_cstring(full_path, context.temp_allocator)
     }
-    return data
+    return
 }

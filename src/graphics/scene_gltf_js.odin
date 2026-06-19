@@ -2,9 +2,7 @@
 
 package graphics
 
-import "core:fmt"
-
-read_from_disk :: proc(path: cstring) -> []u8 {
-    fmt.eprintln("loading from disk not supported on web")
-    return nil
+resolve_image_path :: proc(gltf_path: cstring, uri: cstring) -> cstring {
+    return uri //:C
+    //get used to using 'preload' if you want your game to work on web
 }

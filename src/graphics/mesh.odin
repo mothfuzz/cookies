@@ -288,8 +288,8 @@ bind_mesh :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh) {
 //calculates local mesh data (i.e. not relative to camera)
 calculate_mesh_local :: proc(instance: ^Mesh_Draw, mesh: Mesh, material: Material) {
     //calculate clip_rect
-    w := f32(wgpu.TextureGetWidth(material.base_color.image))
-    h := f32(wgpu.TextureGetHeight(material.base_color.image))
+    w := f32(wgpu.TextureGetWidth(material.base_color_tex.image))
+    h := f32(wgpu.TextureGetHeight(material.base_color_tex.image))
     instance.clip_rect.x /= w
     instance.clip_rect.y /= h
     if instance.clip_rect[2] == 0 {
