@@ -67,15 +67,17 @@ unload_files :: file_map.unload_files
 //neat auto-loader for structs of resources
 
 import "cookies:graphics"
+load_mesh :: proc(mesh: ^graphics.Mesh) {
+    mesh^ = graphics.make_mesh_from_file(file_map.read(mesh.path))
+}
+unload_mesh :: proc(mesh: ^graphics.Mesh) {
+    graphics.delete_mesh(mesh^)
+}
 load_texture :: proc(tex: ^graphics.Texture) {
     tex^ = graphics.make_texture_from_image(file_map.read(tex.path), tex.linear)
 }
 unload_texture :: proc(tex: ^graphics.Texture) {
     graphics.delete_texture(tex^)
-}
-load_mesh :: proc(mesh: ^graphics.Mesh) {
-    //no way of reading plain mesh files (yet)
-    // TODO: add obj loader or something
 }
 import "core:fmt"
 load_material :: proc(mat: ^graphics.Material) {
@@ -137,12 +139,14 @@ unload_sound :: proc(s: ^audio.Sound) {
 }
 
 register_loaders :: proc() {
+    register_loader(load_mesh, unload_mesh)
     register_loader(load_texture, unload_texture)
     register_loader(load_material, unload_material)
     register_loader(load_scene, unload_scene)
     register_loader(load_sound, unload_sound)
 }
 unregister_loaders :: proc() {
+    delete(get_resource_map(graphics.Mesh_Key, graphics.Mesh)^) 
     delete(get_resource_map(graphics.Texture_Key, graphics.Texture)^) 
     delete(get_resource_map(graphics.Material_Key, graphics.Material)^) 
     delete(get_resource_map(graphics.Scene_Key, graphics.Scene)^) 
@@ -154,6 +158,9 @@ load_all :: proc(res: ^$T) {
     for field, i in reflect.struct_fields_zipped(T) {
         ptr := rawptr(uintptr(res) + field.offset)
         switch field.type.id {
+        case graphics.Mesh:
+            r := cast(^graphics.Mesh)(ptr)
+            load(r)
         case graphics.Texture:
             r := cast(^graphics.Texture)(ptr)
             load(r)
@@ -174,6 +181,9 @@ unload_all :: proc(res: ^$T) {
     for field, i in reflect.struct_fields_zipped(T) {
         ptr := rawptr(uintptr(res) + field.offset)
         switch field.type.id {
+        case graphics.Mesh:
+            r := cast(^graphics.Mesh)(ptr)
+            unload(r)
         case graphics.Texture:
             r := cast(^graphics.Texture)(ptr)
             unload(r)
@@ -189,4 +199,3 @@ unload_all :: proc(res: ^$T) {
         }
     }
 }
-

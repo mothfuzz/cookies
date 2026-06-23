@@ -23,7 +23,12 @@ Extents :: struct {
 
 Mesh_Hash :: distinct uintptr
 
+Mesh_Key :: struct {
+    path: cstring,
+}
+
 Mesh :: struct {
+    using key: Mesh_Key,
     size: u32,
     //buffers (currently at 8 - if we need more then we can interleave.)
     positions: wgpu.Buffer,
@@ -115,6 +120,133 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mes
     }
 
     mesh.hash = Mesh_Hash(runtime.default_hasher(&mesh, 0, size_of(Mesh)))
+    return
+}
+
+import "core:strings"
+import "core:strconv"
+make_mesh_from_file :: proc(filedata: []byte) -> (mesh: Mesh) {
+    //load .obj format
+    positions: [dynamic][3]f32
+    defer delete(positions)
+    texcoords: [dynamic][2]f32
+    defer delete(texcoords)
+    normals: [dynamic][3]f32
+
+    vertices: [dynamic]Vertex
+    defer delete(vertices)
+    Face_Vertex :: struct {
+        position: [3]f32,
+        texcoord: [2]f32,
+        normal: [3]f32,
+    }
+
+    current_index: u32 = 0
+    indices_dict: map[Face_Vertex]u32
+    defer delete(indices_dict)
+    indices: [dynamic]u32
+    defer delete(indices)
+
+    add_index :: proc(vertices: ^[dynamic]Vertex, indices_dict: ^map[Face_Vertex]u32, indices: ^[dynamic]u32, current_index: ^u32, f: Face_Vertex) {
+        f := f
+        if key, val, just_inserted, err := map_entry(indices_dict, f); err == nil {
+            if just_inserted {
+                val^ = current_index^
+                current_index^ = current_index^ + 1
+                f.texcoord.y = 1-f.texcoord.y
+                append(vertices, Vertex{position=f.position, texcoord=f.texcoord, normal=f.normal, color={1, 1, 1, 1}})
+            }
+            append(indices, val^)
+        }
+    }
+
+    it := string(filedata)
+    for line in strings.split_lines_iterator(&it) {
+        if strings.starts_with(line, "#") do continue
+        if strings.starts_with(line, "v ") {
+            v := strings.split(line[2:], " ")
+            x := strconv.parse_f32(v[0]) or_break
+            y := strconv.parse_f32(v[1]) or_break
+            z := strconv.parse_f32(v[2]) or_break
+            append(&positions, [3]f32{x, y, z})
+        }
+        if strings.starts_with(line, "vt ") {
+            vt := strings.split(line[3:], " ")
+            u := strconv.parse_f32(vt[0]) or_break
+            v: f32 = 0
+            if len(vt) > 1 {
+                v = strconv.parse_f32(vt[1]) or_break
+            }
+            append(&texcoords, [2]f32{u, v})
+        }
+        if strings.starts_with(line, "vn ") {
+            vn := strings.split(line[3:], " ")
+            x := strconv.parse_f32(vn[0]) or_break
+            y := strconv.parse_f32(vn[1]) or_break
+            z := strconv.parse_f32(vn[2]) or_break
+            append(&normals, [3]f32{x, y, z})
+        }
+        if strings.starts_with(line, "f ") {
+            f := strings.split(line[2:], " ")
+            f_v: [3]Face_Vertex
+            switch strings.count(line[2:], "/") {
+            case 0:
+                //f v v v
+                v0 := strconv.parse_uint(f[0]) or_break
+                v1 := strconv.parse_uint(f[1]) or_break
+                v2 := strconv.parse_uint(f[2]) or_break
+                fv: [3][3]f32 = {positions[v0 - 1], positions[v1 - 1], positions[v2 - 1]}
+                fvt: [3][2]f32 = 0
+                fvn: [3][3]f32
+                calculate_normals(fv[:], nil, fvn[:])
+                f_v[0] = {fv[0], fvt[0], fvn[0]}
+                f_v[1] = {fv[1], fvt[1], fvn[1]}
+                f_v[2] = {fv[2], fvt[2], fvn[2]}
+            case 3:
+                //f v/vt v/vt v/vt
+                v_vt0 := strings.split(f[0], "/")
+                v_vt1 := strings.split(f[1], "/")
+                v_vt2 := strings.split(f[2], "/")
+                v0 := strconv.parse_uint(v_vt0[0]) or_break
+                v1 := strconv.parse_uint(v_vt1[0]) or_break
+                v2 := strconv.parse_uint(v_vt2[0]) or_break
+                fv: [3][3]f32 = {positions[v0 - 1], positions[v1 - 1], positions[v2 - 1]}
+                vt0 := strconv.parse_uint(v_vt0[1]) or_break
+                vt1 := strconv.parse_uint(v_vt1[1]) or_break
+                vt2 := strconv.parse_uint(v_vt2[1]) or_break
+                fvt: [3][2]f32 = {texcoords[vt0 - 1], texcoords[vt1 - 1], texcoords[vt2 - 1]}
+                fvn: [3][3]f32
+                calculate_normals(fv[:], nil, fvn[:])
+                f_v[0] = {fv[0], fvt[0], fvn[0]}
+                f_v[1] = {fv[1], fvt[1], fvn[1]}
+                f_v[2] = {fv[2], fvt[2], fvn[2]}
+            case 6:
+                //f v/vt/vn v/vt/vn v/vt/vn
+                v_vt_vn0 := strings.split(f[0], "/")
+                v_vt_vn1 := strings.split(f[1], "/")
+                v_vt_vn2 := strings.split(f[2], "/")
+                v0 := strconv.parse_uint(v_vt_vn0[0]) or_break
+                v1 := strconv.parse_uint(v_vt_vn1[0]) or_break
+                v2 := strconv.parse_uint(v_vt_vn2[0]) or_break
+                fv: [3][3]f32 = {positions[v0 - 1], positions[v1 - 1], positions[v2 - 1]}
+                vt0 := strconv.parse_uint(v_vt_vn0[1]) or_else 0
+                vt1 := strconv.parse_uint(v_vt_vn1[1]) or_else 0
+                vt2 := strconv.parse_uint(v_vt_vn2[1]) or_else 0
+                fvt: [3][2]f32 = {vt0==0?0:texcoords[vt0 - 1], vt1==0?0:texcoords[vt1 - 1], vt2==0?0:texcoords[vt2 - 1]}
+                vn0 := strconv.parse_uint(v_vt_vn0[2]) or_break
+                vn1 := strconv.parse_uint(v_vt_vn1[2]) or_break
+                vn2 := strconv.parse_uint(v_vt_vn2[2]) or_break
+                fvn: [3][3]f32 = {normals[vn0 - 1], normals[vn1 - 1], normals[vn2 - 1]}
+                f_v[0] = {fv[0], fvt[0], fvn[0]}
+                f_v[1] = {fv[1], fvt[1], fvn[1]}
+                f_v[2] = {fv[2], fvt[2], fvn[2]}
+            }
+            add_index(&vertices, &indices_dict, &indices, &current_index, f_v[0])
+            add_index(&vertices, &indices_dict, &indices, &current_index, f_v[1])
+            add_index(&vertices, &indices_dict, &indices, &current_index, f_v[2])
+        }
+	}
+    mesh = make_mesh_from_slice(vertices[:], indices[:])
     return
 }
 
