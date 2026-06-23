@@ -7,51 +7,69 @@ import "core:time"
 
 s: actors.Stage
 
-My_Actor :: struct {
+Ping :: struct {
     using actor: actors.Actor,
-    init: proc(^My_Actor),
-    tick: proc(^My_Actor),
-    num: int,
+    init: proc(^Ping),
+    kill: proc(^Ping),
+    partner: actors.Handle,
 }
 
-My_Event :: struct {
-    i: int,
+Pong :: struct {
+    using actor: actors.Actor,
+    init: proc(^Pong),
 }
 
-my_event_handler :: proc(a: ^My_Actor, e: ^My_Event) {
-    fmt.println("received event:", e.i)
+Ping_Ball :: struct {}
+Pong_Ball :: struct {}
+
+ping_init :: proc(self: ^Ping) {
+    actors.subscribe(&s, self, ping_handler)
+    self.partner = actors.spawn(&s, Pong{init=pong_init})
 }
 
-my_init :: proc(self: ^My_Actor) {
-    fmt.println("init!")
-    actors.subscribe(&s, self, my_event_handler)
+ping_kill :: proc(self: ^Ping) {
+    //like romeo and juliet...
+    actors.kill(&s, self.partner)
 }
 
-my_tick :: proc(self: ^My_Actor) {
-    self.num = int(self.handle.idx + self.handle.gen)
-    fmt.println("tick:", self.num)
+ping_handler :: proc(self: ^Ping, e: ^Ping_Ball) {
+    fmt.println("ping:", self.handle)
+    actors.send(&s, self.partner, Pong_Ball{})
 }
+
+
+pong_init :: proc(self: ^Pong) {
+    actors.subscribe(&s, self, pong_handler)
+}
+
+pong_handler :: proc(self: ^Pong, e: ^Pong_Ball) {
+    fmt.println("pong:", self.handle)
+    //send back to ping if you want an infinite loop.
+}
+
 
 main :: proc() {
     s = actors.make_stage()
 
-    for i in 0..<200 {
-        handle := actors.spawn(&s, My_Actor{init=my_init, tick=my_tick})
-        if (i+1) % 2 == 0 {
-            actors.kill(&s, handle)
+    for i in 0..<100 {
+        ping := actors.spawn(&s, Ping{init=ping_init, kill=ping_kill})
+        //spice it up a little, kill half
+        if i % 2 == 0 {
+            actors.kill(&s, ping)
         }
     }
 
+    actors.tick(&s) //run 1 tick for spawns/kills
+    fmt.println("should be 100:", actors.count(&s))
 
-    actors.tick(&s)
-    fmt.println(actors.count(&s))
-
-    actors.publish(&s, My_Event{i=4})
+    actors.publish(&s, Ping_Ball{}) //should trigger ping_handler, then send to pong_handler next tick
 
     t0 := time.now()
+    //run 2 ticks so that any messages that get queued next tick will get processed
+    actors.tick(&s)
     actors.tick(&s)
     elapsed := time.diff(t0, time.now())
-    fmt.println("elapsed time:", elapsed)
+    fmt.println("elapsed time:", elapsed) //ironically most of this time is spent calling print
 
     actors.delete_stage(&s)
 

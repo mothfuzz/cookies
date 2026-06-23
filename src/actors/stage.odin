@@ -4,7 +4,7 @@ import hm "core:container/handle_map"
 import "base:intrinsics"
 import "core:reflect"
 
-Actor_Handle :: struct {
+Handle :: struct {
     idx: u32,
     gen: u32,
 }
@@ -16,15 +16,15 @@ Behavior :: struct(T: typeid) {
     kill: proc(^T),
 }
 
-Actor_State :: enum {
+State :: enum {
     Spawned,
     Active,
     Killed,
 }
 
 Actor :: struct {
-    using handle: Actor_Handle,
-    state: Actor_State,
+    using handle: Handle,
+    state: State,
     handle_index: int,
     user_init: proc(^Actor),
     user_tick: proc(^Actor),
@@ -35,16 +35,16 @@ Actor :: struct {
 }
 
 Actor_Ptr :: struct {
-    handle: Actor_Handle,
+    handle: Handle,
     ptr: ^Actor,
 }
 
 Stage :: struct {
-    actors: hm.Dynamic_Handle_Map(Actor_Ptr, Actor_Handle),
-    spawns: [dynamic]Actor_Handle,
-    kills: [dynamic]Actor_Handle,
+    actors: hm.Dynamic_Handle_Map(Actor_Ptr, Handle),
+    spawns: [dynamic]Handle,
+    kills: [dynamic]Handle,
     using stage_sync: Stage_Sync,
-    handles: [dynamic]Actor_Handle,
+    handles: [dynamic]Handle,
     name: string,
 
     using post_office: Post_Office,

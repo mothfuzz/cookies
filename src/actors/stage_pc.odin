@@ -22,7 +22,7 @@ work :: proc(t: thread.Task) {
     s := (^Stage)(t.data)
     starting_index := t.user_index
     ending_index := min(len(s.handles), starting_index + max(1, len(s.handles)/num_workers()))
-    fmt.println("updating actors numbered", starting_index, "-", ending_index, "in this thread")
+    //fmt.println("updating actors numbered", starting_index, "-", ending_index, "in this thread")
     for i := starting_index; i < ending_index; i += 1 {
         actor := hm.get(&s.actors, s.handles[i]).ptr
         if actor.state == .Active && actor.user_tick != nil {
@@ -92,9 +92,9 @@ process_threads :: proc(s: ^Stage) {
     pool_wait(s.pool)
 }
 
-spawn :: proc(s: ^Stage, t: $T, name: string="") -> Actor_Handle {
+spawn :: proc(s: ^Stage, t: $T, name: string="") -> Handle {
     actor := construct_actor(t, name)
-    handle: Actor_Handle
+    handle: Handle
     if sync.mutex_guard(&s.spawn_mutex) {
         handle = hm.add(&s.actors, actor)
         append(&s.spawns, handle)
@@ -103,7 +103,7 @@ spawn :: proc(s: ^Stage, t: $T, name: string="") -> Actor_Handle {
     return handle
 }
 
-kill :: proc(s: ^Stage, handle: Actor_Handle) {
+kill :: proc(s: ^Stage, handle: Handle) {
     if sync.mutex_guard(&s.kill_mutex) {
         if actor, ok := hm.get(&s.actors, handle); ok {
             actor.ptr.state = .Killed

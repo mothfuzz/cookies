@@ -31,12 +31,12 @@ Post_Office_Sync :: struct {
     unsubscribes_mutex: sync.Mutex,
 }
 
-subscribe :: proc(po: ^Post_Office, handle: Actor_Handle, handler: proc(^$A, ^$E)) {
+subscribe :: proc(po: ^Post_Office, handle: Handle, handler: proc(^$A, ^$E)) {
     if sync.mutex_guard(&po.subscribes_mutex) {
         append(&po.subscribes, construct_subscription(handle, handler))
     }
 }
-unsubscribe :: proc(po: ^Post_Office, id: Actor_Handle, $E: typeid) {
+unsubscribe :: proc(po: ^Post_Office, id: Handle, $E: typeid) {
     typename := get_event_type(E)
     if sync.mutex_guard(&po.unsubscribes_mutex) {
         append(&po.unsubscribes, Unsubscribe{typename, handle})

@@ -1,6 +1,5 @@
 package actors
 
-import "core:fmt"
 import "base:runtime"
 import "base:intrinsics"
 
@@ -22,7 +21,7 @@ Mailbox :: struct {
 @(private)
 Subscribe :: struct {
     event_type: string,
-    handle: Actor_Handle,
+    handle: Handle,
     handler: Handler,
     user_handler: rawptr,
 }
@@ -30,12 +29,12 @@ Subscribe :: struct {
 @(private)
 Unsubscribe :: struct {
     event_type: string,
-    handle: Actor_Handle,
+    handle: Handle,
 }
 
 Post_Office :: struct {
-    routes: map[string]map[Actor_Handle]^Mailbox, //must be pointer because queue_mutex must not change location
-    subscriptions: map[Actor_Handle]map[string]struct{},
+    routes: map[string]map[Handle]^Mailbox, //must be pointer because queue_mutex must not change location
+    subscriptions: map[Handle]map[string]struct{},
     subscribes: [dynamic]Subscribe,
     unsubscribes: [dynamic]Unsubscribe,
     using post_office_sync: Post_Office_Sync,
@@ -66,7 +65,7 @@ get_event_type :: proc($E: typeid) -> string {
 }
 
 @(private)
-unsubscribe_all :: proc(po: ^Post_Office, handle: Actor_Handle) {
+unsubscribe_all :: proc(po: ^Post_Office, handle: Handle) {
     for event_type, &route in po.routes {
         if mailbox, ok := route[handle]; ok {
             //no need for mutex because this happens upon actor death
@@ -76,7 +75,7 @@ unsubscribe_all :: proc(po: ^Post_Office, handle: Actor_Handle) {
 }
 
 @(private)
-construct_subscription :: proc(handle: Actor_Handle, handler: proc(^$A, ^$E)) -> Subscribe {
+construct_subscription :: proc(handle: Handle, handler: proc(^$A, ^$E)) -> Subscribe {
     typename := get_event_type(E)
     user_handler := rawptr(handler)
     handler := proc(mailbox: ^Mailbox, a: ^Actor, e: ^Event) {
@@ -91,7 +90,7 @@ construct_subscription :: proc(handle: Actor_Handle, handler: proc(^$A, ^$E)) ->
 @(private)
 process_subscriptions :: proc(po: ^Post_Office) {
     for subscribe in po.subscribes {
-        route := po.routes[subscribe.event_type] or_else map[Actor_Handle]^Mailbox{}
+        route := po.routes[subscribe.event_type] or_else map[Handle]^Mailbox{}
         if mailbox, ok := route[subscribe.handle]; ok {
             delete(mailbox.queue)
             delete(mailbox.inbox)
@@ -139,7 +138,7 @@ publish :: proc(stage: ^Stage, event: $E) {
     }
 }
 
-send :: proc(stage: ^Stage, handle: Actor_Handle, event: $E) {
+send :: proc(stage: ^Stage, handle: Handle, event: $E) {
     typename := get_event_type(E)
     if route, ok := &stage.routes[typename]; ok {
         if mailbox, ok := route[handle]; ok {

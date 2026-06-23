@@ -2,8 +2,6 @@
 
 package actors
 
-import "core:fmt"
-
 Mailbox_Sync :: struct {}
 
 @(private)
@@ -22,10 +20,10 @@ buffer_events :: proc(m: ^Mailbox) {
 
 Post_Office_Sync :: struct {}
 
-subscribe :: proc(po: ^Post_Office, handle: Actor_Handle, handler: proc(^$A, ^$E)) {
+subscribe :: proc(po: ^Post_Office, handle: Handle, handler: proc(^$A, ^$E)) {
     append(&po.subscribes, construct_subscription(handle, handler))
 }
-unsubscribe :: proc(po: ^Post_Office, handle: Actor_Handle, $E: typeid) {
+unsubscribe :: proc(po: ^Post_Office, handle: Handle, $E: typeid) {
     typename := get_event_type(E)
     append(&po.subscribes, Subscribe{typename, handle})
 }

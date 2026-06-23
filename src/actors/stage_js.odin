@@ -27,7 +27,7 @@ process_threads :: proc(s: ^Stage) {
     }
 }
 
-spawn :: proc(s: ^Stage, t: $T, name: string="") -> Actor_Handle {
+spawn :: proc(s: ^Stage, t: $T, name: string="") -> Handle {
     actor := construct_actor(t, name)
     handle := hm.add(&s.actors, actor)
     append(&s.spawns, handle)
@@ -35,7 +35,7 @@ spawn :: proc(s: ^Stage, t: $T, name: string="") -> Actor_Handle {
     return handle
 }
 
-kill :: proc(s: ^Stage, handle: Actor_Handle) {
+kill :: proc(s: ^Stage, handle: Handle) {
     if actor, ok := hm.get(&s.actors, handle); ok {
         actor.ptr.state = .Killed
         append(&s.kills, handle)
