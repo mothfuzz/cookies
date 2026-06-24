@@ -253,7 +253,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         },
         primitive = {
             topology = .TriangleList,
-            cullMode = .None,
+            cullMode = .Back,
             frontFace = .CCW,
         },
         depthStencil = &{
@@ -321,7 +321,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         },
         primitive = {
             topology = .TriangleList,
-            cullMode = .None,
+            cullMode = .Back,
             frontFace = .CCW,
         },
         depthStencil = &{
@@ -398,8 +398,8 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         },
         primitive = {
             topology = .TriangleList,
-            cullMode = .None,
-            frontFace = .CCW,
+            cullMode = .Back,
+            frontFace = .CW,
         },
         depthStencil = nil,
         multisample = {

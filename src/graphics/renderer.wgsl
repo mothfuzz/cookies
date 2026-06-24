@@ -325,7 +325,8 @@ fn trans_main(in: VSOut) -> TransOut {
     let weight = max(min(1.0, most_color * final_color.a), final_color.a) *
         clamp(0.03 / (1e-5 + pow(in.position.z / 200, 4.0)), 1e-2, 3e3);
 
-    out.accum = vec4<f32>(final_color.rgb, final_color.a) * weight;
+    out.accum = vec4<f32>(final_color.rgb * final_color.a, final_color.a) * weight;
+    out.accum = clamp(out.accum, vec4<f32>(-1e4), vec4<f32>(1e4)); //prevent accum saturation
     out.revealage = final_color.a;
 
     return out;
