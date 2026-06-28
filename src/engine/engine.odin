@@ -54,6 +54,7 @@ boot_with :: proc($T: typeid, init: proc(^T), tick: proc(^T), draw: proc(^T, f64
         proc() {
             boot_state := cast(^Boot_State(T))(boot_state)
             if boot_state.quit != nil do boot_state->quit()
+            free(boot_state)
         },
     )
 }
