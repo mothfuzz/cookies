@@ -200,6 +200,38 @@ z_2d :: proc(cam: Camera) -> f32 {
     return linalg.sqrt(linalg.pow(height, 2) - linalg.pow(height/2.0, 2))
 }
 
+//returns the minimum z-value you can offset sprites so that they will be depth-sorted but not visibly scaled by perspective (within tolerance)
+MAX_Z_LAYERS :: 16 //conservative
+PERSPECTIVE_SCALE_TOLERANCE :: 0.01 //maximum scale offset at max layer (0.01 should be invisible at most resolutions)
+DEPTH_PADDING :: 2.0 //padding to avoid z-fighting
+@(export)
+z_min_step :: proc(cam: Camera, num_layers: int = MAX_Z_LAYERS) -> f32 {
+    d := z_2d(cam)
+    near := cam.near if cam.near != 0 else screen_uniforms.size[2]
+    far := cam.far if cam.far != -1 else screen_uniforms.size[3]
+
+    depth_precision :: f32(1 << 24) //number of distinct values in depth buffer
+    depth_quant: f32 //minimum epsilon given precision & perspective matrix
+    if far == 0 {
+        //infinite perspective
+        depth_quant = (d*d)/(near*depth_precision)
+    } else {
+        //finite
+        depth_quant = (d*d*(far - near))/(near*far*depth_precision)
+    }
+    depth_epsilon := depth_quant * DEPTH_PADDING
+    scale_epsilon := (d * PERSPECTIVE_SCALE_TOLERANCE) / f32(num_layers)
+    //depth buffer usually gives us lots of values to work with
+    //for reasonable layer counts, depth quantum should win
+    //for low depth precision or extremely high layer counts, scale epsilon would win (and likely result in z-fighting)
+    return min(scale_epsilon, max(depth_epsilon, 1e-4))
+}
+
+@(export)
+z_layer :: proc(cam: Camera, layer: int, num_layers: int = MAX_Z_LAYERS) -> f32 {
+    return f32(layer) * z_min_step(cam, num_layers) 
+}
+
 bounds_in_frustum :: proc(cam: Camera, bounding_box: [8][4]f32) -> bool {
     //need to check if all planes are passing (i.e. at least one point is inside)
     passing: [6]bool = false
