@@ -20,11 +20,11 @@ Sprites_Example :: struct {
 
 init :: proc(s: ^Sprites_Example) {
     window.set_size(500, 500)
-    graphics.set_background_color({0.5, 0.2, 0.8})
 
     s.frasier_tex = graphics.make_texture_from_image(#load("../resources/frasier.png"))
     s.frasier_mat = graphics.make_material(base_color=s.frasier_tex)
     s.camera = graphics.make_camera()
+    graphics.set_background_color(&s.camera, {0.5, 0.2, 0.8})
 
     s.tree = transform.make_tree()
     s.frasier_trans = transform.create_node(&s.tree)
@@ -76,7 +76,7 @@ tick :: proc(s: ^Sprites_Example) {
 }
 
 draw :: proc(s: ^Sprites_Example, alpha, delta: f64) {
-    graphics.draw_camera(&s.camera, transform.get_world_smooth(&s.tree, s.camera_trans, alpha))
+    graphics.draw_camera(s.camera, transform.get_world_smooth(&s.tree, s.camera_trans, alpha))
     graphics.draw_sprite(s.frasier_mat, transform.get_world_smooth(&s.tree, s.frasier_trans, alpha)) //draw a single frasier in the center of the screen
 }
 

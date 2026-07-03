@@ -1,14 +1,10 @@
-struct Screen {
-    size: vec4<f32>, //width, height, near plane, far plane
-    color: vec4<f32>, //rgb, fog starting distance
-}
-@group(0) @binding(0) var<uniform> screen: Screen;
-
 struct Camera {
     view: mat4x4<f32>,
     projection: mat4x4<f32>,
+    color: vec4<f32>, //rgb + exposure
+    fog_distance: vec2<f32>, //fog onset + render distance
 }
-@group(0) @binding(1) var<uniform> camera: Camera;
+@group(0) @binding(0) var<uniform> camera: Camera;
 
 
 @group(1) @binding(0) var smp: sampler;
@@ -272,36 +268,30 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
 }
 
 fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
-    var final_color = in_color;
-    let near = select(screen.size[2], 0.1, screen.size[2] == 0);
-    let far = select(screen.size[3], 2048.0, screen.size[3] == 0);
-    let fog_max = far;
-    var fog_min = screen.color[3];
-    if fog_min == 0.0 {
-        fog_min = (far - near)*0.5; //fog starts at halfway by default
+    if camera.fog_distance[1] == 0 {
+        return in_color;
     }
+    var final_color = in_color;
+    let fog_max = camera.fog_distance[1];
+    var fog_min = camera.fog_distance[0];
     let dist = abs(in_position.z / in_position.w);
     let fog_factor = clamp((fog_max - dist) / (fog_max - fog_min), 0, 1);
-    var fog_color = vec4<f32>(screen.color.rgb, final_color.a);
+    var fog_color = vec4<f32>(camera.color.rgb, final_color.a);
     final_color = mix(fog_color, final_color, fog_factor);
     return final_color;
 }
 
-
-
 @fragment
 fn solid_main(in: VSOut) -> @location(0) vec4<f32> {
     let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint;
-    let screen_color = vec4<f32>(in.position.x/screen.size.x, in.position.y/screen.size.y, 1.0, 1.0);
-    let color = mix(in.color, screen_color, 0.0);
-    var final_color = base_color * color;
+    var final_color = base_color;
     if final_color.a < 0.9 {
         discard;
     }
     final_color = apply_lights(in, final_color);
     final_color = apply_fog(in.position, final_color);
 
-    return final_color;
+    return final_color * camera.color.a;
 }
 
 struct TransOut {
@@ -320,6 +310,7 @@ fn trans_main(in: VSOut) -> TransOut {
     final_color = apply_lights(in, final_color);
     final_color = apply_fog(in.position, final_color);
     //final_color.a = base_color.a;
+    final_color = vec4<f32>(final_color.rgb * camera.color.a, final_color.a);
 
     let most_color = max(max(final_color.r, final_color.g), final_color.b);
     let weight = max(min(1.0, most_color * final_color.a), final_color.a) *

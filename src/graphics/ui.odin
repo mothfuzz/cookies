@@ -148,8 +148,8 @@ draw_ui :: proc(fill_rect: [4]f32, color: [4]f32, texture: Texture, clip_rect: [
 
 //0,0 is center, rect is -1:1 xywh, clip_rect is xywh, 0:w & 0:h of texture
 ui_draw_rect :: proc(rect: [4]f32, color: [4]f32 = 1, texture: Texture = white_tex, clip_rect: [4]f32 = 0) {
-    sx := screen_uniforms.size.x/2
-    sy := screen_uniforms.size.y/2
+    sx := f32(screen_resolution.x)/2
+    sy := f32(screen_resolution.y)/2
     fill_rect := [4]f32{
         rect[0]/sx,
         rect[1]/sy,
@@ -189,8 +189,8 @@ render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder
     })
 
     wgpu.RenderPassEncoderSetPipeline(render_pass, ui_pipeline)
-    wgpu.RenderPassEncoderSetViewport(render_pass, 0, 0, screen_uniforms.size.x, screen_uniforms.size.y, 0, 1)
-    wgpu.RenderPassEncoderSetScissorRect(render_pass, 0, 0, u32(screen_uniforms.size.x), u32(screen_uniforms.size.y))
+    wgpu.RenderPassEncoderSetViewport(render_pass, 0, 0, f32(screen_resolution.x), f32(screen_resolution.y), 0, 1)
+    wgpu.RenderPassEncoderSetScissorRect(render_pass, 0, 0, u32(screen_resolution.x), u32(screen_resolution.y))
 
     //fmt.println("rendering ui batch...")
     for tex, &batch in ui_batches {

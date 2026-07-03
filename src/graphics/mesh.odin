@@ -467,7 +467,7 @@ calculate_mesh_local :: proc(instance: ^Mesh_Draw, mesh: Mesh, material: Materia
 
 //calculates world mesh data (aka the modelview)
 //assumes local data already calculated
-calculate_mesh_world :: proc(instance: ^Mesh_Draw, cam: Camera) {
+calculate_mesh_world :: proc(instance: ^Mesh_Draw, cam: Camera_Draw) {
     if instance.is_billboard {
         rotation_scale := cast(matrix[3,3]f32)(instance.transform) //isolate untransformed rotation/scale
         instance.transform = cam.view * instance.transform; //transform to camera...

@@ -20,6 +20,7 @@ Renderer :: struct {
     queue: wgpu.Queue,
     shader: wgpu.ShaderModule,
     composite_shader: wgpu.ShaderModule,
+    camera_fill_shader: wgpu.ShaderModule,
     layout: wgpu.PipelineLayout,
     solid_pipeline: wgpu.RenderPipeline,
     trans_pipeline: wgpu.RenderPipeline,
@@ -28,6 +29,8 @@ Renderer :: struct {
     composite_bind_group_layout: wgpu.BindGroupLayout,
     composite_bind_group: wgpu.BindGroup,
     composite_sampler: wgpu.Sampler,
+    camera_fill_layout: wgpu.PipelineLayout,
+    camera_fill_pipeline: wgpu.RenderPipeline,
     using shadows: Shadow_Renderer,
     ready: bool,
 }
@@ -56,13 +59,14 @@ without_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
     }
 }
 
+screen_resolution: [2]uint
+
 tex_format: wgpu.TextureFormat
 view_format: wgpu.TextureFormat
 configure_surface :: proc(size: [2]uint = 0) {
     if size != 0 {
-        screen_uniforms.size.xy = {f32(size.x), f32(size.y)}
+        screen_resolution = size
     }
-
     fmt.println("reconfiguring draw surface...")
     caps, status := wgpu.SurfaceGetCapabilities(ren.surface, ren.adapter)
     if status == .Error {
@@ -89,8 +93,8 @@ configure_surface :: proc(size: [2]uint = 0) {
         format = tex_format,
         viewFormatCount = 1,
         viewFormats = &view_format,
-        width = u32(screen_uniforms.size.x),
-        height = u32(screen_uniforms.size.y),
+        width = u32(screen_resolution.x),
+        height = u32(screen_resolution.y),
         presentMode = presentMode,
         alphaMode = .Opaque,
     }
@@ -195,6 +199,13 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         },
     })
 
+    ren.camera_fill_shader = wgpu.DeviceCreateShaderModule(ren.device, &{
+        nextInChain = &wgpu.ShaderSourceWGSL{
+            sType = .ShaderSourceWGSL,
+            code = #load("camera_fill.wgsl"),
+        },
+    })
+
     //bind group layouts
     camera_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(camera_layout_entries),
@@ -220,9 +231,6 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         bindGroupLayoutCount = len(bind_group_layouts),
         bindGroupLayouts = raw_data(bind_group_layouts),
     })
-
-    //create uniform buffers/bind group up front
-    screen_uniforms_buffer = wgpu.DeviceCreateBuffer(device, &{usage={.Uniform, .CopyDst}, size=size_of(Screen_Uniforms)})
 
     //vertex data
     vertex_buffers := []wgpu.VertexBufferLayout{
@@ -416,12 +424,52 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         addressModeV=.ClampToEdge,
     })
 
+    fmt.println("creating clear pipeline...")
+    camera_fill_layout_entries := []wgpu.BindGroupLayoutEntry{
+        wgpu.BindGroupLayoutEntry{
+            binding = 0,
+            visibility = {.Fragment},
+            buffer = {type = .Uniform}
+        }
+    }
+    ren.camera_fill_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
+        bindGroupLayoutCount = 1,
+        bindGroupLayouts = &camera_layout,
+    })
+    ren.camera_fill_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+        label = "camera_fill",
+        layout = ren.camera_fill_layout,
+        vertex = {
+            module = ren.camera_fill_shader,
+            entryPoint = "vs_main",
+            bufferCount = 0,
+        },
+        fragment = &{
+            module = ren.camera_fill_shader,
+            entryPoint = "fs_main",
+            targetCount = 1,
+            targets = &wgpu.ColorTargetState{
+                format = with_srgb(ren.config.format),
+                writeMask = wgpu.ColorWriteMaskFlags_All,
+            },
+        },
+        primitive = {
+            topology = .TriangleList,
+            cullMode = .Back,
+            frontFace = .CW,
+        },
+        depthStencil = nil,
+        multisample = {
+            count = 4,
+            mask = 0xffffffff,
+        },
+    })
+
     fmt.println("creating shadow renderer...")
     init_shadows()
 
     fmt.println("setting up render targets...")
     configure_render_targets()
-
 
     init_defaults()
     init_ui()
@@ -435,7 +483,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
 
 ctx: runtime.Context
 init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
-    screen_uniforms.size.xy = {f32(size.x), f32(size.y)}
+    screen_resolution = size
     ren.instance = wgpu.CreateInstance(nil)
     if ren.instance == nil {
         panic("WebGPU not supported.")
@@ -457,7 +505,11 @@ quit :: proc() {
     wgpu.BindGroupLayoutRelease(ren.composite_bind_group_layout)
     wgpu.BindGroupRelease(ren.composite_bind_group)
     wgpu.SamplerRelease(ren.composite_sampler)
+    wgpu.RenderPipelineRelease(ren.camera_fill_pipeline)
+    wgpu.PipelineLayoutRelease(ren.camera_fill_layout)
     wgpu.ShaderModuleRelease(ren.shader)
+    wgpu.ShaderModuleRelease(ren.composite_shader)
+    wgpu.ShaderModuleRelease(ren.camera_fill_shader)
     wgpu.TextureViewRelease(ren.msaa_view)
     wgpu.TextureRelease(ren.msaa_tex)
     delete_texture(ren.depth_buffer)
@@ -475,7 +527,7 @@ quit :: proc() {
 
 Frame :: struct {
     lights: [dynamic]Light_Draw,
-    cameras: [dynamic]Camera,
+    cameras: [dynamic]Camera_Draw,
     action: map[Material_Hash]map[Mesh_Hash][dynamic]Mesh_Draw,
     //resources
     meshes: map[Mesh_Hash]Mesh,
@@ -529,9 +581,8 @@ draw_spot_light :: proc(light: Spot_Light, trans: matrix[4,4]f32 = 1) {
 draw_light :: proc{draw_point_light, draw_directional_light, draw_spot_light}
 
 @(export)
-draw_camera :: proc(camera: ^Camera, trans: matrix[4,4]f32 = 1) {
-    calculate_camera(camera, trans) //don't need to defer this one
-    append(&frame.cameras, camera^)
+draw_camera :: proc(camera: Camera, trans: matrix[4,4]f32 = 1) {
+    append(&frame.cameras, calculate_camera(camera, trans)) //compute once, don't defer
 }
 
 @(export)
@@ -634,7 +685,7 @@ Draw_Call :: struct {
 
 //embarassingly parallel.
 @(private)
-compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera) -> []Draw_Call {
+compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera_Draw) -> []Draw_Call {
     draws := make([dynamic]Draw_Call)
     for batch, i in batches {
         trans := batch.mesh.is_trans || batch.material.base_color_tex.is_trans
@@ -815,9 +866,9 @@ render_frame :: proc() {
             })
             wgpu.RenderPassEncoderSetPipeline(shadow_pass, ren.shadow_pipeline)
 
-            calculate_camera(&spot_light.shadow_camera)
-            bind_camera(shadow_pass, 0, spot_light.shadow_camera)
-            draws := compute_draw_calls(batches, spot_light.shadow_camera)
+            camera := lights.spot_light_shadow_cameras[i]
+            bind_camera(shadow_pass, 0, camera)
+            draws := compute_draw_calls(batches, camera)
             defer delete_draw_calls(draws)
             execute_draw_calls(shadow_pass, draws)
 
@@ -836,9 +887,7 @@ render_frame :: proc() {
             loadOp = .Clear,
             storeOp = .Store,
             depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = [4]f64{f64(screen_uniforms.color.r),
-                                f64(screen_uniforms.color.g),
-                                f64(screen_uniforms.color.b), 1.0},
+            clearValue = {0, 0, 0, 1},
         },
         depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
             view = ren.depth_buffer.view,
@@ -891,7 +940,31 @@ render_frame :: proc() {
 
     //next get started going through the current frame's render batches & actuall drawing them...
 
+    //start with a fill pass for each camera marked 'fill'
+    camera_fill_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+        label = "camera_fill",
+        colorAttachmentCount = 1,
+        colorAttachments = &wgpu.RenderPassColorAttachment{
+            view = ren.msaa_view,
+            resolveTarget = screen,
+            loadOp = .Load,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+        },
+    })
+    wgpu.RenderPassEncoderSetPipeline(camera_fill_pass, ren.camera_fill_pipeline)
     for camera in frame.cameras {
+        if !camera.fill do continue
+        wgpu.RenderPassEncoderSetBindGroup(camera_fill_pass, 0, camera.bind_group)
+        x, y, w, h := expand_values(camera.viewport)
+        wgpu.RenderPassEncoderSetViewport(camera_fill_pass, x, y, w, h, 0, 1)
+        wgpu.RenderPassEncoderSetScissorRect(camera_fill_pass, u32(x), u32(y), u32(w), u32(h))
+        wgpu.RenderPassEncoderDraw(camera_fill_pass, 3, 1, 0, 0)
+    }
+    wgpu.RenderPassEncoderEnd(camera_fill_pass)
+    wgpu.RenderPassEncoderRelease(camera_fill_pass)
+
+    for &camera in frame.cameras {
 
         //gather all draw calls...
         all_draws := compute_draw_calls(batches, camera)
