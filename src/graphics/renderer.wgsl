@@ -35,10 +35,18 @@ struct SpotLight {
     view_to_shadow: mat4x4<f32>,
 }
 @group(3) @binding(2) var<storage, read> spot_lights: array<SpotLight>;
-@group(3) @binding(3) var shadow_depth_sampler: sampler_comparison;
-@group(3) @binding(4) var shadow_color_sampler: sampler;
-@group(3) @binding(5) var spot_light_shadow_depth: texture_depth_2d_array;
-@group(3) @binding(6) var spot_light_shadow_color: texture_2d_array<f32>;
+
+struct LightCount {
+    point: u32,
+    directional: u32,
+    spot: u32,
+    total: u32,
+}
+@group(3) @binding(3) var<uniform> light_count: LightCount;
+@group(3) @binding(4) var shadow_depth_sampler: sampler_comparison;
+@group(3) @binding(5) var shadow_color_sampler: sampler;
+@group(3) @binding(6) var spot_light_shadow_depth: texture_depth_2d_array;
+@group(3) @binding(7) var spot_light_shadow_color: texture_2d_array<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -56,6 +64,7 @@ struct Vertex {
     @location(12) base_color_tint: vec4<f32>,
     @location(13) pbr_tint: vec4<f32>, //ambient, metallic, roughness
     @location(14) emissive_tint: vec4<f32>, //rgb
+    //@location(15) skeleton_offset: vec4<u32>, //the last one we have... use it wisely
 }
 
 struct VSOut {
@@ -176,15 +185,8 @@ fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: v
 
 fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
     var final_color = in_color;
-    var lights: bool = true;
-    if arrayLength(&point_lights) == 1 && point_lights[0].color.a == 0 &&
-        arrayLength(&directional_lights) == 1 && directional_lights[0].color.a == 0 &&
-        arrayLength(&spot_lights) == 1 && spot_lights[0].color.a == 0 {
-        //if all lights are default lights, render fullbright
-        lights = false;
-    }
 
-    if lights {
+    if light_count.total > 0 {
         let pbr = textureSample(pbr, smp, in.texcoord);// * in.pbr_tint;
         let ambient_occlusion = pbr.r;
         let roughness = pbr.g;
@@ -203,7 +205,7 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
 
         let ambient_color = vec3<f32>(0.03) * final_color.rgb * ambient_occlusion; //initial ambient value
         var light = ambient_color * final_color.a;
-        for (var i: u32 = 0; i < arrayLength(&point_lights); i++) {
+        for (var i: u32 = 0; i < light_count.point; i++) {
             let l = normalize(point_lights[i].position.xyz - in.position.xyz);
 
             let d = distance(in.position.xyz, point_lights[i].position.xyz);
@@ -216,13 +218,13 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
                 light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
             }
         }
-        for (var i: u32 = 0; i < arrayLength(&directional_lights); i++) {
+        for (var i: u32 = 0; i < light_count.directional; i++) {
             let l = normalize(-directional_lights[i].direction.xyz);
             let radiance = directional_lights[i].color.rgb * directional_lights[i].color.a;
             //light += calculate_influence_phong(n, v, l, radiance);
             light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
         }
-        for (var i: u32 = 0; i < arrayLength(&spot_lights); i++) {
+        for (var i: u32 = 0; i < light_count.spot; i++) {
             if(spot_lights[i].color.a == 0) {
                 continue;
             }

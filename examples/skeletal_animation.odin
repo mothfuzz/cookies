@@ -25,15 +25,15 @@ brainstem2_anim: graphics.Animation_State
 init :: proc() {
     window.set_size(800, 800)
 
-    graphics.set_background_color({1, 0, 1})
-    graphics.set_render_distance(0)
-    graphics.set_fog_distance(0)
-
     tree = transform.make_tree()
 
     cam = graphics.make_camera()
+    graphics.set_background_color(&cam, {1, 0, 1})
+    //graphics.set_render_distance(0)
+    //graphics.set_fog_distance(0)
     graphics.look_at(&cam, {0, 0, 10}, {0, 0, 0})
 
+    //light = graphics.make_directional_light({0.6, 0.4, 0}, {1, 0, 0, 10})
     light = graphics.make_directional_light({0.6, 0.4, 0}, {1, 0, 0, 10})
     
     brainstem = graphics.make_scene_from_file("BrainStem.gltf", #load("../resources/BrainStem.gltf"), &tree)
@@ -84,7 +84,7 @@ tick :: proc() {
 }
 
 draw :: proc(a: f64, dt: f64) {
-    graphics.draw_camera(&cam)
+    graphics.draw_camera(cam)
     graphics.draw_scene(brainstem, a, dt, &brainstem_anim)
     graphics.draw_scene(brainstem2, a, dt, &brainstem2_anim)
     graphics.draw_light(light)

@@ -73,46 +73,61 @@ lights_layout_entries := []wgpu.BindGroupLayoutEntry{
     wgpu.BindGroupLayoutEntry{
         binding = 0,
         visibility = {.Fragment},
-        buffer = {type=.ReadOnlyStorage},
+        buffer = {type=.ReadOnlyStorage, hasDynamicOffset = true},
     },
     //directional lights
     wgpu.BindGroupLayoutEntry{
         binding = 1,
         visibility = {.Fragment},
-        buffer = {type=.ReadOnlyStorage},
+        buffer = {type=.ReadOnlyStorage, hasDynamicOffset = true},
     },
     //spot lights
     wgpu.BindGroupLayoutEntry{
         binding = 2,
         visibility = {.Fragment},
-        buffer = {type=.ReadOnlyStorage},
+        buffer = {type=.ReadOnlyStorage, hasDynamicOffset = true},
+    },
+    //light count
+    wgpu.BindGroupLayoutEntry{
+        binding = 3,
+        visibility = {.Fragment},
+        buffer = {type=.Uniform},
     },
     //shadow depth sampler (must be Comparison for textureSampleCompare in WGSL)
     wgpu.BindGroupLayoutEntry{
-        binding = 3,
+        binding = 4,
         visibility = {.Fragment},
         sampler = {type = .Comparison}
     },
     //shadow color sampler
     wgpu.BindGroupLayoutEntry{
-        binding = 4,
+        binding = 5,
         visibility = {.Fragment},
         sampler = {type = .NonFiltering}
     },
     //spot light depth shadows
     wgpu.BindGroupLayoutEntry{
-        binding = 5,
+        binding = 6,
         visibility = {.Fragment},
         texture = {sampleType = .Depth, viewDimension = ._2DArray, multisampled=false},
     },
     //spot light color shadows
     wgpu.BindGroupLayoutEntry{
-        binding = 6,
+        binding = 7,
         visibility = {.Fragment},
         texture = {sampleType = .Float, viewDimension = ._2DArray, multisampled=false},
     },
 }
 lights_layout: wgpu.BindGroupLayout
+
+Light_Count :: struct {
+    point: u32,
+    directional: u32,
+    spot: u32,
+    total: u32,
+}
+light_count_buffer: wgpu.Buffer
+light_count_buffer_init: bool
 
 
 POINT_LIGHT_SHADOW_MAP_RES :: 1024
@@ -250,16 +265,18 @@ calculate_lights :: proc(lights: []Light_Draw) -> Lights {
             }
         }
     }
-    //make sure buffers are non-zero, add default lights with zero influence
-    if len(point_lights) == 0 {
-        append(&point_lights, Point_Light{color=0})
+
+    light_count := Light_Count{
+        point = u32(len(point_lights)),
+        directional = u32(len(directional_lights)),
+        spot = u32(len(spot_lights)),
+        total = u32(len(point_lights) + len(directional_lights) + len(spot_lights))
     }
-    if len(directional_lights) == 0 {
-        append(&directional_lights, Directional_Light{color=0})
+    if !light_count_buffer_init {
+        light_count_buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage = {.Uniform, .CopyDst}, size = size_of(Light_Count)})
+        light_count_buffer_init = true
     }
-    if len(spot_lights) == 0 {
-        append(&spot_lights, Spot_Light{color=0})
-    }
+    wgpu.QueueWriteBuffer(ren.queue, light_count_buffer, 0, &light_count, size_of(Light_Count))
 
     //create textures
     if u32(num_spot_lights_shadows) > wgpu.TextureGetDepthOrArrayLayers(ren.spot_light_shadow_depth.image) {
@@ -328,34 +345,114 @@ delete_lights_uniforms :: proc(lights: Lights_Uniforms) {
     delete(lights.spot_lights)
 }
 
+light_bind_group: wgpu.BindGroup
+light_bind_group_created: bool
 
-bind_lights :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, lights: Lights_Uniforms) {
-    //lights := lights
+Light_Buffer :: struct {
+    size_aligned: int,
+    capacity: int,
+    buffer: wgpu.Buffer,
+}
 
-    point_lights_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Storage}}, lights.point_lights)
-    defer wgpu.BufferRelease(point_lights_buffer)
+pl_buffer, dl_buffer, sl_buffer: Light_Buffer
 
-    directional_lights_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Storage}}, lights.directional_lights)
-    defer wgpu.BufferRelease(directional_lights_buffer)
+import "base:runtime"
 
-    spot_lights_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Storage}}, lights.spot_lights)
-    defer wgpu.BufferRelease(spot_lights_buffer)
+//since lights are buffered per-camera we need to offset them so that queueWriteBuffer doesn't overwrite.
+realloc_light_buffers :: proc(lights: Lights, num_cameras: int) {
+    p_size := len(lights.point_lights) * size_of(Point_Light_Uniforms)
+    d_size := len(lights.directional_lights) * size_of(Directional_Light_Uniforms)
+    s_size := len(lights.spot_lights) * size_of(Spot_Light_Uniforms)
 
-    bindings := []wgpu.BindGroupEntry{
-        {binding = 0, buffer=point_lights_buffer, size=size_of(Point_Light_Uniforms)*u64(len(lights.point_lights))},
-        {binding = 1, buffer=directional_lights_buffer, size=size_of(Directional_Light_Uniforms)*u64(len(lights.directional_lights))},
-        {binding = 2, buffer=spot_lights_buffer, size=size_of(Spot_Light_Uniforms)*u64(len(lights.spot_lights))},
-        {binding = 3, sampler=ren.shadow_depth_sampler},
-        {binding = 4, sampler=ren.shadow_color_sampler},
-        {binding = 5, textureView=ren.spot_light_shadow_depth.view},
-        {binding = 6, textureView=ren.spot_light_shadow_color.view},
+    rebind := false
+    p_min_size := max(storage_alignment, size_of(Point_Light_Uniforms))
+    p_size_aligned := max(runtime.align_forward(p_size, storage_alignment), p_min_size)
+    d_min_size := max(storage_alignment, size_of(Directional_Light_Uniforms))
+    d_size_aligned := max(runtime.align_forward(d_size, storage_alignment), d_min_size)
+    s_min_size := max(storage_alignment, size_of(Spot_Light_Uniforms))
+    s_size_aligned := max(runtime.align_forward(s_size, storage_alignment), s_min_size)
+    if p_size_aligned != pl_buffer.size_aligned ||
+        d_size_aligned != dl_buffer.size_aligned ||
+        s_size_aligned != sl_buffer.size_aligned {
+            rebind = true
+        }
+    pl_buffer.size_aligned = p_size_aligned
+    dl_buffer.size_aligned = d_size_aligned
+    sl_buffer.size_aligned = s_size_aligned
+
+    if pl_buffer.size_aligned * num_cameras > pl_buffer.capacity {
+        if pl_buffer.capacity > 0 {
+            wgpu.BufferRelease(pl_buffer.buffer)
+        }
+        pl_buffer.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage = {.Storage, .CopyDst}, size = u64(pl_buffer.size_aligned * num_cameras)})
+        pl_buffer.capacity = int(wgpu.BufferGetSize(pl_buffer.buffer))
+        rebind = true
     }
-    light_bind_group := wgpu.DeviceCreateBindGroup(ren.device, &{
-        layout = lights_layout,
-        entryCount = len(bindings),
-        entries = raw_data(bindings),
-    })
-    defer wgpu.BindGroupRelease(light_bind_group)
+    if dl_buffer.size_aligned * num_cameras > dl_buffer.capacity {
+        if dl_buffer.capacity > 0 {
+            wgpu.BufferRelease(dl_buffer.buffer)
+        }
+        dl_buffer.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage = {.Storage, .CopyDst}, size = u64(dl_buffer.size_aligned * num_cameras)})
+        dl_buffer.capacity = int(wgpu.BufferGetSize(dl_buffer.buffer))
+        rebind = true
+    }
+    if sl_buffer.size_aligned * num_cameras > sl_buffer.capacity {
+        if sl_buffer.capacity > 0 {
+            wgpu.BufferRelease(sl_buffer.buffer)
+        }
+        sl_buffer.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage = {.Storage, .CopyDst}, size = u64(sl_buffer.size_aligned * num_cameras)})
+        sl_buffer.capacity = int(wgpu.BufferGetSize(sl_buffer.buffer))
+        rebind = true
+    }
 
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, light_bind_group)
+    if rebind {
+        if light_bind_group_created {
+            wgpu.BindGroupRelease(light_bind_group)
+        }
+        bindings := []wgpu.BindGroupEntry{
+            {binding = 0, buffer = pl_buffer.buffer, size = u64(pl_buffer.size_aligned * num_cameras)},
+            {binding = 1, buffer = dl_buffer.buffer, size = u64(dl_buffer.size_aligned * num_cameras)},
+            {binding = 2, buffer = sl_buffer.buffer, size = u64(sl_buffer.size_aligned * num_cameras)},
+            {binding = 3, buffer = light_count_buffer, size = u64(size_of(Light_Count))},
+            {binding = 4, sampler=ren.shadow_depth_sampler},
+            {binding = 5, sampler=ren.shadow_color_sampler},
+            {binding = 6, textureView=ren.spot_light_shadow_depth.view},
+            {binding = 7, textureView=ren.spot_light_shadow_color.view},
+        }
+        light_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+            layout = lights_layout,
+            entryCount = len(bindings),
+            entries = raw_data(bindings),
+        })
+        light_bind_group_created = true
+    }
+}
+
+write_light_buffers :: proc(lights: Lights, cameras: []Camera_Draw) {
+    realloc_light_buffers(lights, len(cameras))
+    for camera, i in cameras {
+        lights_uniforms := calculate_lights_uniforms(lights, camera)
+        defer delete_lights_uniforms(lights_uniforms)
+        if len(lights_uniforms.point_lights) > 0 {
+            pl_offset := u64(i * int(pl_buffer.size_aligned))
+            wgpu.QueueWriteBuffer(ren.queue, pl_buffer.buffer, pl_offset, raw_data(lights_uniforms.point_lights), uint(pl_buffer.size_aligned))
+        }
+        if len(lights_uniforms.directional_lights) > 0 {
+            dl_offset := u64(i * int(dl_buffer.size_aligned))
+            wgpu.QueueWriteBuffer(ren.queue, dl_buffer.buffer, dl_offset, raw_data(lights_uniforms.directional_lights), uint(dl_buffer.size_aligned))
+        }
+        if len(lights_uniforms.spot_lights) > 0 {
+            sl_offset := u64(i * int(sl_buffer.size_aligned))
+            wgpu.QueueWriteBuffer(ren.queue, sl_buffer.buffer, sl_offset, raw_data(lights_uniforms.spot_lights), uint(sl_buffer.size_aligned))
+        }
+    }
+}
+
+bind_lights :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, camera_index: u32) {
+    dynamic_offsets := [?]u32{
+        camera_index * u32(pl_buffer.size_aligned),
+        camera_index * u32(dl_buffer.size_aligned),
+        camera_index * u32(sl_buffer.size_aligned),
+    }
+    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, light_bind_group, dynamic_offsets[:])
 }

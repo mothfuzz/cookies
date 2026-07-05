@@ -376,6 +376,7 @@ instance_data_attributes := []wgpu.VertexAttribute{
     {format = .Float32x4, offset = 5 * size_of([4]f32), shaderLocation = instance_data_location + 5}, //base_color_tint
     {format = .Float32x4, offset = 6 * size_of([4]f32), shaderLocation = instance_data_location + 6}, //pbr_tint
     {format = .Float32x4, offset = 7 * size_of([4]f32), shaderLocation = instance_data_location + 7}, //emissive_tint
+    //{format = .Uint32x4, offset = 8 * size_of([4]u32), shaderLocation = instance_data_location + 7}, //skeleton_offset
 }
 instance_data_attribute := wgpu.VertexBufferLayout{
     stepMode = .Instance,
@@ -404,6 +405,7 @@ Mesh_Draw :: struct {
 Instance :: struct {
     transform: matrix[4,4]f32,
     using dynamic_material: Dynamic_Material,
+    //skeleton_offset: [4]u32,
 }
 
 //this happens at an earlier stage than draw_instances i.e. multiple materials could be bound for one mesh
@@ -479,12 +481,24 @@ calculate_mesh_world :: proc(instance: ^Mesh_Draw, cam: Camera_Draw) {
     }
 }
 
+instance_buffer: wgpu.Buffer
+instance_buffer_cap := 0
+
+@(private)
+realloc_instance_buffer :: proc(new_size: int) {
+    if new_size < instance_buffer_cap do return
+    if instance_buffer_cap > 0 {
+        wgpu.BufferRelease(instance_buffer)
+    }
+    instance_buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage = {.Vertex, .CopyDst}, size = u64(new_size)})
+    instance_buffer_cap = new_size
+}
+
 //assumes material, mesh, and camera are all already bound & calculations are all done.
 @(private)
-draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, instances: []Instance) {
-    instance_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, instances)
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, instance_data_location, instance_buffer, 0, wgpu.BufferGetSize(instance_buffer))
-    wgpu.BufferRelease(instance_buffer)
+draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, instances: []Instance, offset, size: u64) {
+    if size == 0 do return
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, instance_data_location, instance_buffer, offset, size)
 
     if mesh.indices != nil {
         wgpu.RenderPassEncoderSetIndexBuffer(render_pass, mesh.indices, .Uint32, 0, wgpu.BufferGetSize(mesh.indices))

@@ -162,6 +162,9 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
     wgpu.AdapterRequestDevice(ren.adapter, nil, {callback = request_device, userdata1=userdata1})
 }
 
+uniform_alignment: int
+storage_alignment: int
+
 @(private)
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
     context = (^runtime.Context)(userdata1)^
@@ -175,8 +178,12 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     limits, _ := wgpu.DeviceGetLimits(ren.device)
     fmt.println("max uniform buffers:", limits.maxUniformBuffersPerShaderStage)
     fmt.println("max uniform buffer size:", limits.maxUniformBufferBindingSize, "bytes")
+    uniform_alignment = int(limits.minUniformBufferOffsetAlignment)
+    fmt.println("min uniform buffer offset alignment:", uniform_alignment, "bytes")
     fmt.println("max storage buffers:", limits.maxStorageBuffersPerShaderStage)
     fmt.println("max storage buffer size:", limits.maxStorageBufferBindingSize, "bytes")
+    storage_alignment = int(limits.minStorageBufferOffsetAlignment)
+    fmt.println("min storage buffer offset alignment:", storage_alignment, "bytes")
     fmt.println("max vertex buffers:", limits.maxVertexBuffers)
     fmt.println("max vertex buffer size:", limits.maxBufferSize, "bytes")
     fmt.println("max vertex attributes:", limits.maxVertexAttributes)
@@ -681,6 +688,17 @@ Draw_Call :: struct {
     material: Material,
     instances: []Instance,
     skeletons: []matrix[4,4]f32,
+    //offset into mesh's instance_buffer
+    instance_buffer_offset: u64,
+    instance_buffer_size: u64,
+}
+
+@(private)
+write_instance_buffer :: proc(draws: []Draw_Call) {
+    for draw in draws {
+        if draw.instance_buffer_size == 0 do continue
+        wgpu.QueueWriteBuffer(ren.queue, instance_buffer, draw.instance_buffer_offset, raw_data(draw.instances), uint(draw.instance_buffer_size))
+    }
 }
 
 //embarassingly parallel.
@@ -715,7 +733,7 @@ compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera_Draw) -> []Draw
         if len(instances) == 0 {
             delete(instances)
         } else {
-            append(&draws, Draw_Call{batch.mesh, batch.material, instances[:], skeletons[:]})
+            append(&draws, Draw_Call{batch.mesh, batch.material, instances[:], skeletons[:], 0, 0})
         }
     }
     return draws[:]
@@ -769,10 +787,117 @@ filter_draw_calls :: proc(in_draws: []Draw_Call, filter: Draw_Call_Filter) -> []
             delete(instances)
             delete(skeletons)
         } else {
-            append(&out_draws, Draw_Call{draw.mesh, draw.material, instances[:], skeletons[:]})
+            append(&out_draws, Draw_Call{draw.mesh, draw.material, instances[:], skeletons[:], 0, 0})
         }
     }
     return out_draws[:]
+}
+
+Pass :: struct {
+    draw_calls: []Draw_Call, //each with thier own absolute offset/size
+}
+
+Passes :: struct {
+    pl_solid_shadows: []Pass, //per shadow-casting light
+    dl_solid_shadows: []Pass, //per shadow-casting light
+    sl_solid_shadows: []Pass, //per shadow-casting light
+    //*_trans_shadows: []Pass, //per shadow-casting light - not implemented yet
+    solid_main: []Pass, //per camera
+    trans_main: []Pass, //per camera
+}
+
+@(private)
+compute_pass :: proc(batches: []Mesh_Batch, cam: Camera_Draw, filter: Draw_Call_Filter, running_offset: ^int) -> (pass: Pass) {
+    draws := compute_draw_calls(batches, cam)
+    defer delete_draw_calls(draws)
+    filtered_draws := filter_draw_calls(draws, filter)
+    if len(filtered_draws) == 0 do return
+    pass.draw_calls = filtered_draws
+    for &draw in filtered_draws {
+        draw_size := len(draw.instances) * size_of(Instance)
+        draw.instance_buffer_offset = u64(running_offset^)
+        draw.instance_buffer_size = u64(draw_size)
+        running_offset^ += draw_size
+    }
+    return
+}
+
+@(private)
+compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_Draw) -> (passes: Passes) {
+    //the big buffer...
+    //[solid per shadow cam][trans per shadow cam][solid per main cam][trans per main cam]
+
+    pl_solid_shadows := make([dynamic]Pass)
+    dl_solid_shadows := make([dynamic]Pass)
+    sl_solid_shadows := make([dynamic]Pass)
+    //*_trans_shadows := make([dynamic]Pass)
+    solid_main := make([dynamic]Pass)
+    trans_main := make([dynamic]Pass)
+    
+    running_offset := 0
+    for light_cam in lights.point_light_shadow_cameras {
+        pass := compute_pass(batches, light_cam, .Solid, &running_offset)
+        append(&pl_solid_shadows, pass)
+    }
+    for light_cam in lights.directional_light_shadow_cameras {
+        pass := compute_pass(batches, light_cam, .Solid, &running_offset)
+        append(&dl_solid_shadows, pass)
+    }
+    for light_cam in lights.spot_light_shadow_cameras {
+        pass := compute_pass(batches, light_cam, .Solid, &running_offset)
+        append(&sl_solid_shadows, pass)
+    }
+    for cam in cameras {
+        pass := compute_pass(batches, cam, .Solid, &running_offset)
+        append(&solid_main, pass)
+    }
+    for cam in cameras {
+        pass := compute_pass(batches, cam, .Trans, &running_offset)
+        append(&trans_main, pass)
+    }
+    passes.pl_solid_shadows = pl_solid_shadows[:]
+    passes.dl_solid_shadows = dl_solid_shadows[:]
+    passes.sl_solid_shadows = sl_solid_shadows[:]
+    passes.solid_main = solid_main[:]
+    passes.trans_main = trans_main[:]
+
+    realloc_instance_buffer(running_offset)
+    write_all_instance_buffers(passes)
+    
+    return
+}
+
+@(private)
+write_all_instance_buffers :: proc(passes: Passes) {
+    for pass in passes.pl_solid_shadows do write_instance_buffer(pass.draw_calls)
+    for pass in passes.dl_solid_shadows do write_instance_buffer(pass.draw_calls)
+    for pass in passes.sl_solid_shadows do write_instance_buffer(pass.draw_calls)
+    for pass in passes.solid_main do write_instance_buffer(pass.draw_calls)
+    for pass in passes.trans_main do write_instance_buffer(pass.draw_calls)
+}
+
+@(private)
+delete_passes :: proc(passes: Passes) {
+    for pass in passes.pl_solid_shadows {
+        delete_draw_calls(pass.draw_calls)
+    }
+    delete(passes.pl_solid_shadows)
+    for pass in passes.dl_solid_shadows {
+        delete_draw_calls(pass.draw_calls)
+    }
+    delete(passes.dl_solid_shadows)
+    for pass in passes.sl_solid_shadows {
+        delete_draw_calls(pass.draw_calls)
+    }
+    delete(passes.sl_solid_shadows)
+    for pass in passes.solid_main {
+        delete_draw_calls(pass.draw_calls)
+    }
+    delete(passes.solid_main)
+    for pass in passes.trans_main {
+        delete_draw_calls(pass.draw_calls)
+    }
+    delete(passes.trans_main)
 }
 
 @(private)
@@ -788,11 +913,9 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
             bind_mesh(render_pass, draw.mesh)
         }
         bind_skeletons(render_pass, 2, draw.skeletons, u32(len(draw.instances)))
-        draw_mesh_instances(render_pass, draw.mesh, draw.instances)
+        draw_mesh_instances(render_pass, draw.mesh, draw.instances, draw.instance_buffer_offset, draw.instance_buffer_size)
     }
 }
-
-import "core:math/linalg"
 
 @(export)
 render_frame :: proc() {
@@ -832,6 +955,9 @@ render_frame :: proc() {
     lights := calculate_lights(frame.lights[:])
     defer delete_lights(lights)
 
+    passes := compute_passes(batches, lights, frame.cameras[:])
+    defer delete_passes(passes)
+
     //go through lights & render shadow maps...
     for &spot_light, i in lights.spot_lights {
         if spot_light.render_shadows {
@@ -868,9 +994,7 @@ render_frame :: proc() {
 
             camera := lights.spot_light_shadow_cameras[i]
             bind_camera(shadow_pass, 0, camera)
-            draws := compute_draw_calls(batches, camera)
-            defer delete_draw_calls(draws)
-            execute_draw_calls(shadow_pass, draws)
+            execute_draw_calls(shadow_pass, passes.sl_solid_shadows[i].draw_calls)
 
             wgpu.RenderPassEncoderEnd(shadow_pass)
             wgpu.RenderPassEncoderRelease(shadow_pass)
@@ -964,14 +1088,10 @@ render_frame :: proc() {
     wgpu.RenderPassEncoderEnd(camera_fill_pass)
     wgpu.RenderPassEncoderRelease(camera_fill_pass)
 
-    for &camera in frame.cameras {
+    //make sure to upload + offset lights per-camera.
+    write_light_buffers(lights, frame.cameras[:])
 
-        //gather all draw calls...
-        all_draws := compute_draw_calls(batches, camera)
-        defer delete_draw_calls(all_draws)
-
-        lights := calculate_lights_uniforms(lights, camera)
-        defer delete_lights_uniforms(lights)
+    for &camera, i in frame.cameras {
 
         //perform solid pass
         render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
@@ -994,10 +1114,8 @@ render_frame :: proc() {
         })
         wgpu.RenderPassEncoderSetPipeline(render_pass, ren.solid_pipeline)
         bind_camera(render_pass, 0, camera)
-        bind_lights(render_pass, 3, lights)
-        solid_draws := filter_draw_calls(all_draws[:], .Solid)
-        defer delete_draw_calls(solid_draws)
-        execute_draw_calls(render_pass, solid_draws)
+        bind_lights(render_pass, 3, u32(i))
+        execute_draw_calls(render_pass, passes.solid_main[i].draw_calls)
         wgpu.RenderPassEncoderEnd(render_pass)
         wgpu.RenderPassEncoderRelease(render_pass)
 
@@ -1034,10 +1152,8 @@ render_frame :: proc() {
         })
         wgpu.RenderPassEncoderSetPipeline(render_pass, ren.trans_pipeline)
         bind_camera(render_pass, 0, camera)
-        bind_lights(render_pass, 3, lights)
-        trans_draws := filter_draw_calls(all_draws[:], .Trans)
-        defer delete_draw_calls(trans_draws)
-        execute_draw_calls(render_pass, trans_draws)
+        bind_lights(render_pass, 3, u32(i))
+        execute_draw_calls(render_pass, passes.trans_main[i].draw_calls)
         wgpu.RenderPassEncoderEnd(render_pass)
         wgpu.RenderPassEncoderRelease(render_pass)
     }
