@@ -64,7 +64,7 @@ struct Vertex {
     @location(12) base_color_tint: vec4<f32>,
     @location(13) pbr_tint: vec4<f32>, //ambient, metallic, roughness
     @location(14) emissive_tint: vec4<f32>, //rgb
-    //@location(15) skeleton_offset: vec4<u32>, //the last one we have... use it wisely
+    @location(15) skeleton_offset: vec4<u32>, //the last one we have... use it wisely
 }
 
 struct VSOut {
@@ -89,16 +89,15 @@ fn ident() -> mat4x4<f32> {
 }
 
 @group(2) @binding(0) var<storage, read> skeletons: array<mat4x4<f32>>;
-@group(2) @binding(1) var<uniform> skeleton_len: u32;
+//@group(2) @binding(1) var<uniform> skeleton_len: u32;
 fn calculate_bones(vertex: Vertex, instance_index: u32) -> mat4x4<f32> {
     if(all(vertex.weights == vec4<f32>(0.0))) {
         return ident();
     }
-    let offset = instance_index * skeleton_len;
-    let bone1 = skeletons[offset + u32(vertex.bones.x)] * vertex.weights.x;
-    let bone2 = skeletons[offset + u32(vertex.bones.y)] * vertex.weights.y;
-    let bone3 = skeletons[offset + u32(vertex.bones.z)] * vertex.weights.z;
-    let bone4 = skeletons[offset + u32(vertex.bones.w)] * vertex.weights.w;
+    let bone1 = skeletons[vertex.skeleton_offset.x + u32(vertex.bones.x)] * vertex.weights.x;
+    let bone2 = skeletons[vertex.skeleton_offset.x + u32(vertex.bones.y)] * vertex.weights.y;
+    let bone3 = skeletons[vertex.skeleton_offset.x + u32(vertex.bones.z)] * vertex.weights.z;
+    let bone4 = skeletons[vertex.skeleton_offset.x + u32(vertex.bones.w)] * vertex.weights.w;
     return bone1 + bone2 + bone3 + bone4;
 }
 

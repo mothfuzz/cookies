@@ -376,7 +376,7 @@ instance_data_attributes := []wgpu.VertexAttribute{
     {format = .Float32x4, offset = 5 * size_of([4]f32), shaderLocation = instance_data_location + 5}, //base_color_tint
     {format = .Float32x4, offset = 6 * size_of([4]f32), shaderLocation = instance_data_location + 6}, //pbr_tint
     {format = .Float32x4, offset = 7 * size_of([4]f32), shaderLocation = instance_data_location + 7}, //emissive_tint
-    //{format = .Uint32x4, offset = 8 * size_of([4]u32), shaderLocation = instance_data_location + 7}, //skeleton_offset
+    {format = .Uint32x4, offset = 8 * size_of([4]u32), shaderLocation = instance_data_location + 8}, //skeleton_offset
 }
 instance_data_attribute := wgpu.VertexBufferLayout{
     stepMode = .Instance,
@@ -405,7 +405,7 @@ Mesh_Draw :: struct {
 Instance :: struct {
     transform: matrix[4,4]f32,
     using dynamic_material: Dynamic_Material,
-    //skeleton_offset: [4]u32,
+    skeleton_offset: [4]u32,
 }
 
 //this happens at an earlier stage than draw_instances i.e. multiple materials could be bound for one mesh

@@ -632,7 +632,7 @@ draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
         copy(owned_bones, bones)
         bones = owned_bones
     }
-    draw := Mesh_Draw{{transform, dynamic_material}, sprite, billboard, bones, {}}
+    draw := Mesh_Draw{{transform, dynamic_material, 0}, sprite, billboard, bones, {}}
     calculate_mesh_local(&draw, mesh, material)
 
     append(instances, draw)
@@ -682,12 +682,32 @@ clear_action :: proc(f: ^Frame) {
     }
 }
 
+write_skeletons :: proc(batches: []Mesh_Batch) {
+    //all the skeletons at once.
+    running_offset := 0
+    for &batch in batches {
+        for &draw in batch.instances {
+            if draw.bones == nil do continue
+            draw.skeleton_offset[0] = u32(running_offset)
+            running_offset += len(draw.bones)
+        }
+    }
+    realloc_skeletons_buffer(running_offset)
+    for batch in batches {
+        for draw in batch.instances {
+            if draw.bones == nil do continue
+            offset := draw.skeleton_offset[0] * size_of(matrix[4,4]f32)
+            size := len(draw.bones) * size_of(matrix[4,4]f32)
+            wgpu.QueueWriteBuffer(ren.queue, skeletons_buffer, u64(offset), raw_data(draw.bones), uint(size))
+        }
+    }
+}
+
 @(private)
 Draw_Call :: struct {
     mesh: Mesh,
     material: Material,
     instances: []Instance,
-    skeletons: []matrix[4,4]f32,
     //offset into mesh's instance_buffer
     instance_buffer_offset: u64,
     instance_buffer_size: u64,
@@ -709,7 +729,6 @@ compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera_Draw) -> []Draw
         trans := batch.mesh.is_trans || batch.material.base_color_tex.is_trans
         solid := batch.mesh.is_solid || batch.material.base_color_tex.is_solid
         instances := make([dynamic]Instance)
-        skeletons := make([dynamic]matrix[4,4]f32)
         for instance in batch.instances {
             instance_is_trans := instance.base_color_tint.a > 0 && instance.base_color_tint.a < 1
             instance_is_solid := instance.base_color_tint.a == 1
@@ -723,17 +742,12 @@ compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera_Draw) -> []Draw
             if bounds_in_frustum(camera, instance.bounding_box) {
                 calculate_mesh_world(&instance, camera)
                 append(&instances, instance)
-                if instance.bones == nil {
-                    append(&skeletons, 1)
-                } else {
-                    append(&skeletons, ..instance.bones)
-                }
             }
         }
         if len(instances) == 0 {
             delete(instances)
         } else {
-            append(&draws, Draw_Call{batch.mesh, batch.material, instances[:], skeletons[:], 0, 0})
+            append(&draws, Draw_Call{batch.mesh, batch.material, instances[:], 0, 0})
         }
     }
     return draws[:]
@@ -742,7 +756,6 @@ compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera_Draw) -> []Draw
 delete_draw_calls :: proc(draws: []Draw_Call) {
     for d in draws {
         delete(d.instances)
-        delete(d.skeletons)
     }
     delete(draws)
 }
@@ -757,12 +770,7 @@ Draw_Call_Filter :: enum {
 filter_draw_calls :: proc(in_draws: []Draw_Call, filter: Draw_Call_Filter) -> []Draw_Call {
     out_draws := make([dynamic]Draw_Call)
     for draw in in_draws {
-        skeleton_size := 0
-        if draw.skeletons != nil {
-            skeleton_size = len(draw.skeletons)/len(draw.instances)
-        }
         instances := make([dynamic]Instance)
-        skeletons := make([dynamic]matrix[4,4]f32)
         for instance, i in draw.instances {
             do_draw: bool
             switch filter {
@@ -777,17 +785,12 @@ filter_draw_calls :: proc(in_draws: []Draw_Call, filter: Draw_Call_Filter) -> []
             }
             if do_draw {
                 append(&instances, instance)
-                if draw.skeletons != nil {
-                    base := i*skeleton_size
-                    append(&skeletons, ..draw.skeletons[base:base+skeleton_size])
-                }
             }
         }
         if len(instances) == 0 {
             delete(instances)
-            delete(skeletons)
         } else {
-            append(&out_draws, Draw_Call{draw.mesh, draw.material, instances[:], skeletons[:], 0, 0})
+            append(&out_draws, Draw_Call{draw.mesh, draw.material, instances[:], 0, 0})
         }
     }
     return out_draws[:]
@@ -912,7 +915,7 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
         if prev_mesh == 0 || draw.mesh.hash != prev_mesh {
             bind_mesh(render_pass, draw.mesh)
         }
-        bind_skeletons(render_pass, 2, draw.skeletons, u32(len(draw.instances)))
+        bind_skeletons(render_pass, 2)
         draw_mesh_instances(render_pass, draw.mesh, draw.instances, draw.instance_buffer_offset, draw.instance_buffer_size)
     }
 }
@@ -951,10 +954,14 @@ render_frame :: proc() {
     batches := flatten_action(frame)
     defer delete(batches)
 
-    //first render shadow maps.
+    //gather up them bones
+    write_skeletons(batches)
+
+    //then gather up all lights
     lights := calculate_lights(frame.lights[:])
     defer delete_lights(lights)
 
+    //pack all view-dependent data...
     passes := compute_passes(batches, lights, frame.cameras[:])
     defer delete_passes(passes)
 
