@@ -456,3 +456,18 @@ bind_lights :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, camera_index
     }
     wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, light_bind_group, dynamic_offsets[:])
 }
+
+delete_lights_buffer :: proc() {
+    if light_bind_group != nil {
+        wgpu.BindGroupRelease(light_bind_group)
+    }
+    if pl_buffer.capacity > 0 {
+        wgpu.BufferRelease(pl_buffer.buffer)
+    }
+    if dl_buffer.capacity > 0 {
+        wgpu.BufferRelease(dl_buffer.buffer)
+    }
+    if sl_buffer.capacity > 0 {
+        wgpu.BufferRelease(sl_buffer.buffer)
+    }
+}

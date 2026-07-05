@@ -494,6 +494,12 @@ realloc_instance_buffer :: proc(new_size: int) {
     instance_buffer_cap = new_size
 }
 
+delete_instance_buffer :: proc() {
+    if instance_buffer_cap > 0 {
+        wgpu.BufferRelease(instance_buffer)
+    }
+}
+
 //assumes material, mesh, and camera are all already bound & calculations are all done.
 @(private)
 draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, instances: []Instance, offset, size: u64) {

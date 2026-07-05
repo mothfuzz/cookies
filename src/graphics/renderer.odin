@@ -481,6 +481,8 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     init_defaults()
     init_ui()
 
+    realloc_skeletons_buffer(0) //need minimum size for valid bindings
+
     ren.ready = true
     fmt.println("renderer SAYS it's ready.")
     fmt.println(status)
@@ -504,6 +506,8 @@ quit :: proc() {
     delete_frame()
     delete_ui_batches()
     delete_defaults()
+    delete_lights_buffer()
+    delete_skeletons_buffer()
     wgpu.RenderPipelineRelease(ren.solid_pipeline)
     wgpu.RenderPipelineRelease(ren.trans_pipeline)
     wgpu.PipelineLayoutRelease(ren.layout)

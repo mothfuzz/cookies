@@ -343,20 +343,20 @@ draw_enemies :: proc(a: f64) {
 
 draw :: proc(t: f64, dt: f64) {
 
-    graphics.draw_camera(&cam)
+    graphics.draw_camera(cam)
 
     bs := f32(Big_Font_Size)
     rs := f32(Regular_Font_Size)
 
     switch gamestate {
     case .Title:
-        graphics.set_background_color({0.2, 0.4, 0.8})
+        graphics.set_background_color(&cam, {0.2, 0.4, 0.8})
         str1 := "BOX VS SPHERES"
         str2 := "click to start"
         graphics.ui_draw_text(str1, big_font, {0-f32(len(str1))*bs/2, 0+2*bs}, {1, 1, 1, 1})
         graphics.ui_draw_text(str2, regular_font, {0-f32(len(str2))*rs/2, 0-2*rs}, {1, 1, 1, 1})
     case .Playing:
-        graphics.set_background_color({0.2, 0.3, 0.1})
+        graphics.set_background_color(&cam, {0.2, 0.3, 0.1})
 
         score_str := fmt.tprintf("score:  %v", player.score)
         graphics.ui_draw_text(score_str, regular_font, {-Screen_Width/2, Screen_Height/2}, {1, 1, 1, 1})
@@ -378,14 +378,14 @@ draw :: proc(t: f64, dt: f64) {
         pause_str := "(Paused)"
         graphics.ui_draw_text(pause_str, big_font, {0 - f32(len(pause_str))*bs/2, 0+2*bs}, {1, 1, 1, 1})
     case .Won:
-        graphics.set_background_color({0.7, 0.6, 0.2})
+        graphics.set_background_color(&cam, {0.7, 0.6, 0.2})
         win_str := "You Won!"
         score_str := fmt.tprint("final score: ", player.score)
         graphics.ui_draw_text(win_str, big_font, {0 - f32(len(win_str))*bs/2, 0+2*bs}, {1, 1, 1, 1})
         graphics.ui_draw_text(score_str, regular_font, {0 - f32(len(score_str))*rs/2, 0-2*rs}, {1, 1, 1, 1})
     case .Died:
         die_str := "You Fucking Died!"
-        graphics.set_background_color({0.2, 0.2, 0.2})
+        graphics.set_background_color(&cam, {0.2, 0.2, 0.2})
         graphics.ui_draw_text(die_str, big_font, {0 - f32(len(die_str))*bs/2, 0+2*bs}, {1.0, 0.0, 0.0, 1})
         score_str := fmt.tprint("final score: ", player.score)
         graphics.ui_draw_text(score_str, regular_font, {0 - f32(len(score_str))*rs/2, 0-2*rs}, {1, 1, 1, 1})
