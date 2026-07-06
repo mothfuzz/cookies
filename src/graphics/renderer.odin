@@ -508,6 +508,7 @@ quit :: proc() {
     delete_defaults()
     delete_lights_buffer()
     delete_skeletons_buffer()
+    delete_instance_buffer()
     wgpu.RenderPipelineRelease(ren.solid_pipeline)
     wgpu.RenderPipelineRelease(ren.trans_pipeline)
     wgpu.PipelineLayoutRelease(ren.layout)
