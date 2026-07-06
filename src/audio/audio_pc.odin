@@ -37,18 +37,18 @@ dead_sounds: map[^ma.sound]Playing_Sound
 global_min_distance: f32 = 1.0
 global_max_distance: f32 = 20.0
 
-data_callback :: proc "c" (userdata: rawptr, buffer: [^]u8, buffer_size_bytes: i32) {
-    context = (^runtime.Context)(userdata)^
-    buffer_size_frames := u64(buffer_size_bytes) / u64(ma.get_bytes_per_frame(.f32, ma.engine_get_channels(&engine)))
-    ma.engine_read_pcm_frames(&engine, buffer, buffer_size_frames, nil)
-}
+//can't actually use temp_allocator because it's thread-local and audio runs in a separate thread.
+STREAM_TEMP_SIZE :: 64 * 1024
+stream_temp: []u8
+
 sdl_audio_callback :: proc "c" (userdata: rawptr, stream: ^sdl3.AudioStream, additional_amount: i32, total_amount: i32) {
-    context = (^runtime.Context)(userdata)^
-    if additional_amount > 0 {
-        data := make([]u8, additional_amount, context.temp_allocator)
-        data_callback(userdata, raw_data(data), additional_amount)
-        sdl3.PutAudioStreamData(stream, raw_data(data), additional_amount)
-    }
+    _ = userdata
+    _ = total_amount
+    if additional_amount <= 0 do return
+    if int(additional_amount) > len(stream_temp) do return //dropouts!
+    buffer_size_frames := u64(additional_amount) / u64(ma.get_bytes_per_frame(.f32, ma.engine_get_channels(&engine)))
+    ma.engine_read_pcm_frames(&engine, raw_data(stream_temp), buffer_size_frames, nil)
+    sdl3.PutAudioStreamData(stream, raw_data(stream_temp), additional_amount)
 }
 
 
@@ -65,6 +65,8 @@ init :: proc() {
     }
 
     ctx = context
+    stream_temp = make([]u8, STREAM_TEMP_SIZE)
+
     spec := sdl3.AudioSpec{.F32, i32(ma.engine_get_channels(&engine)), i32(ma.engine_get_sample_rate(&engine))}
     stream := sdl3.OpenAudioDeviceStream(sdl3.AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, sdl_audio_callback, &ctx)
     sdl3.ResumeAudioDevice(sdl3.GetAudioStreamDevice(stream))
@@ -73,6 +75,7 @@ init :: proc() {
 quit :: proc() {
     //fmt.println("live_sounds:", len(live_sounds))
     //fmt.println("dead_sounds:", len(dead_sounds))
+    delete(stream_temp)
     for _, sound in live_sounds {
         ma.sound_uninit(sound.sound)
         ma.audio_buffer_uninit(sound.audio_buffer)
