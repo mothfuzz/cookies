@@ -42,8 +42,6 @@ STREAM_TEMP_SIZE :: 64 * 1024
 stream_temp: []u8
 
 sdl_audio_callback :: proc "c" (userdata: rawptr, stream: ^sdl3.AudioStream, additional_amount: i32, total_amount: i32) {
-    _ = userdata
-    _ = total_amount
     if additional_amount <= 0 do return
     if int(additional_amount) > len(stream_temp) do return //dropouts!
     buffer_size_frames := u64(additional_amount) / u64(ma.get_bytes_per_frame(.f32, ma.engine_get_channels(&engine)))
