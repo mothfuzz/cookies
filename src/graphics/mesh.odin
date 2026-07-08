@@ -132,6 +132,7 @@ make_mesh_from_file :: proc(filedata: []byte) -> (mesh: Mesh) {
     texcoords: [dynamic][2]f32
     defer delete(texcoords)
     normals: [dynamic][3]f32
+    defer delete(normals)
 
     vertices: [dynamic]Vertex
     defer delete(vertices)
@@ -164,14 +165,14 @@ make_mesh_from_file :: proc(filedata: []byte) -> (mesh: Mesh) {
     for line in strings.split_lines_iterator(&it) {
         if strings.starts_with(line, "#") do continue
         if strings.starts_with(line, "v ") {
-            v := strings.split(line[2:], " ")
+            v := strings.split(line[2:], " ", context.temp_allocator)
             x := strconv.parse_f32(v[0]) or_break
             y := strconv.parse_f32(v[1]) or_break
             z := strconv.parse_f32(v[2]) or_break
             append(&positions, [3]f32{x, y, z})
         }
         if strings.starts_with(line, "vt ") {
-            vt := strings.split(line[3:], " ")
+            vt := strings.split(line[3:], " ", context.temp_allocator)
             u := strconv.parse_f32(vt[0]) or_break
             v: f32 = 0
             if len(vt) > 1 {
@@ -180,14 +181,14 @@ make_mesh_from_file :: proc(filedata: []byte) -> (mesh: Mesh) {
             append(&texcoords, [2]f32{u, v})
         }
         if strings.starts_with(line, "vn ") {
-            vn := strings.split(line[3:], " ")
+            vn := strings.split(line[3:], " ", context.temp_allocator)
             x := strconv.parse_f32(vn[0]) or_break
             y := strconv.parse_f32(vn[1]) or_break
             z := strconv.parse_f32(vn[2]) or_break
             append(&normals, [3]f32{x, y, z})
         }
         if strings.starts_with(line, "f ") {
-            f := strings.split(line[2:], " ")
+            f := strings.split(line[2:], " ", context.temp_allocator)
             f_v: [3]Face_Vertex
             switch strings.count(line[2:], "/") {
             case 0:
@@ -204,9 +205,9 @@ make_mesh_from_file :: proc(filedata: []byte) -> (mesh: Mesh) {
                 f_v[2] = {fv[2], fvt[2], fvn[2]}
             case 3:
                 //f v/vt v/vt v/vt
-                v_vt0 := strings.split(f[0], "/")
-                v_vt1 := strings.split(f[1], "/")
-                v_vt2 := strings.split(f[2], "/")
+                v_vt0 := strings.split(f[0], "/", context.temp_allocator)
+                v_vt1 := strings.split(f[1], "/", context.temp_allocator)
+                v_vt2 := strings.split(f[2], "/", context.temp_allocator)
                 v0 := strconv.parse_uint(v_vt0[0]) or_break
                 v1 := strconv.parse_uint(v_vt1[0]) or_break
                 v2 := strconv.parse_uint(v_vt2[0]) or_break
@@ -222,9 +223,9 @@ make_mesh_from_file :: proc(filedata: []byte) -> (mesh: Mesh) {
                 f_v[2] = {fv[2], fvt[2], fvn[2]}
             case 6:
                 //f v/vt/vn v/vt/vn v/vt/vn
-                v_vt_vn0 := strings.split(f[0], "/")
-                v_vt_vn1 := strings.split(f[1], "/")
-                v_vt_vn2 := strings.split(f[2], "/")
+                v_vt_vn0 := strings.split(f[0], "/", context.temp_allocator)
+                v_vt_vn1 := strings.split(f[1], "/", context.temp_allocator)
+                v_vt_vn2 := strings.split(f[2], "/", context.temp_allocator)
                 v0 := strconv.parse_uint(v_vt_vn0[0]) or_break
                 v1 := strconv.parse_uint(v_vt_vn1[0]) or_break
                 v2 := strconv.parse_uint(v_vt_vn2[0]) or_break
@@ -482,15 +483,15 @@ calculate_mesh_world :: proc(instance: ^Mesh_Draw, cam: Camera_Draw) {
 }
 
 instance_buffer: wgpu.Buffer
-instance_buffer_cap := 0
+instance_buffer_cap: u64 = 0
 
 @(private)
-realloc_instance_buffer :: proc(new_size: int) {
+realloc_instance_buffer :: proc(new_size: u64) {
     if new_size < instance_buffer_cap do return
     if instance_buffer_cap > 0 {
         wgpu.BufferRelease(instance_buffer)
     }
-    instance_buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage = {.Vertex, .CopyDst}, size = u64(new_size)})
+    instance_buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage = {.Vertex, .CopyDst}, size = new_size})
     instance_buffer_cap = new_size
 }
 
@@ -502,14 +503,15 @@ delete_instance_buffer :: proc() {
 
 //assumes material, mesh, and camera are all already bound & calculations are all done.
 @(private)
-draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, instances: []Instance, offset, size: u64) {
-    if size == 0 do return
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, instance_data_location, instance_buffer, offset, size)
+draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, count: u32, buffer_offset: u64) {
+    if count == 0 do return
+    size := u64(count) * u64(size_of(Instance))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, instance_data_location, instance_buffer, buffer_offset, size)
 
     if mesh.indices != nil {
         wgpu.RenderPassEncoderSetIndexBuffer(render_pass, mesh.indices, .Uint32, 0, wgpu.BufferGetSize(mesh.indices))
-        wgpu.RenderPassEncoderDrawIndexed(render_pass, mesh.size, u32(len(instances)), 0, 0, 0)
+        wgpu.RenderPassEncoderDrawIndexed(render_pass, mesh.size, count, 0, 0, 0)
     } else {
-        wgpu.RenderPassEncoderDraw(render_pass, mesh.size, u32(len(instances)), 0, 0)
+        wgpu.RenderPassEncoderDraw(render_pass, mesh.size, count, 0, 0)
     }
 }

@@ -26,6 +26,7 @@ Camera_Draw :: struct {
     viewport: [4]f32,
     fill: bool,
     using uniforms: Camera_Uniforms,
+    viewproj: matrix[4,4]f32, //optimization
 }
 
 Camera :: struct {
@@ -155,6 +156,7 @@ calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1) -> (draw: Camer
     draw.fill = cam.fill
     draw.fog_distance = {fog_onset, far}
     wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &draw.uniforms, size_of(Camera_Uniforms))
+    draw.viewproj = draw.projection * draw.view
     return
 }
 
@@ -242,12 +244,12 @@ z_layer :: proc(cam: Camera, layer: int, num_layers: int = MAX_Z_LAYERS) -> f32 
     return f32(layer) * z_min_step(cam, num_layers) 
 }
 
-bounds_in_frustum :: proc(cam: Camera_Uniforms, bounding_box: [8][4]f32) -> bool {
+bounds_in_frustum :: proc(cam: Camera_Draw, bounding_box: [8][4]f32) -> bool {
     //need to check if all planes are passing (i.e. at least one point is inside)
     passing: [6]bool = false
     //OBB check for meshes
     for point in bounding_box {
-        test_point := cam.projection * cam.view * point
+        test_point := cam.viewproj * point
         if test_point.x >= -test_point.w {
             passing[0] = true
         }

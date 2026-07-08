@@ -675,8 +675,9 @@ flatten_action :: proc(f: Frame) -> []Mesh_Batch {
 }
 @(private)
 clear_action :: proc(f: ^Frame) {
-    for material, &meshes in f.action {
-        for mesh, &instances in meshes {
+    if f.action == nil do return
+    for _, &meshes in f.action {
+        for _, &instances in meshes {
             for instance in instances {
                 if instance.bones != nil {
                     delete(instance.bones)
@@ -712,199 +713,203 @@ write_skeletons :: proc(batches: []Mesh_Batch) {
 Draw_Call :: struct {
     mesh: Mesh,
     material: Material,
-    instances: []Instance,
+    //offset insto pass's staging buffer
+    first_instance: u32,
+    instance_count: u32,
     //offset into mesh's instance_buffer
     instance_buffer_offset: u64,
-    instance_buffer_size: u64,
 }
 
-@(private)
-write_instance_buffer :: proc(draws: []Draw_Call) {
-    for draw in draws {
-        if draw.instance_buffer_size == 0 do continue
-        wgpu.QueueWriteBuffer(ren.queue, instance_buffer, draw.instance_buffer_offset, raw_data(draw.instances), uint(draw.instance_buffer_size))
-    }
-}
-
-//embarassingly parallel.
-@(private)
-compute_draw_calls :: proc(batches: []Mesh_Batch, camera: Camera_Draw) -> []Draw_Call {
-    draws := make([dynamic]Draw_Call)
-    for batch, i in batches {
-        trans := batch.mesh.is_trans || batch.material.base_color_tex.is_trans
-        solid := batch.mesh.is_solid || batch.material.base_color_tex.is_solid
-        instances := make([dynamic]Instance)
-        for instance in batch.instances {
-            instance_is_trans := instance.base_color_tint.a > 0 && instance.base_color_tint.a < 1
-            instance_is_solid := instance.base_color_tint.a == 1
-            if !trans && !solid && !instance_is_trans && !instance_is_solid {
-                //don't render a totally invisible mesh
-                continue;
-            }
-            instance := instance
-            //check it against frustum before doing world calculations
-            //if it passes, compute billboards/modelview/etc.
-            if bounds_in_frustum(camera, instance.bounding_box) {
-                calculate_mesh_world(&instance, camera)
-                append(&instances, instance)
-            }
-        }
-        if len(instances) == 0 {
-            delete(instances)
-        } else {
-            append(&draws, Draw_Call{batch.mesh, batch.material, instances[:], 0, 0})
-        }
-    }
-    return draws[:]
-}
-@(private)
-delete_draw_calls :: proc(draws: []Draw_Call) {
-    for d in draws {
-        delete(d.instances)
-    }
-    delete(draws)
-}
 
 @(private)
-Draw_Call_Filter :: enum {
-    Both,
-    Solid,
-    Trans,
-}
-@(private)
-filter_draw_calls :: proc(in_draws: []Draw_Call, filter: Draw_Call_Filter) -> []Draw_Call {
-    out_draws := make([dynamic]Draw_Call)
-    for draw in in_draws {
-        instances := make([dynamic]Instance)
-        for instance, i in draw.instances {
-            do_draw: bool
-            switch filter {
-            case .Both:
-                do_draw = true
-            case .Solid:
-                do_draw = (draw.mesh.is_solid || draw.material.base_color_tex.is_solid) &&
-                    instance.base_color_tint.a == 1
-            case .Trans:
-                do_draw = draw.mesh.is_trans || draw.material.base_color_tex.is_trans ||
-                    (instance.base_color_tint.a > 0 && instance.base_color_tint.a < 1) 
-            }
-            if do_draw {
-                append(&instances, instance)
-            }
-        }
-        if len(instances) == 0 {
-            delete(instances)
-        } else {
-            append(&out_draws, Draw_Call{draw.mesh, draw.material, instances[:], 0, 0})
-        }
-    }
-    return out_draws[:]
+instance_filter :: proc(mesh: Mesh, material: Material, instance: Instance) -> (is_solid, is_trans: bool) {
+    is_solid = (mesh.is_solid || material.base_color_tex.is_solid) && instance.base_color_tint.a == 1
+    is_trans = mesh.is_trans || material.base_color_tex.is_trans || (instance.base_color_tint.a > 0 && instance.base_color_tint.a < 1)
+    return
 }
 
 Pass :: struct {
-    draw_calls: []Draw_Call, //each with thier own absolute offset/size
+    buffer_offset: u64,
+    instances: []Instance,
+    draw_calls: []Draw_Call,
 }
 
+//passes slice into instance buffer per-camera
 Passes :: struct {
-    pl_solid_shadows: []Pass, //per shadow-casting light
-    dl_solid_shadows: []Pass, //per shadow-casting light
-    sl_solid_shadows: []Pass, //per shadow-casting light
-    //*_trans_shadows: []Pass, //per shadow-casting light - not implemented yet
-    solid_main: []Pass, //per camera
-    trans_main: []Pass, //per camera
+    pl_solid_shadows: []Pass,
+    dl_solid_shadows: []Pass,
+    sl_solid_shadows: []Pass,
+    //*_trans_shadows: []Pass,
+    solid_main: []Pass,
+    trans_main: []Pass,
+}
+
+//need separate staging so that each pass 'knows' what slice of instances it has.
+Pass_Staging :: struct {
+    instances: [dynamic]Instance,
+    draw_calls: [dynamic]Draw_Call,
 }
 
 @(private)
-compute_pass :: proc(batches: []Mesh_Batch, cam: Camera_Draw, filter: Draw_Call_Filter, running_offset: ^int) -> (pass: Pass) {
-    draws := compute_draw_calls(batches, cam)
-    defer delete_draw_calls(draws)
-    filtered_draws := filter_draw_calls(draws, filter)
-    if len(filtered_draws) == 0 do return
-    pass.draw_calls = filtered_draws
-    for &draw in filtered_draws {
-        draw_size := len(draw.instances) * size_of(Instance)
-        draw.instance_buffer_offset = u64(running_offset^)
-        draw.instance_buffer_size = u64(draw_size)
-        running_offset^ += draw_size
+compute_pass :: proc(batches: []Mesh_Batch, cam: Camera_Draw, solid, trans: ^Pass_Staging) {
+    for batch in batches {
+        solid_start := u32(len(solid.instances))
+        trans_start := u32(len(trans.instances))
+
+        for &instance in batch.instances {
+            is_solid, is_trans := instance_filter(batch.mesh, batch.material, instance)
+            if !is_solid && !is_trans do continue
+            if !bounds_in_frustum(cam, instance.bounding_box) do continue
+            calculate_mesh_world(&instance, cam)
+            if is_solid {
+                append(&solid.instances, instance)
+            }
+            if is_trans {
+                append(&solid.instances, instance)
+            }
+        }
+
+        solid_count := u32(len(solid.instances)) - solid_start
+        trans_count := u32(len(trans.instances)) - trans_start
+
+        if solid_count > 0 {
+            append(&solid.draw_calls, Draw_Call{
+                mesh = batch.mesh, material = batch.material,
+                first_instance = solid_start,
+                instance_count = solid_count,
+            })
+        }
+        if trans_count > 0 {
+            append(&trans.draw_calls, Draw_Call{
+                mesh = batch.mesh, material = batch.material,
+                first_instance = trans_start,
+                instance_count = trans_count,
+            })
+        }
     }
-    return
+}
+
+@(private)
+write_pass :: proc(pass: ^Pass, staging: ^Pass_Staging, running_offset: ^u64) {
+    pass.buffer_offset = running_offset^
+    pass.instances = staging.instances[:]
+    pass.draw_calls = staging.draw_calls[:]
+    for &draw in pass.draw_calls {
+        draw.instance_buffer_offset = running_offset^ + u64(draw.first_instance) * size_of(Instance)
+    }
+    running_offset^ += u64(len(pass.instances)) * size_of(Instance)
+}
+
+//trying to do this all at once overwhelmed temp_alloc :C
+@(private)
+write_pass_instances :: proc(pass: ^Pass) {
+    if len(pass.instances) == 0 do return
+    size := u64(len(pass.instances)) * size_of(Instance)
+    wgpu.QueueWriteBuffer(ren.queue, instance_buffer, pass.buffer_offset, raw_data(pass.instances), uint(size))
 }
 
 @(private)
 compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_Draw) -> (passes: Passes) {
     //the big buffer...
-    //[solid per shadow cam][trans per shadow cam][solid per main cam][trans per main cam]
+    //[solid shadow cam 0][trans shadow cam 0][solid main cam 0][trans main cam 0][etc.]
 
-    pl_solid_shadows := make([dynamic]Pass)
-    dl_solid_shadows := make([dynamic]Pass)
-    sl_solid_shadows := make([dynamic]Pass)
-    //*_trans_shadows := make([dynamic]Pass)
-    solid_main := make([dynamic]Pass)
-    trans_main := make([dynamic]Pass)
-    
-    running_offset := 0
-    for light_cam in lights.point_light_shadow_cameras {
-        pass := compute_pass(batches, light_cam, .Solid, &running_offset)
-        append(&pl_solid_shadows, pass)
+    dl_solid_shadows_staging := make([]Pass_Staging, len(lights.directional_light_shadow_cameras))
+    pl_solid_shadows_staging := make([]Pass_Staging, len(lights.point_light_shadow_cameras))
+    sl_solid_shadows_staging := make([]Pass_Staging, len(lights.spot_light_shadow_cameras))
+    solid_main_staging := make([]Pass_Staging, len(cameras))
+    trans_main_staging := make([]Pass_Staging, len(cameras))
+    defer delete(pl_solid_shadows_staging)
+    defer delete(dl_solid_shadows_staging)
+    defer delete(sl_solid_shadows_staging)
+    defer delete(solid_main_staging)
+    defer delete(trans_main_staging)
+
+    passes.dl_solid_shadows = make([]Pass, len(lights.directional_light_shadow_cameras))
+    passes.pl_solid_shadows = make([]Pass, len(lights.point_light_shadow_cameras))
+    passes.sl_solid_shadows = make([]Pass, len(lights.spot_light_shadow_cameras))
+    passes.solid_main = make([]Pass, len(cameras))
+    passes.trans_main = make([]Pass, len(cameras))
+
+    //first generate staging buffers
+    for cam, i in lights.point_light_shadow_cameras {
+        compute_pass(batches, cam, &pl_solid_shadows_staging[i], nil)
     }
-    for light_cam in lights.directional_light_shadow_cameras {
-        pass := compute_pass(batches, light_cam, .Solid, &running_offset)
-        append(&dl_solid_shadows, pass)
+    for cam, i in lights.directional_light_shadow_cameras {
+        compute_pass(batches, cam, &dl_solid_shadows_staging[i], nil)
     }
-    for light_cam in lights.spot_light_shadow_cameras {
-        pass := compute_pass(batches, light_cam, .Solid, &running_offset)
-        append(&sl_solid_shadows, pass)
+    for cam, i in lights.spot_light_shadow_cameras {
+        compute_pass(batches, cam, &sl_solid_shadows_staging[i], nil)
     }
-    for cam in cameras {
-        pass := compute_pass(batches, cam, .Solid, &running_offset)
-        append(&solid_main, pass)
+    for cam, i in cameras {
+        compute_pass(batches, cam, &solid_main_staging[i], &trans_main_staging[i])
     }
-    for cam in cameras {
-        pass := compute_pass(batches, cam, .Trans, &running_offset)
-        append(&trans_main, pass)
+
+    //then actually pack the staging passes to the real passes
+    running_offset: u64
+    for &pass, i in passes.pl_solid_shadows {
+        write_pass(&pass, &pl_solid_shadows_staging[i], &running_offset)
     }
-    passes.pl_solid_shadows = pl_solid_shadows[:]
-    passes.dl_solid_shadows = dl_solid_shadows[:]
-    passes.sl_solid_shadows = sl_solid_shadows[:]
-    passes.solid_main = solid_main[:]
-    passes.trans_main = trans_main[:]
+    for &pass, i in passes.dl_solid_shadows {
+        write_pass(&pass, &dl_solid_shadows_staging[i], &running_offset)
+    }
+    for &pass, i in passes.sl_solid_shadows {
+        write_pass(&pass, &sl_solid_shadows_staging[i], &running_offset)
+    }
+    for &pass, i in passes.solid_main {
+        write_pass(&pass, &solid_main_staging[i], &running_offset)
+    }
+    for &pass, i in passes.trans_main {
+        write_pass(&pass, &trans_main_staging[i], &running_offset)
+    }
 
     realloc_instance_buffer(running_offset)
-    write_all_instance_buffers(passes)
-    
+
+    for &pass in passes.pl_solid_shadows {
+        write_pass_instances(&pass)
+    }
+    for &pass in passes.dl_solid_shadows {
+        write_pass_instances(&pass)
+    }
+    for &pass in passes.sl_solid_shadows {
+        write_pass_instances(&pass)
+    }
+    for &pass in passes.solid_main {
+        write_pass_instances(&pass)
+    }
+    for &pass in passes.trans_main {
+        write_pass_instances(&pass)
+    }
+
     return
 }
 
 @(private)
-write_all_instance_buffers :: proc(passes: Passes) {
-    for pass in passes.pl_solid_shadows do write_instance_buffer(pass.draw_calls)
-    for pass in passes.dl_solid_shadows do write_instance_buffer(pass.draw_calls)
-    for pass in passes.sl_solid_shadows do write_instance_buffer(pass.draw_calls)
-    for pass in passes.solid_main do write_instance_buffer(pass.draw_calls)
-    for pass in passes.trans_main do write_instance_buffer(pass.draw_calls)
+delete_pass :: proc(pass: ^Pass) {
+    delete(pass.instances)
+    delete(pass.draw_calls)
 }
 
 @(private)
 delete_passes :: proc(passes: Passes) {
-    for pass in passes.pl_solid_shadows {
-        delete_draw_calls(pass.draw_calls)
+    for &pass in passes.pl_solid_shadows {
+        delete_pass(&pass)
+    }
+    for &pass in passes.dl_solid_shadows {
+        delete_pass(&pass)
+    }
+    for &pass in passes.sl_solid_shadows {
+        delete_pass(&pass)
+    }
+    for &pass in passes.solid_main {
+        delete_pass(&pass)
+    }
+    for &pass in passes.trans_main {
+        delete_pass(&pass)
     }
     delete(passes.pl_solid_shadows)
-    for pass in passes.dl_solid_shadows {
-        delete_draw_calls(pass.draw_calls)
-    }
     delete(passes.dl_solid_shadows)
-    for pass in passes.sl_solid_shadows {
-        delete_draw_calls(pass.draw_calls)
-    }
     delete(passes.sl_solid_shadows)
-    for pass in passes.solid_main {
-        delete_draw_calls(pass.draw_calls)
-    }
     delete(passes.solid_main)
-    for pass in passes.trans_main {
-        delete_draw_calls(pass.draw_calls)
-    }
     delete(passes.trans_main)
 }
 
@@ -921,17 +926,19 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
             bind_mesh(render_pass, draw.mesh)
         }
         bind_skeletons(render_pass, 2)
-        draw_mesh_instances(render_pass, draw.mesh, draw.instances, draw.instance_buffer_offset, draw.instance_buffer_size)
+        draw_mesh_instances(render_pass, draw.mesh, draw.instance_count, draw.instance_buffer_offset)
     }
 }
 
 @(export)
 render_frame :: proc() {
 
-    //context.allocator = context.temp_allocator
-    //defer free_all(context.temp_allocator)
-    //^in order for this to work I'd need to remove all the real deletes
-
+    /*allocator := context.allocator
+    context.allocator = context.temp_allocator
+    defer {
+        context.allocator = allocator
+        clear_frame()
+    }*/
     defer clear_frame()
 
     //prepare the screen surface
@@ -966,7 +973,7 @@ render_frame :: proc() {
     lights := calculate_lights(frame.lights[:])
     defer delete_lights(lights)
 
-    //pack all view-dependent data...
+    //compute all instance data for passes
     passes := compute_passes(batches, lights, frame.cameras[:])
     defer delete_passes(passes)
 
@@ -1006,7 +1013,7 @@ render_frame :: proc() {
 
             camera := lights.spot_light_shadow_cameras[i]
             bind_camera(shadow_pass, 0, camera)
-            execute_draw_calls(shadow_pass, passes.sl_solid_shadows[i].draw_calls)
+            execute_draw_calls(shadow_pass, passes.sl_solid_shadows[i].draw_calls[:])
 
             wgpu.RenderPassEncoderEnd(shadow_pass)
             wgpu.RenderPassEncoderRelease(shadow_pass)
@@ -1127,7 +1134,7 @@ render_frame :: proc() {
         wgpu.RenderPassEncoderSetPipeline(render_pass, ren.solid_pipeline)
         bind_camera(render_pass, 0, camera)
         bind_lights(render_pass, 3, u32(i))
-        execute_draw_calls(render_pass, passes.solid_main[i].draw_calls)
+        execute_draw_calls(render_pass, passes.solid_main[i].draw_calls[:])
         wgpu.RenderPassEncoderEnd(render_pass)
         wgpu.RenderPassEncoderRelease(render_pass)
 
@@ -1165,7 +1172,7 @@ render_frame :: proc() {
         wgpu.RenderPassEncoderSetPipeline(render_pass, ren.trans_pipeline)
         bind_camera(render_pass, 0, camera)
         bind_lights(render_pass, 3, u32(i))
-        execute_draw_calls(render_pass, passes.trans_main[i].draw_calls)
+        execute_draw_calls(render_pass, passes.trans_main[i].draw_calls[:])
         wgpu.RenderPassEncoderEnd(render_pass)
         wgpu.RenderPassEncoderRelease(render_pass)
     }

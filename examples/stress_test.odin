@@ -50,7 +50,7 @@ New_Cube_Draw :: Cube_Draw{
 }
 
 cubes_draw := New_Cube_Draw
-cubes: [10000]Cube
+cubes: [100000]Cube
 
 init :: proc() {
     window.set_size(Width, Height)
@@ -98,6 +98,29 @@ quit :: proc() {
     graphics.delete_font(font)
 }
 
+import "core:mem"
 main :: proc() {
+    when ODIN_OS != .JS {
+        track: mem.Tracking_Allocator
+        mem.tracking_allocator_init(&track, context.allocator)
+        context.allocator = mem.tracking_allocator(&track)
+    }
+
     engine.boot(init, tick, draw, quit)
+
+    when ODIN_OS != .JS {
+        if len(track.allocation_map) > 0 {
+            fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+            for _, entry in track.allocation_map {
+                fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+            }
+        }
+        if len(track.bad_free_array) > 0 {
+            fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+            for entry in track.bad_free_array {
+                fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+            }
+        }
+        mem.tracking_allocator_destroy(&track)
+    }
 }
