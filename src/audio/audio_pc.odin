@@ -6,6 +6,7 @@ import "base:runtime"
 import "vendor:sdl3"
 import ma "vendor:miniaudio"
 import "core:fmt"
+import "core:sync"
 
 Sound_Key :: struct {
     path: cstring,
@@ -30,10 +31,12 @@ Playing_Sound :: struct {
     max_distance: f32,
 }
 
-ctx: runtime.Context
+//ctx: runtime.Context
 engine: ma.engine
+sdl_stream: ^sdl3.AudioStream
 live_sounds: map[^ma.sound]Playing_Sound
 dead_sounds: map[^ma.sound]Playing_Sound
+sounds_mutex: sync.Mutex
 global_min_distance: f32 = 1.0
 global_max_distance: f32 = 20.0
 
@@ -62,26 +65,34 @@ init :: proc() {
         fmt.panicf("failed to init audio engine: %v", engine_init_result)
     }
 
-    ctx = context
+    ctx := context
     stream_temp = make([]u8, STREAM_TEMP_SIZE)
 
     spec := sdl3.AudioSpec{.F32, i32(ma.engine_get_channels(&engine)), i32(ma.engine_get_sample_rate(&engine))}
-    stream := sdl3.OpenAudioDeviceStream(sdl3.AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, sdl_audio_callback, &ctx)
-    sdl3.ResumeAudioDevice(sdl3.GetAudioStreamDevice(stream))
+    sdl_stream = sdl3.OpenAudioDeviceStream(sdl3.AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, sdl_audio_callback, &ctx)
+    sdl3.ResumeAudioDevice(sdl3.GetAudioStreamDevice(sdl_stream))
 }
 
 quit :: proc() {
     //fmt.println("live_sounds:", len(live_sounds))
     //fmt.println("dead_sounds:", len(dead_sounds))
+
+    sdl3.PauseAudioStreamDevice(sdl_stream)
+    sdl3.LockAudioStream(sdl_stream)
+    defer sdl3.DestroyAudioStream(sdl_stream)
+    defer sdl3.UnlockAudioStream(sdl_stream)
+    
+    if sync.mutex_guard(&sounds_mutex) {
+        for _, sound in live_sounds {
+            ma.sound_uninit(sound.sound)
+            ma.audio_buffer_uninit(sound.audio_buffer)
+        }
+        for _, sound in dead_sounds {
+            ma.sound_uninit(sound.sound)
+            ma.audio_buffer_uninit(sound.audio_buffer)
+        }
+    }
     delete(stream_temp)
-    for _, sound in live_sounds {
-        ma.sound_uninit(sound.sound)
-        ma.audio_buffer_uninit(sound.audio_buffer)
-    }
-    for _, sound in dead_sounds {
-        ma.sound_uninit(sound.sound)
-        ma.audio_buffer_uninit(sound.audio_buffer)
-    }
     ma.engine_uninit(&engine)
 }
 
@@ -105,28 +116,32 @@ delete_sound :: proc(sound: Sound) {
 
 @(private)
 get_new_sound :: proc() -> (playing_sound: Playing_Sound) {
-    for key, sound in dead_sounds {
-        playing_sound = sound
-        //free old sound
-        ma.sound_uninit(sound.sound)
-        ma.audio_buffer_uninit(sound.audio_buffer)
-        //free(sound.audio_buffer)
-        delete_key(&dead_sounds, key)
-        break
+    if sync.mutex_guard(&sounds_mutex) {
+        for key, sound in dead_sounds {
+            playing_sound = sound
+            //free old sound
+            ma.sound_uninit(sound.sound)
+            ma.audio_buffer_uninit(sound.audio_buffer)
+            //free(sound.audio_buffer)
+            delete_key(&dead_sounds, key)
+            break
+        }
+        if playing_sound.sound == nil {
+            playing_sound.sound = new(ma.sound)
+        }
+        live_sounds[playing_sound.sound] = playing_sound
     }
-    if playing_sound.sound == nil {
-        playing_sound.sound = new(ma.sound)
-    }
-    live_sounds[playing_sound.sound] = playing_sound
     return
 }
 
 @(private)
 sound_end :: proc "c" (pUserData: rawptr, pSound: ^ma.sound) {
     context = (^runtime.Context)(pUserData)^
-    playing_sound := live_sounds[pSound]
-    delete_key(&live_sounds, pSound)
-    dead_sounds[pSound] = playing_sound
+    if sync.mutex_guard(&sounds_mutex) {
+        playing_sound := live_sounds[pSound]
+        delete_key(&live_sounds, pSound)
+        dead_sounds[pSound] = playing_sound
+    }
 }
 
 play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (playing_sound: Playing_Sound){
@@ -146,7 +161,7 @@ play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (pl
     sound_config.flags = {.STREAM}
     sound_config.pDataSource = playing_sound.audio_buffer.ref.ds.pCurrent
     sound_config.endCallback = sound_end
-    ctx = context
+    ctx := context
     sound_config.pEndCallbackUserData = &ctx
     sound_config.isLooping = b32(looped)
     sound_result := ma.sound_init_ex(&engine, &sound_config, playing_sound.sound)
@@ -175,60 +190,71 @@ replay_sound :: proc(playing_sound: ^Playing_Sound, looped: bool, fade_in: uint)
 }
 
 loop_sound :: proc(playing_sound: ^Playing_Sound, looped: bool = true) {
-    if playing_sound.sound in live_sounds {
-        ma.sound_set_looping(playing_sound.sound, b32(looped))
-    } else {
-        replay_sound(playing_sound, looped, 0)
+    if sync.mutex_guard(&sounds_mutex) {
+        if playing_sound.sound in live_sounds {
+            ma.sound_set_looping(playing_sound.sound, b32(looped))
+        } else {
+            replay_sound(playing_sound, looped, 0)
+        }
     }
 }
 sound_is_looping :: proc(playing_sound: ^Playing_Sound) -> bool {
-    if playing_sound.sound in live_sounds {
-        return bool(ma.sound_is_looping(playing_sound.sound))
-    } else {
-        return false
+    if sync.mutex_guard(&sounds_mutex) {
+        if playing_sound.sound in live_sounds {
+            return bool(ma.sound_is_looping(playing_sound.sound))
+        }
     }
+    return false
 }
 
 stop_sound :: proc(playing_sound: ^Playing_Sound, finish_playing: bool = false) {
-    if playing_sound.sound in live_sounds {
-        if finish_playing {
-            ma.sound_set_looping(playing_sound.sound, false)
-        } else {
-            ma.sound_stop(playing_sound.sound)
-            ma.sound_seek_to_pcm_frame(playing_sound.sound, 0)
-            //move to dead since sound_stop doesn't call the sound_end callback
-            delete_key(&live_sounds, playing_sound.sound)
-            dead_sounds[playing_sound.sound] = playing_sound^
+    if sync.mutex_guard(&sounds_mutex) {
+        if playing_sound.sound in live_sounds {
+            if finish_playing {
+                ma.sound_set_looping(playing_sound.sound, false)
+            } else {
+                ma.sound_stop(playing_sound.sound)
+                ma.sound_seek_to_pcm_frame(playing_sound.sound, 0)
+                //move to dead since sound_stop doesn't call the sound_end callback
+                delete_key(&live_sounds, playing_sound.sound)
+                dead_sounds[playing_sound.sound] = playing_sound^
+            }
         }
     }
 }
 
 sound_is_playing :: proc(playing_sound: ^Playing_Sound) -> bool {
-    if playing_sound.sound in live_sounds {
-        return bool(ma.sound_is_playing(playing_sound.sound))
+    if sync.mutex_guard(&sounds_mutex) {
+        if playing_sound.sound in live_sounds {
+            return bool(ma.sound_is_playing(playing_sound.sound))
+        }
     }
     return false
 }
 
 pause_sound :: proc(playing_sound: ^Playing_Sound, fade_out: uint = 0) {
-    if playing_sound.sound in live_sounds {
-        if fade_out > 0 {
-            ma.sound_stop_with_fade_in_milliseconds(playing_sound.sound, u64(fade_out))
-        } else {
-            ma.sound_stop(playing_sound.sound)
+    if sync.mutex_guard(&sounds_mutex) {
+        if playing_sound.sound in live_sounds {
+            if fade_out > 0 {
+                ma.sound_stop_with_fade_in_milliseconds(playing_sound.sound, u64(fade_out))
+            } else {
+                ma.sound_stop(playing_sound.sound)
+            }
         }
     }
 }
 resume_sound :: proc(playing_sound: ^Playing_Sound, fade_in: uint = 0) {
-    if playing_sound.sound in live_sounds {
-        ma.sound_set_stop_time_in_milliseconds(playing_sound.sound, ~u64(0)) //workaround for if sound was scheduled to stop
-        if fade_in > 0 {
-            ma.sound_set_fade_in_milliseconds(playing_sound.sound, -1, 1.0, u64(fade_in))
+    if sync.mutex_guard(&sounds_mutex) {
+        if playing_sound.sound in live_sounds {
+            ma.sound_set_stop_time_in_milliseconds(playing_sound.sound, ~u64(0)) //workaround for if sound was scheduled to stop
+            if fade_in > 0 {
+                ma.sound_set_fade_in_milliseconds(playing_sound.sound, -1, 1.0, u64(fade_in))
+            } else {
+                ma.sound_start(playing_sound.sound)
+            }
         } else {
-            ma.sound_start(playing_sound.sound)
+            replay_sound(playing_sound, false, fade_in)
         }
-    } else {
-        replay_sound(playing_sound, false, fade_in)
     }
 }
 
@@ -268,14 +294,18 @@ set_listener_orientation :: proc(direction: [3]f32, up: [3]f32 = {0, 1, 0}, list
 }
 
 set_global_min_distance :: proc(d: f32) {
-    global_min_distance = d
-    for ma_sound, sound in live_sounds {
-        ma.sound_set_min_distance(ma_sound, sound.min_distance==0?global_min_distance:sound.min_distance)
+    if sync.mutex_guard(&sounds_mutex) {
+        global_min_distance = d
+        for ma_sound, sound in live_sounds {
+            ma.sound_set_min_distance(ma_sound, sound.min_distance==0?global_min_distance:sound.min_distance)
+        }
     }
 }
 set_global_max_distance :: proc(d: f32) {
-    global_max_distance = d
-    for ma_sound, sound in live_sounds {
-        ma.sound_set_max_distance(ma_sound, sound.max_distance==0?global_max_distance:sound.max_distance)
+    if sync.mutex_guard(&sounds_mutex) {
+        global_max_distance = d
+        for ma_sound, sound in live_sounds {
+            ma.sound_set_max_distance(ma_sound, sound.max_distance==0?global_max_distance:sound.max_distance)
+        }
     }
 }
