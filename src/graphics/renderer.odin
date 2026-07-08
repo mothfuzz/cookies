@@ -766,24 +766,35 @@ Pass_Staging :: struct {
 @(private)
 compute_pass :: proc(batches: []Mesh_Batch, cam: Camera_Draw, solid, trans: ^Pass_Staging) {
     for batch in batches {
-        solid_start := u32(len(solid.instances))
-        trans_start := u32(len(trans.instances))
+        solid_start, trans_start: u32
+        if solid != nil {
+            solid_start = u32(len(solid.instances))
+        }
+        if trans != nil {
+            trans_start = u32(len(trans.instances))
+        }
 
-        for &instance in batch.instances {
+        for instance in batch.instances {
+            instance := instance
             is_solid, is_trans := instance_filter(batch.mesh, batch.material, instance)
             if !is_solid && !is_trans do continue
             if !bounds_in_frustum(cam, instance.bounding_box) do continue
             calculate_mesh_world(&instance, cam)
-            if is_solid {
+            if is_solid && solid != nil {
                 append(&solid.instances, instance)
             }
-            if is_trans {
-                append(&solid.instances, instance)
+            if is_trans && trans != nil {
+                append(&trans.instances, instance)
             }
         }
 
-        solid_count := u32(len(solid.instances)) - solid_start
-        trans_count := u32(len(trans.instances)) - trans_start
+        solid_count, trans_count: u32
+        if solid != nil {
+            solid_count = u32(len(solid.instances)) - solid_start
+        }
+        if trans != nil {
+            trans_count = u32(len(trans.instances)) - trans_start
+        }
 
         if solid_count > 0 {
             append(&solid.draw_calls, Draw_Call{
@@ -877,6 +888,7 @@ compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_
 
     realloc_instance_buffer(running_offset)
 
+    //write the vertex buffer...
     for &pass in passes.pl_solid_shadows {
         write_pass_instances(&pass)
     }
