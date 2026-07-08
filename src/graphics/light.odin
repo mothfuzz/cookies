@@ -296,6 +296,9 @@ delete_lights :: proc(lights: Lights) {
     delete(lights.point_lights)
     delete(lights.directional_lights)
     delete(lights.spot_lights)
+    delete(lights.point_light_shadow_cameras)
+    delete(lights.directional_light_shadow_cameras)
+    delete(lights.spot_light_shadow_cameras)
 }
 
 Lights_Uniforms :: struct {
