@@ -39,6 +39,7 @@ step :: proc(delta_time: f64) -> bool {
         if user_quit != nil {
             user_quit()
         }
+        graphics.wait_idle()
         graphics.quit()
         audio.quit()
         resources.unregister_loaders()

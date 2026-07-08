@@ -128,4 +128,6 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
         graphics.render_frame()
         free_all(context.temp_allocator)
     }
+
+    graphics.wait_idle() //wait until frame-in-flight is done before shutting down
 }

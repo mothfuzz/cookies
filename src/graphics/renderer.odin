@@ -502,7 +502,15 @@ init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
     wgpu.InstanceRequestAdapter(ren.instance, &{compatibleSurface = ren.surface}, {callback=request_adapter, userdata1=&ctx})
 }
 
+wait_idle :: proc() {
+    if !ren.ready do return
+    for !wgpu.DevicePoll(ren.device, true) {}
+}
+
+
 quit :: proc() {
+    if !ren.ready do return
+
     delete_frame()
     delete_ui_batches()
     delete_defaults()
@@ -528,11 +536,16 @@ quit :: proc() {
     delete_texture(ren.accum)
     delete_texture(ren.revealage)
     delete_shadows()
+
+    //safely clean up resources prior to releasing
+    wgpu.SurfaceUnconfigure(ren.surface)
+
+    wgpu.SurfaceRelease(ren.surface)
     wgpu.QueueRelease(ren.queue)
     wgpu.DeviceRelease(ren.device)
     wgpu.AdapterRelease(ren.adapter)
-    wgpu.SurfaceRelease(ren.surface)
     wgpu.InstanceRelease(ren.instance)
+    ren.ready = false //necessary if we want to re-boot it
 }
 
 //now for the good part!
@@ -932,6 +945,7 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
 
 @(export)
 render_frame :: proc() {
+    if !ren.ready do return
 
     /*allocator := context.allocator
     context.allocator = context.temp_allocator
@@ -944,9 +958,12 @@ render_frame :: proc() {
     //prepare the screen surface
     surface_tex := wgpu.SurfaceGetCurrentTexture(ren.surface)
     switch surface_tex.status {
-    case .SuccessOptimal, .SuccessSuboptimal, .Occluded:
+    case .SuccessOptimal, .SuccessSuboptimal:
         //yay...!
-    case .Timeout, .Outdated, .Lost:
+    case .Occluded, .Timeout:
+        //no drawable this frame, skip it...
+        return
+    case .Outdated, .Lost:
         if surface_tex.texture != nil {
             wgpu.TextureRelease(surface_tex.texture)
         }
@@ -956,6 +973,7 @@ render_frame :: proc() {
         fmt.eprintln(surface_tex.status)
         panic("Surface texture lost! Unable to draw to screen.")
     }
+    if surface_tex.texture == nil do return
     defer wgpu.TextureRelease(surface_tex.texture)
     screen := wgpu.TextureCreateView(surface_tex.texture, &{format=with_srgb(ren.config.format), mipLevelCount=1, arrayLayerCount=1})
     defer wgpu.TextureViewRelease(screen)
