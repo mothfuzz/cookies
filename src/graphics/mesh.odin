@@ -487,7 +487,7 @@ instance_buffer_cap: u64 = 0
 
 @(private)
 realloc_instance_buffer :: proc(new_size: u64) {
-    if new_size < instance_buffer_cap do return
+    if new_size == 0 || new_size <= instance_buffer_cap do return
     if instance_buffer_cap > 0 {
         wgpu.BufferRelease(instance_buffer)
     }

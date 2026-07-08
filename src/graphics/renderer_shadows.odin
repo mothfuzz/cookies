@@ -13,18 +13,6 @@ Shadow_Renderer :: struct {
 }
 
 init_shadows :: proc() {
-    camera_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
-        entryCount = len(camera_layout_entries),
-        entries = raw_data(camera_layout_entries),
-    })
-    material_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
-        entryCount = len(material_layout_entries),
-        entries = raw_data(material_layout_entries),
-    })
-    skeletons_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
-        entryCount = len(skeletons_layout_entries),
-        entries = raw_data(skeletons_layout_entries),
-    })
     bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, skeletons_layout}
     ren.shadow_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
         bindGroupLayoutCount = len(bind_group_layouts),

@@ -72,6 +72,7 @@ configure_surface :: proc(size: [2]uint = 0) {
     if status == .Error {
         panic("Unable to get surface capabilities!")
     }
+    defer wgpu.SurfaceCapabilitiesFreeMembers(caps)
     if caps.formatCount == 0 {
         panic("No available surface formats!")
     }
@@ -502,9 +503,13 @@ init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
     wgpu.InstanceRequestAdapter(ren.instance, &{compatibleSurface = ren.surface}, {callback=request_adapter, userdata1=&ctx})
 }
 
-wait_idle :: proc() {
-    if !ren.ready do return
-    for !wgpu.DevicePoll(ren.device, true) {}
+when ODIN_OS != .JS {
+    wait_idle :: proc() {
+        if !ren.ready do return
+        for !wgpu.DevicePoll(ren.device, true) {}
+    }
+} else {
+    wait_idle :: proc() {}
 }
 
 
@@ -512,7 +517,7 @@ quit :: proc() {
     if !ren.ready do return
 
     delete_frame()
-    delete_ui_batches()
+    delete_ui()
     delete_defaults()
     delete_lights_buffer()
     delete_skeletons_buffer()
@@ -527,6 +532,10 @@ quit :: proc() {
     wgpu.SamplerRelease(ren.composite_sampler)
     wgpu.RenderPipelineRelease(ren.camera_fill_pipeline)
     wgpu.PipelineLayoutRelease(ren.camera_fill_layout)
+    wgpu.BindGroupLayoutRelease(camera_layout)
+    wgpu.BindGroupLayoutRelease(material_layout)
+    wgpu.BindGroupLayoutRelease(skeletons_layout)
+    wgpu.BindGroupLayoutRelease(lights_layout)
     wgpu.ShaderModuleRelease(ren.shader)
     wgpu.ShaderModuleRelease(ren.composite_shader)
     wgpu.ShaderModuleRelease(ren.camera_fill_shader)

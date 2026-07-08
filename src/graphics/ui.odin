@@ -7,6 +7,7 @@ import "vendor:wgpu"
 
 ui_shader: wgpu.ShaderModule
 ui_pipeline: wgpu.RenderPipeline
+ui_pipeline_layout: wgpu.PipelineLayout
 ui_bind_group_layout: wgpu.BindGroupLayout
 ui_sampler: wgpu.Sampler
 
@@ -39,7 +40,7 @@ init_ui :: proc() {
         entries = raw_data(ui_layout_entries),
     })
 
-    ui_layout := wgpu.DeviceCreatePipelineLayout(ren.device, &{
+    ui_pipeline_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
         bindGroupLayoutCount = 1,
         bindGroupLayouts = &ui_bind_group_layout,
     })
@@ -51,7 +52,7 @@ init_ui :: proc() {
         },
     })
     ui_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
-        layout = ui_layout,
+        layout = ui_pipeline_layout,
         label = "ui_pipeline",
         vertex = {
             module = ui_shader,
@@ -122,6 +123,25 @@ delete_ui_batches :: proc() {
         delete(batch.instances)
     }
     delete(ui_batches)
+}
+
+delete_ui :: proc() {
+    delete_ui_batches()
+    if ui_pipeline != nil {
+        wgpu.RenderPipelineRelease(ui_pipeline)
+    }
+    if ui_pipeline_layout != nil {
+        wgpu.PipelineLayoutRelease(ui_pipeline_layout)
+    }
+    if ui_bind_group_layout != nil {
+        wgpu.BindGroupLayoutRelease(ui_bind_group_layout)
+    }
+    if ui_shader != nil {
+        wgpu.ShaderModuleRelease(ui_shader)
+    }
+    if ui_sampler != nil {
+        wgpu.SamplerRelease(ui_sampler)
+    }
 }
 
 //base function for all UI drawing.
