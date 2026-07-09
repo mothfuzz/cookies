@@ -9,6 +9,7 @@ The web build is using native web technologies and should run on any modern brow
 To build/run on any other platform, simply make sure you have SDL3 and its dependencies installed.
 
 Special thanks to the SDL team for their commitment to easy cross-platform game libraries!
+
 Honorable mention as well to W3C for WebGPU & WebAudio, and their committment to open standards.
 
 Current features:
@@ -27,7 +28,7 @@ Current features:
 - fixed timestep for game updates & variable rate for drawing ('fast vsync' if available)
 - keyboard & mouse input
 - basic audio (sound + music loading, playback, looping, fading, spatialization)
-- multithreading actor system with message passing
+- multithreaded actor system with message passing
 - basic spatial querying/collision detection
   - 3D Grid with fast nearby/distance queries
   - Sphere, Capsule, AABB, Convex_Hull, Tri_Mesh
