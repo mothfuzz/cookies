@@ -9,22 +9,48 @@ The web build is using native web technologies and should run on any modern brow
 To build/run on any other platform, simply make sure you have SDL3 and its dependencies installed.
 
 Special thanks to the SDL team for their commitment to easy cross-platform game libraries!
+Honorable mention as well to W3C for WebGPU & WebAudio, and their committment to open standards.
 
 Current features:
-- (in-progress) WebGPU renderer
-- window/context creation
+- WebGPU renderer (same feature set on desktop & web)
+  - 2D/3D agnostic - sprites in 3D, polygons in 2D
+  - full PBR lighting shader
+  - shadow mapping with PCF, shadows optional on every light
+  - skeletal animation + weighting
+  - weighted/blended OIT for overlaping translucents
+  - automatic batching/instancing for all draws
+  - native multi-camera support (for splitscreen, VR, 3D displays, etc)
+  - frustum culling per camera
+  - basic UI primitives (textured quads + text)
+  - OTF font support for both UI & 3D views
+- window creation/main loop handling unified for both desktop and web
+- fixed timestep for game updates & variable rate for drawing ('fast vsync' if available)
 - keyboard & mouse input
-- main loop with fixed timestep for game updates & variable rate for drawing
 - basic audio (sound + music loading, playback, looping, fading, spatialization)
-- parallel actor system for in-game entities
-- spatial querying/collision detection
+- multithreading actor system with message passing
+- basic spatial querying/collision detection
+  - 3D Grid with fast nearby/distance queries
+  - Sphere, Capsule, AABB, Convex_Hull, Tri_Mesh
+  - simple quake-style move-and-slide kinematics over Tri_Mesh colliders
+- resource manager, can auto-populate structs with loaded resources
+  - can save/load those structs from json as well
+  - can also embed resources into the executable
+- file format support:
+  - textures
+    - png & jpg supported on both desktop & web, other formats vary by platform
+  - static meshes
+    - obj
+  - scenes/animated meshes:
+    - gltf
+  - audio:
+    - ogg, wav, mp3 supported on both desktop & web, other formats vary by platform
 
-Planned features:
-- gamepad support
+Planned major features:
 - exporting engine functionality to shared libraries
 - FFI wrappers for various scripting languages (Python for my wife)
 - dynamic mod loading on desktop platforms
 - deterministic gamestate, serializability, saving and loading
+- minor features listed in TODO.org
 
 Not planned:
 - level editors/high level format support (other than glTF)

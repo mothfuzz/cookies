@@ -1,11 +1,44 @@
 #+title: Todo
 
 - expose "lib" package which re-imports all functionality so we don't have a dozen imports per project (a 'prelude' to use rust terms)
-- use this lib package as an API surface, expose dynamic loading via .dll/.so/whatever.
-- once you have dynamic loading, add scripting system
+- optionally use this lib package as an API surface, in order to expose dynamic loading via .dll/.so/whatever.
+- once you have dynamic loading, add modding/scripting subsystem
+- (maybe this can wait until post-1.0)
 
-- skeletal animation needs to be completed.
-- shadow mapping & translucent/colored shadows for directional lights
-  - point & spot lights can come later
+- weighting/crossfading for animations
+  - possibly move 'animation state' into a generic structure that can animate skeletons, textures, or even sprite frames (ala Aseprites' animation JSON format)
+  - basically separate the concept of 'time progression' from 'animation data'
 
-- 3D audio
+- shadow mapping needs to be completed for directional lights & point lights (can largely use the existing functionality, with caveats (cascades for directional, cubemaps for point))
+  
+- translucent/colored shadows for alpha-blended surfaces (use Multiply blending when rendering to shadow map, requires lights to render in two passes though)
+
+- fix transmission system to be more physically-based, possibly using an SSS map / compute thickness from shadow map (if present) (might also be a post-1.0 feature)
+
+- some kind of dynamic environment probe (not baked IBL or spherical harmonics) for metallic reflections, possibly also a planar reflection capture in addition, using the same general mechanism
+
+- move collision data the hell out of glTF - expose a format-agnostic Mesh_Data struct returned by import procs that can be queried by the user to populate collision/AI/navmesh structures themselves
+
+- clean up ui_draw_* functions to be more architecturally similar to the rest of the renderer (might have to rethink coordinate systems...)
+
+- World structure (do not incorporate Actors, requires user-knowledge of multithreading) that associates a single transform.Node with all subsystems that require the concept of 'where an entity is' (spatial grid/collision/spatial audio/etc.), fan-out to those modules in one call instead of user calling a bunch of update_/transform_* in a row
+
+- fully migrate all examples to compile with current APIs
+  - rewrite main.odin to a. work at all and b. be a better testbed/demo program to showcase engine's capabilities
+
+- gamepad support via SDL's gamepad facilities (possibly need another API for Web, or limit to desktop-only)
+- also on that note, IME input, mouse wheel, maaaybe FPS-style cursor lock.
+
+- more window toggles (fullscreen, logical resolution with letterboxing/pillarboxing, vsync options, show/hide cursor, etc)
+
+- raycasts, raycasts, raycasts.
+- also in general Tri_Mesh and regular colliders are two separate worlds, have a user be able to do spatial.move() using arbitrary colliders, not just sphere-trisoup. Have Tri_Mesh work with the collider procs as well (this is a prerequisite for proper spatial.move anyway).
+
+- more rendering primitives - lines, line lists, line strips, wireframes, fill-boxes, collider shapes, etc.
+
+- render-to-texture/framebuffer API
+- simple non-shadery postprocessing parameters (logical resolution as mentioned, LUTs, exposure/gamma settings)
+- maybe have all these in the Screen_Uniforms and separate from Camera
+  - more involved/stylized shaders like bloom/DoF/motion blur/vignetting/film grain/etc. would have to be written in by users and added as their own pipelines/passes. So build the pipes, but not the water.
+
+- audio settings (mainly just be able to set volume dynamically)
