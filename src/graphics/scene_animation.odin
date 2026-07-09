@@ -56,22 +56,23 @@ Animation_Instance :: struct {
     playing: bool,
     looping: bool,
     speed: f32,
+    weight: f32,
     channels: []Animation_Channel_Instance,
 }
 
-Animation_State :: struct {
+Animation_Player :: struct {
     scene: ^Scene,
     instances: []Animation_Instance, //'now playing' bookkeeping
 }
 
-animate :: proc(scene: ^Scene) -> (anim: Animation_State) {
+animate :: proc(scene: ^Scene) -> (anim: Animation_Player) {
     anim.scene = scene
     anim.instances = make([]Animation_Instance, len(scene.animations))
     //set duration to maximum timestamp
     for &a, i in anim.scene.animations {
         instance := &anim.instances[i]
         instance.channels = make([]Animation_Channel_Instance, len(a.channels))
-        for &c in a.channels {
+        for &c, j in a.channels {
             for timestamp in c.input {
                 if timestamp > instance.duration {
                     instance.duration = timestamp
@@ -82,15 +83,29 @@ animate :: proc(scene: ^Scene) -> (anim: Animation_State) {
     return
 }
 
-deanimate :: proc(anim: Animation_State) {
+deanimate :: proc(anim: Animation_Player) {
     for a in anim.instances {
         delete(a.channels)
     }
     delete(anim.instances)
 }
 
-@(private)
-progress :: proc(anim: ^Animation_State, dt: f64) {
+progress :: proc(anim: ^Animation_Player, dt: f64) {
+    //for weighted quaternion sum per-node
+    rot_accum := make([]quaternion128, len(anim.scene.nodes), context.temp_allocator) 
+    rot_weight := make([]f32, len(anim.scene.nodes), context.temp_allocator)
+
+    //pass 1: set to bind pose
+    for &a, i in anim.instances {
+        if a.weight == 0 do continue
+        source_channels := &anim.scene.animations[i].channels
+        for &channel, c in a.channels {
+            node := anim.scene.nodes[source_channels[c].target_node]
+            trans := transform.write(anim.scene.tree, node)
+            trans^ = node.original_trans
+        }
+    }
+    //pass 2: accumulate transforms
     for &a, i in anim.instances {
         source_channels := &anim.scene.animations[i].channels
 
@@ -101,7 +116,6 @@ progress :: proc(anim: ^Animation_State, dt: f64) {
             for &channel, c in a.channels {
                 source_channel := &source_channels[c]
                 last_frame: uint = len(source_channel.input) - 1
-                trans := transform.write(anim.scene.tree, anim.scene.nodes[source_channel.target_node])
                 //handle looping/clamping
                 if a.speed > 0 {
                     if current_time > a.duration {
@@ -150,48 +164,84 @@ progress :: proc(anim: ^Animation_State, dt: f64) {
                     next_time := source_channel.input[channel.next_frame]
                     t = clamp((a.current_time - prev_time) / (next_time - prev_time), 0, 1)
                 }
+
+                if a.weight == 0 do continue //still progress time, but skip calcs
+
+                node := anim.scene.nodes[source_channel.target_node]
+                trans := transform.write(anim.scene.tree, node)
                 switch o in source_channel.output {
                 case Keyframes_Translation:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     translation := linalg.lerp(prev_frame, next_frame, t)
-                    trans.translation = translation
+                    trans.translation += a.weight * (translation - node.original_trans.translation)
                 case Keyframes_Rotation:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     rotation := linalg.quaternion_slerp(prev_frame, next_frame, t)
-                    trans.rotation = rotation
+                    rot_weight[source_channel.target_node] += a.weight
+                    delta := rotation * linalg.quaternion_inverse(node.original_trans.rotation)
+                    new_rot := quaternion(x=a.weight*delta.x, y=a.weight*delta.y, z=a.weight*delta.z, w=a.weight*delta.w)
+                    if linalg.dot(rot_accum[source_channel.target_node], new_rot) < 0 {
+                        //make sure weights are all in the same hemisphere
+                        new_rot = -new_rot
+                    }
+                    rot_accum[source_channel.target_node] += new_rot
+                    //trans.rotation = rotation
                 case Keyframes_Scale:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     scale := linalg.lerp(prev_frame, next_frame, t)
-                    trans.scale = scale
+                    trans.scale += a.weight * (scale - node.original_trans.scale)
                 }
             }
         } else {
             //make sure to not loop between frames when stopped
             for &channel, c in a.channels {
                 channel.prev_frame = channel.next_frame
+                if a.weight == 0 do continue
                 source_channel := &source_channels[c]
-                trans := transform.write(anim.scene.tree, anim.scene.nodes[source_channel.target_node])
+                node := anim.scene.nodes[source_channel.target_node]
+                trans := transform.write(anim.scene.tree, node)
                 switch o in source_channel.output {
                 case Keyframes_Translation:
                     translation := o[channel.next_frame]
-                    trans.translation = translation
+                    trans.translation += a.weight * (translation - node.original_trans.translation)
                 case Keyframes_Rotation:
                     rotation := o[channel.next_frame]
-                    trans.rotation = rotation
+                    rot_weight[source_channel.target_node] += a.weight
+                    delta := rotation * linalg.quaternion_inverse(node.original_trans.rotation)
+                    new_rot := quaternion(x=a.weight*delta.x, y=a.weight*delta.y, z=a.weight*delta.z, w=a.weight*delta.w)
+                    if linalg.dot(rot_accum[source_channel.target_node], new_rot) < 0 {
+                        new_rot = -new_rot
+                    }
+                    rot_accum[source_channel.target_node] += new_rot
+                    //trans.rotation = rotation
                 case Keyframes_Scale:
                     scale := o[channel.next_frame]
-                    trans.scale = scale
+                    trans.scale += a.weight * (scale - node.original_trans.scale)
                 }
             }
         }
     }
+    //now apply accumulated rotations...
+    for &node, i in anim.scene.nodes {
+        if rot_weight[i] == 0 do continue
+        accum := rot_accum[i]
+        weight := rot_weight[i]
+        rot := quaternion(
+            x = accum.x,
+            y = accum.y,
+            z = accum.z,
+            w = (1-weight)+accum.w,
+        )
+        trans := transform.write(anim.scene.tree, node)
+        trans.rotation = linalg.normalize(rot) * node.original_trans.rotation
+    }
 }
 
 
-play :: proc(anim: ^Animation_State, id: int, looping: bool = false, speed: f32 = 1.0) {
+play :: proc(anim: ^Animation_Player, id: int, looping: bool = false, speed: f32 = 1.0, weight: f32 = 1.0) {
     a := &anim.instances[id]
     a.current_time = 0
     for &c, i in a.channels {
@@ -207,8 +257,9 @@ play :: proc(anim: ^Animation_State, id: int, looping: bool = false, speed: f32 
     a.playing = true
     a.looping = looping
     a.speed = speed
+    a.weight = weight
 }
-stop :: proc(anim: ^Animation_State, id: int, return_to_rest: bool = false) {
+stop :: proc(anim: ^Animation_Player, id: int, return_to_rest: bool = false) {
     a := &anim.instances[id]
     a.playing = false
     a.current_time = 0
@@ -223,9 +274,9 @@ stop :: proc(anim: ^Animation_State, id: int, return_to_rest: bool = false) {
         }
     }
 }
-pause :: proc(anim: ^Animation_State, id: int) {
+pause :: proc(anim: ^Animation_Player, id: int) {
     anim.instances[id].playing = false
 }
-resume :: proc(anim: ^Animation_State, id: int) {
+resume :: proc(anim: ^Animation_Player, id: int) {
     anim.instances[id].playing = true
 }

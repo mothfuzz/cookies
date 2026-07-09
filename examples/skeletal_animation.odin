@@ -16,11 +16,11 @@ light: graphics.Directional_Light
 
 brainstem: graphics.Scene
 brainstem_trans: transform.Node
-brainstem_anim: graphics.Animation_State
+brainstem_anim: graphics.Animation_Player
 
 brainstem2: graphics.Scene
 brainstem2_trans: transform.Node
-brainstem2_anim: graphics.Animation_State
+brainstem2_anim: graphics.Animation_Player
 
 init :: proc() {
     window.set_size(800, 800)
@@ -40,7 +40,7 @@ init :: proc() {
     brainstem_trans = transform.create_node(&tree, {translation={0, -1, 5}})
     graphics.link_scene_transform(&brainstem, brainstem_trans)
     brainstem_anim = graphics.animate(&brainstem)
-    graphics.play(&brainstem_anim, 0, true, 0.5)
+    graphics.play(&brainstem_anim, 0, true, 0.5, weight=0.6)
     fmt.printfln("%#v", brainstem.nodes[0])
 
     brainstem2 = graphics.copy_scene(&brainstem)
@@ -85,8 +85,10 @@ tick :: proc() {
 
 draw :: proc(a: f64, dt: f64) {
     graphics.draw_camera(cam)
-    graphics.draw_scene(brainstem, a, dt, &brainstem_anim)
-    graphics.draw_scene(brainstem2, a, dt, &brainstem2_anim)
+    graphics.progress(&brainstem_anim, dt)
+    graphics.progress(&brainstem2_anim, dt)
+    graphics.draw_scene(brainstem, a)
+    graphics.draw_scene(brainstem2, a)
     graphics.draw_light(light)
 }
 
