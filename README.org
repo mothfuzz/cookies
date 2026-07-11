@@ -17,7 +17,7 @@ Current features:
   - 2D/3D agnostic - sprites in 3D, polygons in 2D
   - full PBR lighting shader
   - shadow mapping with PCF, shadows optional on every light
-  - skeletal animation + weighting
+  - skeletal animation + weighted blending of multiple animations
   - weighted/blended OIT for overlaping translucents
   - automatic batching/instancing for all draws
   - native multi-camera support (for splitscreen, VR, 3D displays, etc)
