@@ -93,7 +93,6 @@ deanimate :: proc(anim: Animation_Player) {
 progress :: proc(anim: ^Animation_Player, dt: f64) {
     //for weighted quaternion sum per-node
     rot_accum := make([]quaternion128, len(anim.scene.nodes), context.temp_allocator) 
-    rot_weight := make([]f32, len(anim.scene.nodes), context.temp_allocator)
 
     //pass 1: set to bind pose
     for &a, i in anim.instances {
@@ -179,7 +178,6 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     rotation := linalg.quaternion_slerp(prev_frame, next_frame, t)
-                    rot_weight[source_channel.target_node] += a.weight
                     delta := rotation * linalg.quaternion_inverse(node.original_trans.rotation)
                     new_rot := quaternion(x=a.weight*delta.x, y=a.weight*delta.y, z=a.weight*delta.z, w=a.weight*delta.w)
                     if linalg.dot(rot_accum[source_channel.target_node], new_rot) < 0 {
@@ -209,7 +207,6 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
                     trans.translation += a.weight * (translation - node.original_trans.translation)
                 case Keyframes_Rotation:
                     rotation := o[channel.next_frame]
-                    rot_weight[source_channel.target_node] += a.weight
                     delta := rotation * linalg.quaternion_inverse(node.original_trans.rotation)
                     new_rot := quaternion(x=a.weight*delta.x, y=a.weight*delta.y, z=a.weight*delta.z, w=a.weight*delta.w)
                     if linalg.dot(rot_accum[source_channel.target_node], new_rot) < 0 {
@@ -226,20 +223,13 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
     }
     //now apply accumulated rotations...
     for &node, i in anim.scene.nodes {
-        if rot_weight[i] == 0 do continue
         accum := rot_accum[i]
-        weight := rot_weight[i]
-        rot := quaternion(
-            x = accum.x,
-            y = accum.y,
-            z = accum.z,
-            w = (1-weight)+accum.w,
-        )
+        if accum == 0 do continue
         trans := transform.write(anim.scene.tree, node)
-        trans.rotation = linalg.normalize(rot) * node.original_trans.rotation
+        trans.rotation = linalg.normalize(accum) * node.original_trans.rotation
     }
 }
-
+import "core:fmt"
 
 play :: proc(anim: ^Animation_Player, id: int, looping: bool = false, speed: f32 = 1.0, weight: f32 = 1.0) {
     a := &anim.instances[id]
