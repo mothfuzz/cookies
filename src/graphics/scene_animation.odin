@@ -229,7 +229,6 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
         trans.rotation = linalg.normalize(accum) * node.original_trans.rotation
     }
 }
-import "core:fmt"
 
 play :: proc(anim: ^Animation_Player, id: int, looping: bool = false, speed: f32 = 1.0, weight: f32 = 1.0) {
     a := &anim.instances[id]
