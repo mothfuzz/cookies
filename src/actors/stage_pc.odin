@@ -6,7 +6,7 @@ import "core:os"
 import "core:thread"
 import "core:sync"
 import hm "core:container/handle_map"
-import "core:fmt"
+import "core:log"
 
 Stage_Sync :: struct {
     pool: ^thread.Pool,
@@ -22,11 +22,11 @@ work :: proc(t: thread.Task) {
     s := (^Stage)(t.data)
     starting_index := t.user_index
     ending_index := min(len(s.handles), starting_index + max(1, len(s.handles)/num_workers()))
-    //fmt.println("updating actors numbered", starting_index, "-", ending_index, "in this thread")
+    //log.debug("updating actors numbered", starting_index, "-", ending_index, "in this thread")
     for i := starting_index; i < ending_index; i += 1 {
         actor := hm.get(&s.actors, s.handles[i]).ptr
         if actor.state == .Active && actor.user_tick != nil {
-            //fmt.println("processing actor", actor.id)
+            //log.debug("processing actor", actor.id)
             actor->user_tick()
         }
     }
@@ -39,7 +39,7 @@ work_events :: proc(t: thread.Task) {
     for i := starting_index; i < ending_index; i += 1 {
         actor := hm.get(&s.actors, s.handles[i]).ptr
         if actor.state == .Active {
-            //fmt.println("processing actor", actor.id)
+            //log.debug("processing actor", actor.id)
             process_events(s, actor)
         }
     }

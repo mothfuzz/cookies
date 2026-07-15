@@ -1,7 +1,7 @@
 #+build !js
 package engine
 
-import "core:fmt"
+import "core:log"
 import "vendor:sdl3"
 import "core:os"
 
@@ -21,13 +21,16 @@ set_exe_working_dir :: proc() -> os.Error {
 @(export)
 boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
 
+    context.logger = log.create_console_logger()
+    defer log.destroy_console_logger(context.logger)
+
     if err := set_exe_working_dir(); err != nil {
-        fmt.eprintln("Failed to set working directory, files may not load")
+        log.error("Failed to set working directory, files may not load")
     }
     
     success := sdl3.Init({.VIDEO, .AUDIO})
     if !success {
-        fmt.panicf("Unable to initialize SDL3")
+        log.panic("Unable to initialize SDL3")
     }
     defer sdl3.Quit()
     window.window = sdl3.CreateWindow("hehe", 640, 400, sdl3.WINDOW_RESIZABLE)

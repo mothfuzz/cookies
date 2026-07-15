@@ -79,9 +79,7 @@ load_texture :: proc(tex: ^graphics.Texture) {
 unload_texture :: proc(tex: ^graphics.Texture) {
     graphics.delete_texture(tex^)
 }
-import "core:fmt"
 load_material :: proc(mat: ^graphics.Material) {
-    fmt.println("loading material:", mat.key)
     base_color_tex := graphics.Texture{path=mat.base_color}
     if mat.base_color == nil || string(mat.base_color) == "" {
         base_color_tex = graphics.white_tex
@@ -130,6 +128,12 @@ load_scene :: proc(s: ^graphics.Scene) {
 unload_scene :: proc(s: ^graphics.Scene) {
     graphics.delete_scene(s^)
 }
+load_font :: proc(font: ^graphics.Font) {
+    font^ = graphics.make_font_from_file(file_map.read(font.path), font.size)
+}
+unload_font :: proc(font: ^graphics.Font) {
+    graphics.delete_font(font^)
+}
 import "cookies:audio"
 load_sound :: proc(s: ^audio.Sound) {
     s^ = audio.make_sound_from_file(file_map.read(s.path))
@@ -144,12 +148,14 @@ register_loaders :: proc() {
     register_loader(load_material, unload_material)
     register_loader(load_scene, unload_scene)
     register_loader(load_sound, unload_sound)
+    register_loader(load_font, unload_font)
 }
 unregister_loaders :: proc() {
     delete(get_resource_map(graphics.Mesh_Key, graphics.Mesh)^) 
     delete(get_resource_map(graphics.Texture_Key, graphics.Texture)^) 
     delete(get_resource_map(graphics.Material_Key, graphics.Material)^) 
-    delete(get_resource_map(graphics.Scene_Key, graphics.Scene)^) 
+    delete(get_resource_map(graphics.Scene_Key, graphics.Scene)^)
+    delete(get_resource_map(graphics.Font_Key, graphics.Font)^)
     delete(get_resource_map(audio.Sound_Key, audio.Sound)^) 
 }
 
@@ -169,6 +175,9 @@ load_all :: proc(res: ^$T) {
             load(r)
         case graphics.Scene:
             r := cast(^graphics.Scene)(ptr)
+            load(r)
+        case graphics.Font:
+            r := cast(^graphics.Font)(ptr)
             load(r)
         case audio.Sound:
             r := cast(^audio.Sound)(ptr)
@@ -192,6 +201,9 @@ unload_all :: proc(res: ^$T) {
             unload(r)
         case graphics.Scene:
             r := cast(^graphics.Scene)(ptr)
+            unload(r)
+        case graphics.Font:
+            r := cast(^graphics.Font)(ptr)
             unload(r)
         case audio.Sound:
             r := cast(^audio.Sound)(ptr)

@@ -1,6 +1,6 @@
 package graphics
 
-import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "vendor:wgpu"
@@ -69,11 +69,11 @@ make_mesh_from_slice :: proc(vertices: []Vertex, indices: []u32 = nil) -> (mesh:
 make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
     n := len(vertices)
     if vertices.normal[0] == 0 {
-        fmt.println("No normals, calculating...")
+        log.debug("No normals, calculating...")
         calculate_normals(vertices.position[0:n], indices, vertices.normal[0:n])
     }
     if vertices.tangent[0] == 0 {
-        fmt.println("No tangents, calculating...")
+        log.debug("No tangents, calculating...")
         n := len(vertices)
         calculate_tangents(vertices.position[0:n], vertices.normal[0:n], vertices.texcoord[0:n], indices, vertices.tangent[0:n])
     }

@@ -5,7 +5,7 @@ package audio
 import "base:runtime"
 import "vendor:sdl3"
 import ma "vendor:miniaudio"
-import "core:fmt"
+import "core:log"
 import "core:sync"
 
 Sound_Key :: struct {
@@ -62,7 +62,7 @@ init :: proc() {
 
     engine_init_result := ma.engine_init(&engine_config, &engine)
     if engine_init_result != .SUCCESS {
-        fmt.panicf("failed to init audio engine: %v", engine_init_result)
+        log.panicf("failed to init audio engine: %v", engine_init_result)
     }
 
     ctx := context
@@ -74,8 +74,8 @@ init :: proc() {
 }
 
 quit :: proc() {
-    //fmt.println("live_sounds:", len(live_sounds))
-    //fmt.println("dead_sounds:", len(dead_sounds))
+    //log.debug("live_sounds:", len(live_sounds))
+    //log.debug("dead_sounds:", len(dead_sounds))
 
     sdl3.PauseAudioStreamDevice(sdl_stream)
     sdl3.LockAudioStream(sdl_stream)
@@ -102,7 +102,7 @@ make_sound_from_file :: proc(filedata: []u8) -> (sound: Sound) {
     decoder_config: ma.decoder_config
     result := ma.decode_memory(raw_data(filedata), len(filedata), &decoder_config, &sound.frames_len, &sound.frames_ptr)
     if(result != .SUCCESS) {
-        fmt.panicf("failed to load sound: %v", result)
+        log.panicf("failed to load sound: %v", result)
     }
     sound.format = decoder_config.format
     sound.channels = decoder_config.channels
@@ -166,7 +166,7 @@ play_sound :: proc(sound: Sound, looped: bool = false, fade_in: uint = 0) -> (pl
     sound_config.isLooping = b32(looped)
     sound_result := ma.sound_init_ex(&engine, &sound_config, playing_sound.sound)
     if sound_result != .SUCCESS {
-        fmt.panicf("failed to init sound file from memory: %v", sound_result)
+        log.panicf("failed to init sound file from memory: %v", sound_result)
     }
     ma.sound_set_fade_in_milliseconds(playing_sound.sound, 0.0, 1.0, u64(fade_in))
     ma.sound_start(playing_sound.sound)

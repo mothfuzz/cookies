@@ -3,7 +3,7 @@ package graphics
 import "vendor:wgpu"
 import stbi "vendor:stb/image"
 import "core:math"
-import "core:fmt"
+import "core:log"
 
 Texture_Key :: struct {
     path: cstring,
@@ -22,7 +22,7 @@ Texture :: struct {
 }
 
 make_render_target_array :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Unorm, layers: uint, cubemap: bool = false) -> (tex: Texture) {
-    fmt.println("creating render target array:", size.x, "x", size.y, "x", layers)
+    log.debug("creating render target array:", size.x, "x", size.y, "x", layers)
     tex.render_target = true
     tex.image = wgpu.DeviceCreateTexture(ren.device, &{
         usage = {.RenderAttachment, .TextureBinding, .CopyDst},
@@ -47,7 +47,7 @@ make_render_target_array :: proc(size: [2]uint, format: wgpu.TextureFormat = .RG
 }
 
 make_render_target :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Unorm, resolve_format: wgpu.TextureFormat = .RGBA8UnormSrgb) -> (tex: Texture) {
-    fmt.println("creating render target:", size.x, "x", size.y)
+    log.debug("creating render target:", size.x, "x", size.y)
     tex.render_target = true
     tex.image = wgpu.DeviceCreateTexture(ren.device, &{
         usage = {.RenderAttachment, .TextureBinding, .CopyDst},
@@ -155,9 +155,9 @@ make_mips :: proc(input: []u32, size: [2]uint, include_original: bool = false) -
         if mip_size == {0, 0} {
             break;
         }
-        fmt.println("generating:", mip_size)
+        log.debug("generating:", mip_size)
         append(&mips, make_scaled_image_bilinear(mips[len(mips)-1], mip_size*2, mip_size))
-        fmt.println("generated:", mip_size)
+        log.debug("generated:", mip_size)
     }
     return
 }
@@ -223,9 +223,6 @@ delete_texture :: proc(tex: Texture) {
 }
 
 pixels_byte_to_word :: proc(in_pixels: []byte, x, y: uint) -> (out_pixels: []u32) {
-    //fmt.println("len(in_pixels): ", len(in_pixels))
-    //fmt.println("x:", x)
-    //fmt.println("y:", y)
     out_pixels = make([]u32, x*y)
     for i in 0..<int(x*y) {
         for b in 0..<4 {

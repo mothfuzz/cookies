@@ -9,7 +9,13 @@ Transform vertices according to current_point & the current char's recorded widt
 Upload the whole texture as an atlas, use the sub-coordinates as instanced data.
 */
 
+Font_Key :: struct {
+    path: cstring,
+    size: uint,
+}
+
 Font :: struct {
+    using key: Font_Key,
     texture: Texture,
     material: Material,
     baked_chars: []stbtt.bakedchar,

@@ -86,7 +86,7 @@ tick :: proc() {
 draw :: proc(alpha, delta: f64) {
     graphics.draw_camera(cam, transform.get_world_smooth(&tree, cam_trans, alpha))
     graphics.draw_mesh(quad, quad_mat)
-    graphics.draw_scene(teapot, alpha, delta)
+    graphics.draw_scene(teapot, alpha)
     graphics.draw_spot_light(spot_light, transform.get_world_smooth(&tree, spot_light_trans, alpha))
 }
 

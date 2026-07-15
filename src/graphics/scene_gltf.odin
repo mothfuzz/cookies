@@ -1,6 +1,6 @@
 package graphics
 
-import "core:fmt"
+import "core:log"
 import "base:runtime"
 import "vendor:cgltf"
 import "core:strings"
@@ -220,7 +220,7 @@ load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: Mes
     indices := make([]u32, indices_len)
     defer delete(indices)
     if cgltf.accessor_unpack_indices(primitive.indices, raw_data(indices), 4, indices_len) < indices_len {
-        fmt.eprintln("failed to load all indices!")
+        log.error("failed to load all indices!")
     }
     vertices: #soa[]Vertex = nil
     defer delete(vertices)
@@ -233,32 +233,32 @@ load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: Mes
         switch attribute.type {
         case .position:
             if cgltf.accessor_unpack_floats(attribute.data, raw_data(vertices.position), size) < size {
-                fmt.eprintln("failed to load all positions!")
+                log.error("failed to load all positions!")
             }
         case .normal:
             if cgltf.accessor_unpack_floats(attribute.data, raw_data(vertices.normal), size) < size {
-                fmt.eprintln("failed to load all normals!")
+                log.error("failed to load all normals!")
             }
         case .tangent:
             if cgltf.accessor_unpack_floats(attribute.data, raw_data(vertices.tangent), size) < size {
-                fmt.eprintln("failed to load all tangents!")
+                log.error("failed to load all tangents!")
             }
         case .texcoord:
             if cgltf.accessor_unpack_floats(attribute.data, raw_data(vertices.texcoord), size) < size {
-                fmt.eprintln("failed to load all texcoords!")
+                log.error("failed to load all texcoords!")
             }
         case .color:
             default_colors = false
             if cgltf.accessor_unpack_floats(attribute.data, raw_data(vertices.color), size) < size {
-                fmt.eprintln("failed to load all colors!")
+                log.error("failed to load all colors!")
             }
         case .joints:
             if cgltf.accessor_unpack_floats(attribute.data, raw_data(vertices.bones), size) < size {
-                fmt.eprintln("failed to load all bones!")
+                log.error("failed to load all bones!")
             }
         case .weights:
             if cgltf.accessor_unpack_floats(attribute.data, raw_data(vertices.weights), size) < size {
-                fmt.eprintln("failed to load all weights!")
+                log.error("failed to load all weights!")
             }
         case .invalid, .custom:
             //do nothing...?
@@ -286,7 +286,7 @@ load_animation :: proc(data: ^cgltf.data, scene: ^Scene, animation: cgltf.animat
         out_channel.input = make([]f32, input_len)
         output_tmp: [^]f32
         if cgltf.accessor_unpack_floats(channel.sampler.input, raw_data(out_channel.input), input_len) < input_len {
-            fmt.eprintln("failed to load all input keyframes!")
+            log.error("failed to load all input keyframes!")
         }
         output_len := cgltf.accessor_unpack_floats(channel.sampler.output, nil, 0)
         //copy data into the animation itself, easier on the brain.
@@ -304,10 +304,10 @@ load_animation :: proc(data: ^cgltf.data, scene: ^Scene, animation: cgltf.animat
             //out_channel.output = make(Keyframes_Weights, ...)
             //not supported
         case .invalid:
-            fmt.eprintln("invalid animation path type!")
+            log.error("invalid animation path type!")
         }
         if cgltf.accessor_unpack_floats(channel.sampler.output, output_tmp, output_len) < output_len {
-            fmt.eprintln("failed to load all output keyframes!")
+            log.error("failed to load all output keyframes!")
         }
         switch channel.sampler.interpolation {
         case .linear:
@@ -329,7 +329,7 @@ load_skeleton :: proc(data: ^cgltf.data, scene: ^Scene, skin: cgltf.skin) -> (sk
     inv_binds: []f32 = make([]f32, len(skin.joints)*16)
     defer delete(inv_binds)
     if cgltf.accessor_unpack_floats(skin.inverse_bind_matrices, raw_data(inv_binds), len(inv_binds)) < len(inv_binds) {
-        fmt.eprintln("failed to load all inverse bind matrices!")
+        log.error("failed to load all inverse bind matrices!")
     }
     for joint, i in skin.joints {
         bone := &sk.bones[i]
@@ -352,14 +352,16 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, tree: ^transform
 
     data, res := cgltf.parse(opts, raw_data(filedata), len(filedata))
     if res != .success {
-        fmt.eprintln(res)
+        log.error("could not parse scene:", filename)
+        log.error(res)
         return
     }
 
     //load assets (starting with singular data, then compound data)
     res = cgltf.load_buffers(opts, data, filename)
     if res != .success {
-        fmt.eprintln(res)
+        log.error("could not load buffers for scene", filename)
+        log.error(res)
         return
     }
 

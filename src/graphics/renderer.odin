@@ -1,6 +1,6 @@
 package graphics
 
-import "core:fmt"
+import "core:log"
 import "base:runtime"
 
 import "vendor:wgpu"
@@ -67,25 +67,24 @@ configure_surface :: proc(size: [2]uint = 0) {
     if size != 0 {
         screen_resolution = size
     }
-    fmt.println("reconfiguring draw surface...")
+    log.debug("reconfiguring draw surface...")
     caps, status := wgpu.SurfaceGetCapabilities(ren.surface, ren.adapter)
     if status == .Error {
-        panic("Unable to get surface capabilities!")
+        log.panic("Unable to get surface capabilities!")
     }
     defer wgpu.SurfaceCapabilitiesFreeMembers(caps)
     if caps.formatCount == 0 {
-        panic("No available surface formats!")
+        log.panic("No available surface formats!")
     }
     //prefer mailbox to unlink FPS from refresh rate
     presentMode := wgpu.PresentMode.Fifo
     for i in 0..<caps.presentModeCount {
         if caps.presentModes[i] == .Mailbox {
             presentMode = .Mailbox
-            fmt.println("Upgrading to fast vsync.")
+            log.debug("Upgrading to fast vsync.")
             break
         }
     }
-    //fmt.println(caps)
     tex_format = without_srgb(caps.formats[0])
     view_format = with_srgb(caps.formats[0])
     ren.config = wgpu.SurfaceConfiguration {
@@ -103,7 +102,7 @@ configure_surface :: proc(size: [2]uint = 0) {
 }
 
 configure_render_targets :: proc() {
-    fmt.println("creating render targets:", ren.config.width, "x", ren.config.height)
+    log.debug("creating render targets:", ren.config.width, "x", ren.config.height)
     if ren.msaa_view != nil {
         wgpu.TextureViewRelease(ren.msaa_view)
     }
@@ -148,16 +147,13 @@ configure_render_targets :: proc() {
         entryCount = len(composite_bindings),
         entries = raw_data(composite_bindings),
     })
-
-    fmt.println("MSAA WIDTH:", wgpu.TextureGetWidth(ren.msaa_tex))
-    fmt.println("MSAA HEIGHT:", wgpu.TextureGetHeight(ren.msaa_tex))
 }
 
 @(private)
 request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Adapter, message: string, userdata1, userdata2: rawptr) {
     context = (^runtime.Context)(userdata1)^
     if status != .Success || adapter == nil {
-        panic(message)
+        log.panic(message)
     }
     ren.adapter = adapter
     wgpu.AdapterRequestDevice(ren.adapter, nil, {callback = request_device, userdata1=userdata1})
@@ -170,24 +166,23 @@ storage_alignment: int
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
     context = (^runtime.Context)(userdata1)^
     if status != .Success || device == nil {
-        fmt.println("THERE WAS AN ERROR!!!!")
-        panic(message)
+        log.panic(message)
     }
     ren.device = device
 
     //print limits
     limits, _ := wgpu.DeviceGetLimits(ren.device)
-    fmt.println("max uniform buffers:", limits.maxUniformBuffersPerShaderStage)
-    fmt.println("max uniform buffer size:", limits.maxUniformBufferBindingSize, "bytes")
+    log.debug("max uniform buffers:", limits.maxUniformBuffersPerShaderStage)
+    log.debug("max uniform buffer size:", limits.maxUniformBufferBindingSize, "bytes")
     uniform_alignment = int(limits.minUniformBufferOffsetAlignment)
-    fmt.println("min uniform buffer offset alignment:", uniform_alignment, "bytes")
-    fmt.println("max storage buffers:", limits.maxStorageBuffersPerShaderStage)
-    fmt.println("max storage buffer size:", limits.maxStorageBufferBindingSize, "bytes")
+    log.debug("min uniform buffer offset alignment:", uniform_alignment, "bytes")
+    log.debug("max storage buffers:", limits.maxStorageBuffersPerShaderStage)
+    log.debug("max storage buffer size:", limits.maxStorageBufferBindingSize, "bytes")
     storage_alignment = int(limits.minStorageBufferOffsetAlignment)
-    fmt.println("min storage buffer offset alignment:", storage_alignment, "bytes")
-    fmt.println("max vertex buffers:", limits.maxVertexBuffers)
-    fmt.println("max vertex buffer size:", limits.maxBufferSize, "bytes")
-    fmt.println("max vertex attributes:", limits.maxVertexAttributes)
+    log.debug("min storage buffer offset alignment:", storage_alignment, "bytes")
+    log.debug("max vertex buffers:", limits.maxVertexBuffers)
+    log.debug("max vertex buffer size:", limits.maxBufferSize, "bytes")
+    log.debug("max vertex attributes:", limits.maxVertexAttributes)
 
     configure_surface()
 
@@ -248,7 +243,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         instance_data_attribute,
     }
 
-    fmt.println("creating solid pipeline...")
+    log.debug("creating solid pipeline...")
     ren.solid_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         label = "solid",
         layout = ren.layout,
@@ -283,7 +278,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         },
     })
 
-    fmt.println("creating trans pipeline...")
+    log.debug("creating trans pipeline...")
     trans_targets := []wgpu.ColorTargetState{
         //accum
         {
@@ -351,7 +346,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         },
     })
 
-    fmt.println("creating compositor...")
+    log.debug("creating compositor...")
     composite_layout_entries := []wgpu.BindGroupLayoutEntry{
         wgpu.BindGroupLayoutEntry{
             binding = 0,
@@ -432,7 +427,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         addressModeV=.ClampToEdge,
     })
 
-    fmt.println("creating clear pipeline...")
+    log.debug("creating camera fill pipeline...")
     camera_fill_layout_entries := []wgpu.BindGroupLayoutEntry{
         wgpu.BindGroupLayoutEntry{
             binding = 0,
@@ -473,10 +468,10 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         },
     })
 
-    fmt.println("creating shadow renderer...")
+    log.debug("creating shadow renderer...")
     init_shadows()
 
-    fmt.println("setting up render targets...")
+    log.debug("setting up render targets...")
     configure_render_targets()
 
     init_defaults()
@@ -485,9 +480,9 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     realloc_skeletons_buffer(0) //need minimum size for valid bindings
 
     ren.ready = true
-    fmt.println("renderer SAYS it's ready.")
-    fmt.println(status)
-    fmt.println("GPU device address:", ren.device)
+    log.debug("renderer SAYS it's ready.")
+    log.debug(status)
+    log.debug("GPU device address:", ren.device)
 
 }
 
@@ -496,7 +491,7 @@ init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
     screen_resolution = size
     ren.instance = wgpu.CreateInstance(nil)
     if ren.instance == nil {
-        panic("WebGPU not supported.")
+        log.panic("WebGPU not supported.")
     }
     ren.surface = surface_proc(ren.instance)
     ctx = context
@@ -991,8 +986,7 @@ render_frame :: proc() {
         configure_surface()
         return
     case .Error:
-        fmt.eprintln(surface_tex.status)
-        panic("Surface texture lost! Unable to draw to screen.")
+        log.panic("Surface texture lost! Unable to draw to screen.", surface_tex.status)
     }
     if surface_tex.texture == nil do return
     defer wgpu.TextureRelease(surface_tex.texture)

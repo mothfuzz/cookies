@@ -212,7 +212,6 @@ render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder
     wgpu.RenderPassEncoderSetViewport(render_pass, 0, 0, f32(screen_resolution.x), f32(screen_resolution.y), 0, 1)
     wgpu.RenderPassEncoderSetScissorRect(render_pass, 0, 0, u32(screen_resolution.x), u32(screen_resolution.y))
 
-    //fmt.println("rendering ui batch...")
     for tex, &batch in ui_batches {
         if len(batch.instances) == 0 {
             continue;
@@ -221,7 +220,6 @@ render_ui :: proc(screen: wgpu.TextureView, command_encoder: wgpu.CommandEncoder
             //preserve precision
             instance.z_index = 1.0 - (instance.z_index / z_index)
         }
-        //fmt.println("ui batch size...", len(batch.instances))
         wgpu.RenderPassEncoderSetBindGroup(render_pass, 0, batch.bind_group)
         instance_buffer := wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, batch.instances[:])
         wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 0, instance_buffer, 0, wgpu.BufferGetSize(instance_buffer))

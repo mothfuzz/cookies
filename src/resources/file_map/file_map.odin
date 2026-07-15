@@ -1,6 +1,6 @@
 package file_map
 
-import "core:fmt"
+import "core:log"
 
 Loaded_File :: struct {
     data: []u8,
@@ -24,7 +24,7 @@ read :: proc(path: cstring) -> []u8 {
     }
     data := read_from_disk(path)
     if data == nil {
-        fmt.eprintln("failed to read file:", path)
+        log.error("failed to read file:", path)
         return nil
     }
     loaded_files[path] = {data, false}

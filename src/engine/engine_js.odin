@@ -1,6 +1,7 @@
 #+build js
 package engine
 
+import "core:log"
 import "core:sys/wasm/js"
 
 import "cookies:window"
@@ -18,8 +19,12 @@ user_quit: proc() = nil
 initialized: bool = false
 accumulator: f64 = 0
 
+logger: log.Logger
+
 @(export)
 step :: proc(delta_time: f64) -> bool {
+    context.logger = logger
+
     if !graphics.ren.ready {
         return true
     }
@@ -44,6 +49,7 @@ step :: proc(delta_time: f64) -> bool {
         audio.quit()
         resources.unregister_loaders()
         resources.unload_files()
+        log.destroy_console_logger(logger)
         return false
     }
     accumulator += delta_time
@@ -62,14 +68,16 @@ step :: proc(delta_time: f64) -> bool {
     return true
 }
 
-import "core:fmt"
 resize_event :: proc(e: js.Event) {
-    fmt.println("JS: Resize event fired!!!")
     graphics.configure_surface(window.get_size())
     graphics.configure_render_targets()
 }
 
+
 boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
+
+    logger = log.create_console_logger()
+    context.logger = logger
 
     user_init = init
     user_tick = tick
