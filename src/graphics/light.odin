@@ -202,11 +202,12 @@ Light_Draw :: struct {
 
 Lights :: struct {
     point_lights: []Point_Light,
-    point_light_shadow_cameras: []Camera_Draw,
     directional_lights: []Directional_Light,
-    directional_light_shadow_cameras: []Camera_Draw,
     spot_lights: []Spot_Light,
-    spot_light_shadow_cameras: []Camera_Draw,
+    shadow_cameras: []Camera_Draw, //point, directional, spot
+    num_point_shadows: int,
+    num_directional_shadows: int,
+    num_spot_shadows: int,
 }
 
 vecpos :: proc(p: [3]f32) -> [4]f32 {
@@ -220,12 +221,12 @@ vecdir :: proc(d: [3]f32) -> [4]f32 {
 
 calculate_lights :: proc(lights: []Light_Draw) -> Lights {
     point_lights := make([dynamic]Point_Light)
-    point_light_shadow_cameras := make([dynamic]Camera_Draw)
     directional_lights := make([dynamic]Directional_Light)
-    directional_light_shadow_cameras := make([dynamic]Camera_Draw)
     spot_lights := make([dynamic]Spot_Light)
-    spot_light_shadow_cameras := make([dynamic]Camera_Draw)
-    num_spot_lights_shadows: uint = 0
+    shadow_cameras := make([dynamic]Camera_Draw)
+    num_directional_shadows: int = 0
+    num_point_shadows: int = 0
+    num_spot_shadows: int = 0
     for light in lights {
         switch l in light.light {
         case Point_Light:
@@ -233,6 +234,10 @@ calculate_lights :: proc(lights: []Light_Draw) -> Lights {
             pl.position = (light.transform * vecpos(l.position)).xyz
             if pl.render_shadows {
                 inject_at(&point_lights, 0, pl)
+                //for i in 0..<6 {
+                //inject_at(&shadow_cameras, 0, calculate_camera(...))
+                //num_point_shadows += 1
+                //}
             } else {
                 append(&point_lights, pl)
             }
@@ -241,6 +246,10 @@ calculate_lights :: proc(lights: []Light_Draw) -> Lights {
             dl.direction = (light.transform * vecdir(l.direction)).xyz
             if dl.render_shadows {
                 inject_at(&directional_lights, 0, dl)
+                //for i in 0..<num_cascades * num_cameras {
+                //inject_at(&shadow_cameras, num_point_shadows, calculate_camera(...))
+                //num_directional_shadows += 1
+                //}
             } else {
                 append(&directional_lights, dl)
             }
@@ -249,7 +258,6 @@ calculate_lights :: proc(lights: []Light_Draw) -> Lights {
             sl.position = (light.transform * vecpos(sl.position)).xyz
             sl.direction = (light.transform * vecdir(sl.direction)).xyz
             if sl.render_shadows {
-                num_spot_lights_shadows += 1
 
                 //handle parallel-to-up case
                 world_up := [3]f32{0, 1, 0}
@@ -258,8 +266,9 @@ calculate_lights :: proc(lights: []Light_Draw) -> Lights {
                 }
 
                 look_at(&sl.shadow_camera, sl.position, sl.position + sl.direction, world_up)
-                inject_at(&spot_light_shadow_cameras, 0, calculate_camera(sl.shadow_camera))
+                inject_at(&shadow_cameras, num_point_shadows+num_directional_shadows, calculate_camera(sl.shadow_camera))
                 inject_at(&spot_lights, 0, sl)
+                num_spot_shadows += 1
             } else {
                 append(&spot_lights, sl)
             }
@@ -279,26 +288,25 @@ calculate_lights :: proc(lights: []Light_Draw) -> Lights {
     wgpu.QueueWriteBuffer(ren.queue, light_count_buffer, 0, &light_count, size_of(Light_Count))
 
     //create textures
-    if u32(num_spot_lights_shadows) > wgpu.TextureGetDepthOrArrayLayers(ren.spot_light_shadow_depth.image) {
+    if u32(num_spot_shadows) > wgpu.TextureGetDepthOrArrayLayers(ren.spot_light_shadow_depth.image) {
         delete_texture(ren.spot_light_shadow_depth)
         size: [2]uint = {SPOT_LIGHT_SHADOW_MAP_RES, SPOT_LIGHT_SHADOW_MAP_RES}
-        ren.spot_light_shadow_depth = make_render_target_array(size, .Depth32Float, num_spot_lights_shadows)
+        ren.spot_light_shadow_depth = make_render_target_array(size, .Depth32Float, uint(num_spot_shadows))
         delete_texture(ren.spot_light_shadow_color)
-        ren.spot_light_shadow_color = make_render_target_array(size, .RGBA8Unorm, num_spot_lights_shadows)
+        ren.spot_light_shadow_color = make_render_target_array(size, .RGBA8Unorm, uint(num_spot_shadows))
     }
     
-    return Lights{point_lights[:], point_light_shadow_cameras[:],
-                  directional_lights[:], directional_light_shadow_cameras[:],
-                  spot_lights[:], spot_light_shadow_cameras[:]}
+    return Lights{
+        point_lights[:], directional_lights[:], spot_lights[:], shadow_cameras[:],
+        num_point_shadows, num_directional_shadows, num_spot_shadows,
+    }
 }
 
 delete_lights :: proc(lights: Lights) {
     delete(lights.point_lights)
     delete(lights.directional_lights)
     delete(lights.spot_lights)
-    delete(lights.point_light_shadow_cameras)
-    delete(lights.directional_light_shadow_cameras)
-    delete(lights.spot_light_shadow_cameras)
+    delete(lights.shadow_cameras)
 }
 
 Lights_Uniforms :: struct {
@@ -315,6 +323,9 @@ calculate_lights_uniforms :: proc(lights: Lights, camera: Camera_Uniforms) -> Li
         pl.position.xyz = (camera.view * vecpos(lights.point_lights[i].position)).xyz
         pl.position.w = lights.point_lights[i].radius
         pl.color = lights.point_lights[i].color
+        if lights.point_lights[i].render_shadows {
+            //light_cam = lights.shadow_cameras[i]
+        }
     }
 
     directional_light_uniforms := make([]Directional_Light_Uniforms, len(lights.directional_lights))
@@ -322,6 +333,9 @@ calculate_lights_uniforms :: proc(lights: Lights, camera: Camera_Uniforms) -> Li
         dir := lights.directional_lights[i].direction
         dl.direction.xyz = linalg.normalize((camera.view * vecdir(dir)).xyz)
         dl.color = lights.directional_lights[i].color;
+        if lights.directional_lights[i].render_shadows {
+            //light_cam = lights.shadow_cameras[lights.num_point_shadows+i]
+        }
     }
 
     spot_light_uniforms := make([]Spot_Light_Uniforms, len(lights.spot_lights))
@@ -334,7 +348,7 @@ calculate_lights_uniforms :: proc(lights: Lights, camera: Camera_Uniforms) -> Li
         sl.direction.w = linalg.cos(lights.spot_lights[i].outer_angle)
         sl.color = lights.spot_lights[i].color;
         if lights.spot_lights[i].render_shadows {
-            light_cam := lights.spot_light_shadow_cameras[i]
+            light_cam := lights.shadow_cameras[lights.num_point_shadows+lights.num_directional_shadows+i]
             sl.view_to_shadow = light_cam.projection * light_cam.view * inverse_view(camera.view)
         }
     }

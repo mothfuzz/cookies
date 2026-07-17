@@ -753,10 +753,8 @@ Pass :: struct {
 
 //passes slice into instance buffer per-camera
 Passes :: struct {
-    pl_solid_shadows: []Pass,
-    dl_solid_shadows: []Pass,
-    sl_solid_shadows: []Pass,
-    //*_trans_shadows: []Pass,
+    solid_shadows: []Pass,
+    //trans_shadows: []Pass,
     solid_main: []Pass,
     trans_main: []Pass,
 }
@@ -841,32 +839,22 @@ compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_
     //the big buffer...
     //[solid shadow cam 0][trans shadow cam 0][solid main cam 0][trans main cam 0][etc.]
 
-    dl_solid_shadows_staging := make([]Pass_Staging, len(lights.directional_light_shadow_cameras))
-    pl_solid_shadows_staging := make([]Pass_Staging, len(lights.point_light_shadow_cameras))
-    sl_solid_shadows_staging := make([]Pass_Staging, len(lights.spot_light_shadow_cameras))
+    solid_shadows_staging := make([]Pass_Staging, len(lights.shadow_cameras))
     solid_main_staging := make([]Pass_Staging, len(cameras))
     trans_main_staging := make([]Pass_Staging, len(cameras))
-    defer delete(pl_solid_shadows_staging)
-    defer delete(dl_solid_shadows_staging)
-    defer delete(sl_solid_shadows_staging)
+    defer delete(solid_shadows_staging)
     defer delete(solid_main_staging)
     defer delete(trans_main_staging)
 
-    passes.dl_solid_shadows = make([]Pass, len(lights.directional_light_shadow_cameras))
-    passes.pl_solid_shadows = make([]Pass, len(lights.point_light_shadow_cameras))
-    passes.sl_solid_shadows = make([]Pass, len(lights.spot_light_shadow_cameras))
+    //this should ACTUALLY be a single list of Camera_Draw for all shadows. The pass should be 'take a camera, draw a shadow map'
+    //no matter how many cameras (1 per spot light, 6 per point light, num_cascades*num_main_cameras per directional light)
+    passes.solid_shadows = make([]Pass, len(lights.shadow_cameras))
     passes.solid_main = make([]Pass, len(cameras))
     passes.trans_main = make([]Pass, len(cameras))
 
     //first generate staging buffers
-    for cam, i in lights.point_light_shadow_cameras {
-        compute_pass(batches, cam, &pl_solid_shadows_staging[i], nil)
-    }
-    for cam, i in lights.directional_light_shadow_cameras {
-        compute_pass(batches, cam, &dl_solid_shadows_staging[i], nil)
-    }
-    for cam, i in lights.spot_light_shadow_cameras {
-        compute_pass(batches, cam, &sl_solid_shadows_staging[i], nil)
+    for cam, i in lights.shadow_cameras {
+        compute_pass(batches, cam, &solid_shadows_staging[i], nil)
     }
     for cam, i in cameras {
         compute_pass(batches, cam, &solid_main_staging[i], &trans_main_staging[i])
@@ -874,14 +862,8 @@ compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_
 
     //then actually pack the staging passes to the real passes
     running_offset: u64
-    for &pass, i in passes.pl_solid_shadows {
-        write_pass(&pass, &pl_solid_shadows_staging[i], &running_offset)
-    }
-    for &pass, i in passes.dl_solid_shadows {
-        write_pass(&pass, &dl_solid_shadows_staging[i], &running_offset)
-    }
-    for &pass, i in passes.sl_solid_shadows {
-        write_pass(&pass, &sl_solid_shadows_staging[i], &running_offset)
+    for &pass, i in passes.solid_shadows {
+        write_pass(&pass, &solid_shadows_staging[i], &running_offset)
     }
     for &pass, i in passes.solid_main {
         write_pass(&pass, &solid_main_staging[i], &running_offset)
@@ -893,13 +875,7 @@ compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_
     realloc_instance_buffer(running_offset)
 
     //write the vertex buffer...
-    for &pass in passes.pl_solid_shadows {
-        write_pass_instances(&pass)
-    }
-    for &pass in passes.dl_solid_shadows {
-        write_pass_instances(&pass)
-    }
-    for &pass in passes.sl_solid_shadows {
+    for &pass in passes.solid_shadows {
         write_pass_instances(&pass)
     }
     for &pass in passes.solid_main {
@@ -920,13 +896,7 @@ delete_pass :: proc(pass: ^Pass) {
 
 @(private)
 delete_passes :: proc(passes: Passes) {
-    for &pass in passes.pl_solid_shadows {
-        delete_pass(&pass)
-    }
-    for &pass in passes.dl_solid_shadows {
-        delete_pass(&pass)
-    }
-    for &pass in passes.sl_solid_shadows {
+    for &pass in passes.solid_shadows {
         delete_pass(&pass)
     }
     for &pass in passes.solid_main {
@@ -935,9 +905,7 @@ delete_passes :: proc(passes: Passes) {
     for &pass in passes.trans_main {
         delete_pass(&pass)
     }
-    delete(passes.pl_solid_shadows)
-    delete(passes.dl_solid_shadows)
-    delete(passes.sl_solid_shadows)
+    delete(passes.solid_shadows)
     delete(passes.solid_main)
     delete(passes.trans_main)
 }
@@ -1011,6 +979,9 @@ render_frame :: proc() {
     defer delete_passes(passes)
 
     //go through lights & render shadow maps...
+    pl_shadow_base := 0
+    dl_shadow_base := lights.num_point_shadows
+    sl_shadow_base := lights.num_point_shadows + lights.num_directional_shadows
     for &spot_light, i in lights.spot_lights {
         if spot_light.render_shadows {
             //render to a specific spot in the texture array
@@ -1044,9 +1015,9 @@ render_frame :: proc() {
             })
             wgpu.RenderPassEncoderSetPipeline(shadow_pass, ren.shadow_pipeline)
 
-            camera := lights.spot_light_shadow_cameras[i]
+            camera := lights.shadow_cameras[sl_shadow_base+i]
             bind_camera(shadow_pass, 0, camera)
-            execute_draw_calls(shadow_pass, passes.sl_solid_shadows[i].draw_calls[:])
+            execute_draw_calls(shadow_pass, passes.solid_shadows[sl_shadow_base+i].draw_calls[:])
 
             wgpu.RenderPassEncoderEnd(shadow_pass)
             wgpu.RenderPassEncoderRelease(shadow_pass)
