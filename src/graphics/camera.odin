@@ -27,6 +27,7 @@ Camera_Draw :: struct {
     fill: bool,
     using uniforms: Camera_Uniforms,
     viewproj: matrix[4,4]f32, //optimization
+    layer_mask: Layer_Mask,
 }
 
 Camera :: struct {
@@ -39,6 +40,7 @@ Camera :: struct {
     range: [4]f32, //fov, near, far, fog onset
     relative: bool, //auto-resize based on window width/height
     fill: bool,
+    layer_mask: Layer_Mask,
 }
 
 @(export)
@@ -81,13 +83,18 @@ set_fog_onset :: proc(cam: ^Camera, fog_onset: f32) {
     cam.range[3] = fog_onset
 }
 
+@(export)
+set_layer_mask :: proc(cam: ^Camera, layer_mask: Layer_Mask) {
+    cam.layer_mask = layer_mask
+}
+
 /* TODO:
 when using absolute cameras with w/h != resolution, use upscaling/downscaling & letterboxing/pillarboxing
 render to HDR (i.e. floating point) target so you can do post-processing
 */
 
 @(export)
-make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = 0, fov: f32 = 0, fill: bool = true) -> (cam: Camera) {
+make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = 0, fov: f32 = 0, fill: bool = true, layers: Layer_Mask = All_Layers) -> (cam: Camera) {
     cam.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Uniform, .CopyDst}, size=size_of(Camera_Uniforms)})
     bindings := []wgpu.BindGroupEntry{
         {binding = 0, buffer = cam.buffer, size = size_of(Camera_Uniforms)},
@@ -102,6 +109,7 @@ make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = 0
     cam.rotation = 1
     cam.fill = fill
     cam.color.a = 1.0
+    cam.layer_mask = layers
     return
 }
 
@@ -154,6 +162,7 @@ calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1) -> (draw: Camer
     fog_onset := cam.range[3] if cam.range[3] != 0 else (far - near)/2.0
     draw.color = cam.color
     draw.fill = cam.fill
+    draw.layer_mask = cam.layer_mask
     draw.fog_distance = {fog_onset, far}
     wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &draw.uniforms, size_of(Camera_Uniforms))
     draw.viewproj = draw.projection * draw.view

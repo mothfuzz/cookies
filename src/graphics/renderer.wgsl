@@ -17,6 +17,7 @@ struct PointLight {
     position: vec4<f32>, //view space xyz+radius
     color: vec4<f32>, //rgb+intensity
     view_to_shadow: mat4x4<f32>,
+    shadow_index: vec4<i32>,
 }
 @group(3) @binding(0) var<storage, read> point_lights: array<PointLight>;
 
@@ -25,6 +26,7 @@ struct DirectionalLight {
     color: vec4<f32>, //rgb+intensity
     view_to_shadow_near: mat4x4<f32>,
     view_to_shadow_far: mat4x4<f32>,
+    shadow_index: vec4<i32>,
 }
 @group(3) @binding(1) var<storage, read> directional_lights: array<DirectionalLight>;
 
@@ -33,6 +35,7 @@ struct SpotLight {
     direction: vec4<f32>,//xyz+outer angle
     color: vec4<f32>,
     view_to_shadow: mat4x4<f32>,
+    shadow_index: vec4<i32>,
 }
 @group(3) @binding(2) var<storage, read> spot_lights: array<SpotLight>;
 
@@ -235,7 +238,8 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
                 continue;
             }
             var shadow = 0.0;
-            if(i < textureNumLayers(spot_light_shadow_depth)) {
+            let layer = spot_lights[i].shadow_index.r;
+            if(layer != -1) {
                 let frag_in_light = spot_lights[i].view_to_shadow * in.position;
                 let ndc = frag_in_light.xyz / frag_in_light.w;
                 var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
@@ -246,7 +250,7 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
                 for(var x = -1; x <= 1; x++) {
                     for(var y = -1; y <= 1; y++) {
                         let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                        shadow += textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, i, depth_ref - bias);
+                        shadow += textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref - bias);
                     }
                 }
                 shadow /= 9.0;

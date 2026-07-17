@@ -526,14 +526,14 @@ calculate_skeleton :: proc(scene: Scene, node: Node, alpha: f64) -> []matrix[4,4
 
 
 @(private)
-draw_node :: proc(scene: Scene, node: Node, alpha: f64) {
+draw_node :: proc(scene: Scene, node: Node, alpha: f64, layers: Layer_Mask) {
     //draw self
     switch node.type {
     case .Node:
     case .Model:
         bones := calculate_skeleton(scene, node, alpha)
         defer delete(bones)
-        draw_model(scene.models[node.data], transform.get_world_smooth(scene.tree, node, alpha), bones)
+        draw_model(scene.models[node.data], transform.get_world_smooth(scene.tree, node, alpha), bones, layers)
     case .Camera:
         //...
     case .Light:
@@ -541,12 +541,12 @@ draw_node :: proc(scene: Scene, node: Node, alpha: f64) {
     }
     //draw children (will trigger subsequent draws)
     for child in node.children {
-        draw_node(scene, scene.nodes[child], alpha)
+        draw_node(scene, scene.nodes[child], alpha, layers)
     }
 }
-draw_scene :: proc(scene: Scene, alpha: f64) {
+draw_scene :: proc(scene: Scene, alpha: f64, layers: Layer_Mask = All_Layers) {
     for i in scene.layouts[scene.active_layout].roots {
-        draw_node(scene, scene.nodes[i], alpha)
+        draw_node(scene, scene.nodes[i], alpha, layers)
     }
 }
 

@@ -596,21 +596,25 @@ clear_frame :: proc() {
 frame: Frame
 
 @(export)
-draw_point_light :: proc(light: Point_Light, trans: matrix[4,4]f32 = 1) {
-    append(&frame.lights, Light_Draw{light, trans})
+draw_point_light :: proc(light: Point_Light, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
+    append(&frame.lights, Light_Draw{light, trans, layers})
 }
 @(export)
-draw_directional_light :: proc(light: Directional_Light, trans: matrix[4,4]f32 = 1) {
-    append(&frame.lights, Light_Draw{light, trans})
+draw_directional_light :: proc(light: Directional_Light, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
+    append(&frame.lights, Light_Draw{light, trans, layers})
 }
 @(export)
-draw_spot_light :: proc(light: Spot_Light, trans: matrix[4,4]f32 = 1) {
-    append(&frame.lights, Light_Draw{light, trans})
+draw_spot_light :: proc(light: Spot_Light, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
+    append(&frame.lights, Light_Draw{light, trans, layers})
 }
 draw_light :: proc{draw_point_light, draw_directional_light, draw_spot_light}
 
 @(export)
-draw_camera :: proc(camera: Camera, trans: matrix[4,4]f32 = 1) {
+draw_camera :: proc(camera: Camera, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
+    camera := camera
+    if layers != All_Layers {
+        camera.layer_mask = layers
+    }
     append(&frame.cameras, calculate_camera(camera, trans)) //compute once, don't defer
 }
 
@@ -621,7 +625,7 @@ draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
                   ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
                   emissive_tint: [3]f32 = 1,
                   sprite: bool = false, billboard: bool = false,
-                  bones: []matrix[4,4]f32 = nil) {
+                  bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
     //make sure resources are set
     if !(mesh.hash in frame.meshes) {
         frame.meshes[mesh.hash] = mesh
@@ -654,7 +658,7 @@ draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
         copy(owned_bones, bones)
         bones = owned_bones
     }
-    draw := Mesh_Draw{{transform, dynamic_material, 0}, sprite, billboard, bones, {}}
+    draw := Mesh_Draw{{transform, dynamic_material, 0}, sprite, billboard, bones, {}, layers}
     calculate_mesh_local(&draw, mesh, material)
 
     append(instances, draw)
@@ -667,9 +671,10 @@ draw_sprite :: proc(material: Material, transform: matrix[4, 4]f32 = 1,
                     base_color_tint: [4]f32 = 1,
                     ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
                     emissive_tint: [3]f32 = 1,
-                    billboard: bool = true) {
+                    billboard: bool = true, layers: Layer_Mask = All_Layers) {
     draw_mesh(quad_mesh, material, transform, clip_rect,
-              base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint, true, billboard)
+              base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint,
+              true, billboard, nil, layers)
 }
 
 @(private)
@@ -777,6 +782,7 @@ compute_pass :: proc(batches: []Mesh_Batch, cam: Camera_Draw, solid, trans: ^Pas
         }
 
         for instance in batch.instances {
+            if (cam.layer_mask & instance.layer_mask) == 0 do continue
             instance := instance
             is_solid, is_trans := instance_filter(batch.mesh, batch.material, instance)
             if !is_solid && !is_trans do continue
@@ -971,7 +977,7 @@ render_frame :: proc() {
     write_skeletons(batches)
 
     //then gather up all lights
-    lights := calculate_lights(frame.lights[:])
+    lights := calculate_lights(frame.lights[:], frame.cameras[:])
     defer delete_lights(lights)
 
     //compute all instance data for passes
@@ -979,9 +985,7 @@ render_frame :: proc() {
     defer delete_passes(passes)
 
     //go through lights & render shadow maps...
-    pl_shadow_base := 0
-    dl_shadow_base := lights.num_point_shadows
-    sl_shadow_base := lights.num_point_shadows + lights.num_directional_shadows
+    shadow_offsets := shadow_offsets(lights, frame.cameras[:])
     for &spot_light, i in lights.spot_lights {
         if spot_light.render_shadows {
             //render to a specific spot in the texture array
@@ -989,7 +993,7 @@ render_frame :: proc() {
                 dimension = ._2D,
                 mipLevelCount = 1,
                 arrayLayerCount = 1,
-                baseArrayLayer=u32(i),
+                baseArrayLayer=u32(spot_light.shadow_index),
             }
             shadow_color := wgpu.TextureCreateView(ren.spot_light_shadow_color.image, &view_descriptor)
             defer wgpu.TextureViewRelease(shadow_color)
@@ -1015,9 +1019,10 @@ render_frame :: proc() {
             })
             wgpu.RenderPassEncoderSetPipeline(shadow_pass, ren.shadow_pipeline)
 
-            camera := lights.shadow_cameras[sl_shadow_base+i]
+            shadow_index := shadow_offsets.s + spot_light.shadow_index
+            camera := lights.shadow_cameras[shadow_index]
             bind_camera(shadow_pass, 0, camera)
-            execute_draw_calls(shadow_pass, passes.solid_shadows[sl_shadow_base+i].draw_calls[:])
+            execute_draw_calls(shadow_pass, passes.solid_shadows[shadow_index].draw_calls[:])
 
             wgpu.RenderPassEncoderEnd(shadow_pass)
             wgpu.RenderPassEncoderRelease(shadow_pass)
@@ -1112,7 +1117,7 @@ render_frame :: proc() {
     wgpu.RenderPassEncoderRelease(camera_fill_pass)
 
     //make sure to upload + offset lights per-camera.
-    write_light_buffers(lights, frame.cameras[:])
+    write_light_buffers(lights, frame.cameras[:], shadow_offsets)
 
     for &camera, i in frame.cameras {
 

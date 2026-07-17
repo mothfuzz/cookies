@@ -402,6 +402,7 @@ Mesh_Draw :: struct {
     is_billboard: bool,
     bones: []matrix[4,4]f32,
     bounding_box: [8][4]f32,
+    layer_mask: Layer_Mask
 }
 Instance :: struct {
     transform: matrix[4,4]f32,
