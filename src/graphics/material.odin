@@ -81,7 +81,7 @@ rebuild_material :: proc(mat: ^Material) {
     mat.hash = Material_Hash(runtime.default_hasher(mat, 0, size_of(Material)))
 }
 
-make_material :: proc(base_color: Texture=white_tex, normal: Texture=normal_tex, pbr: Texture=white_tex, emissive: Texture=black_tex, filtering: bool = true, tiling: [2]bool = false) -> (mat: Material) {
+make_material :: proc(base_color: Texture=white_tex, normal: Texture=normal_tex, pbr: Texture=pbr_tex, emissive: Texture=black_tex, filtering: bool = true, tiling: [2]bool = false) -> (mat: Material) {
     mat.sampler = wgpu.DeviceCreateSampler(ren.device, &{
         minFilter = .Linear if filtering else .Nearest,
         magFilter = .Linear if filtering else .Nearest,

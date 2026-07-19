@@ -70,8 +70,8 @@ init_shadows :: proc() {
     })
 
     size: [2]uint = {SPOT_LIGHT_SHADOW_MAP_RES, SPOT_LIGHT_SHADOW_MAP_RES}
-    ren.spot_light_shadow_depth = make_render_target_array(size, .Depth32Float, 1)
-    ren.spot_light_shadow_color = make_render_target_array(size, .RGBA8Unorm, 1)
+    ren.spot_light_shadow_depth = make_render_texture_array(size, .Depth32Float, 1)
+    ren.spot_light_shadow_color = make_render_texture_array(size, .RGBA8Unorm, 1)
     ren.shadow_depth_sampler = wgpu.DeviceCreateSampler(ren.device, &{
         minFilter = .Linear,
         magFilter = .Linear,

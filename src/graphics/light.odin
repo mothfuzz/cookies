@@ -307,9 +307,9 @@ calculate_lights :: proc(lights: []Light_Draw, cameras: []Camera_Draw) -> Lights
     if u32(num_spot_shadows) > wgpu.TextureGetDepthOrArrayLayers(ren.spot_light_shadow_depth.image) {
         delete_texture(ren.spot_light_shadow_depth)
         size: [2]uint = {SPOT_LIGHT_SHADOW_MAP_RES, SPOT_LIGHT_SHADOW_MAP_RES}
-        ren.spot_light_shadow_depth = make_render_target_array(size, .Depth32Float, uint(num_spot_shadows))
+        ren.spot_light_shadow_depth = make_render_texture_array(size, .Depth32Float, uint(num_spot_shadows))
         delete_texture(ren.spot_light_shadow_color)
-        ren.spot_light_shadow_color = make_render_target_array(size, .RGBA8Unorm, uint(num_spot_shadows))
+        ren.spot_light_shadow_color = make_render_texture_array(size, .RGBA8Unorm, uint(num_spot_shadows))
     }
     
     return Lights{
@@ -462,9 +462,9 @@ realloc_light_buffers :: proc(lights: Lights, num_cameras: int) {
             wgpu.BindGroupRelease(light_bind_group)
         }
         bindings := []wgpu.BindGroupEntry{
-            {binding = 0, buffer = pl_buffer.buffer, size = u64(pl_buffer.size_aligned * num_cameras)},
-            {binding = 1, buffer = dl_buffer.buffer, size = u64(dl_buffer.size_aligned * num_cameras)},
-            {binding = 2, buffer = sl_buffer.buffer, size = u64(sl_buffer.size_aligned * num_cameras)},
+            {binding = 0, buffer = pl_buffer.buffer, size = u64(pl_buffer.size_aligned)},
+            {binding = 1, buffer = dl_buffer.buffer, size = u64(dl_buffer.size_aligned)},
+            {binding = 2, buffer = sl_buffer.buffer, size = u64(sl_buffer.size_aligned)},
             {binding = 3, buffer = light_count_buffer, size = u64(size_of(Light_Count))},
             {binding = 4, sampler=ren.shadow_depth_sampler},
             {binding = 5, sampler=ren.shadow_color_sampler},
@@ -472,6 +472,7 @@ realloc_light_buffers :: proc(lights: Lights, num_cameras: int) {
             {binding = 7, textureView=ren.spot_light_shadow_color.view},
         }
         light_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+            label = "lights",
             layout = lights_layout,
             entryCount = len(bindings),
             entries = raw_data(bindings),

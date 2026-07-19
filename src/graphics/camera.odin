@@ -140,14 +140,14 @@ inverse_view :: proc(trans: matrix[4,4]f32) -> (inv_view: matrix[4,4]f32) {
 }
 
 FOV :: 60.0
-calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1) -> (draw: Camera_Draw) {
+calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Target = nil) -> (draw: Camera_Draw) {
     draw.bind_group = cam.bind_group
     draw.view = inverse_view(trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1))
     fov := cam.range[0]
     if fov == 0 {
         fov = linalg.to_radians(f32(FOV))
     } 
-    draw.viewport = get_viewport_rect(cam)
+    draw.viewport = get_viewport_rect(cam, rt)
     width, height := draw.viewport[2], draw.viewport[3]
     near := cam.range[1]
     far := cam.range[2]
@@ -187,16 +187,26 @@ set_viewport :: proc(cam: ^Camera, viewport: [4]f32) {
     cam.viewport = viewport
 }
 
-get_viewport_rect :: proc(cam: Camera) -> [4]f32 {
+get_viewport_rect :: proc(cam: Camera, render_target: ^Render_Target = nil) -> [4]f32 {
+    screen_resolution := screen_resolution
+    if render_target != nil {
+        screen_resolution.x = uint(wgpu.TextureGetWidth(render_target.output.image))
+        screen_resolution.y = uint(wgpu.TextureGetHeight(render_target.output.image))
+    }
     x, y := cam.viewport.x, cam.viewport.y
-    width, height := get_viewport_size(cam)
+    width, height := get_viewport_size(cam, render_target)
     if cam.relative {
         x *= f32(screen_resolution.x)
         y *= f32(screen_resolution.y)
     }
     return {max(x, 0), max(y, 0), width, height}
 }
-get_viewport_size :: proc(cam: Camera) -> (width, height: f32) {
+get_viewport_size :: proc(cam: Camera, render_target: ^Render_Target = nil) -> (width, height: f32) {
+    screen_resolution := screen_resolution
+    if render_target != nil {
+        screen_resolution.x = uint(wgpu.TextureGetWidth(render_target.output.image))
+        screen_resolution.y = uint(wgpu.TextureGetHeight(render_target.output.image))
+    }
     width = cam.viewport[2]
     height = cam.viewport[3]
     if cam.relative {

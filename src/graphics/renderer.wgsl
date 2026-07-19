@@ -189,7 +189,7 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
     var final_color = in_color;
 
     if light_count.total > 0 {
-        let pbr = textureSample(pbr, smp, in.texcoord);// * in.pbr_tint;
+        let pbr = textureSample(pbr, smp, in.texcoord) * in.pbr_tint;
         let ambient_occlusion = pbr.r;
         let roughness = pbr.g;
         let metallic = pbr.b;

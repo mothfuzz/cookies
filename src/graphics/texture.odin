@@ -14,70 +14,10 @@ Texture :: struct {
     using key: Texture_Key,
     image: wgpu.Texture,
     view: wgpu.TextureView,
-    render_target: bool,
-    resolve: wgpu.Texture,
-    resolve_view: wgpu.TextureView,
+    //resolve: wgpu.Texture,
+    //resolve_view: wgpu.TextureView,
     is_trans: bool,
     is_solid: bool,
-}
-
-make_render_target_array :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Unorm, layers: uint, cubemap: bool = false) -> (tex: Texture) {
-    log.debug("creating render target array:", size.x, "x", size.y, "x", layers)
-    tex.render_target = true
-    tex.image = wgpu.DeviceCreateTexture(ren.device, &{
-        usage = {.RenderAttachment, .TextureBinding, .CopyDst},
-        dimension = ._2D,
-        size = {
-            width = u32(size.x),
-            height = u32(size.y),
-            depthOrArrayLayers = cubemap?u32(6*layers):u32(layers),
-        },
-        format = format,
-        mipLevelCount = 1,
-        sampleCount = 1
-    })
-    tex.view = wgpu.TextureCreateView(tex.image, &{
-        dimension = cubemap?.CubeArray:._2DArray,
-        mipLevelCount = 1,
-        arrayLayerCount = u32(layers),
-    })
-    tex.is_solid = true //I guess
-    tex.is_trans = false
-    return
-}
-
-make_render_target :: proc(size: [2]uint, format: wgpu.TextureFormat = .RGBA8Unorm, resolve_format: wgpu.TextureFormat = .RGBA8UnormSrgb) -> (tex: Texture) {
-    log.debug("creating render target:", size.x, "x", size.y)
-    tex.render_target = true
-    tex.image = wgpu.DeviceCreateTexture(ren.device, &{
-        usage = {.RenderAttachment, .TextureBinding, .CopyDst},
-        dimension = ._2D,
-        size = {
-            width = u32(size.x),
-            height = u32(size.y),
-            depthOrArrayLayers = 1,
-        },
-        format = format,
-        mipLevelCount = 1,
-        sampleCount = 4
-    })
-    tex.view = wgpu.TextureCreateView(tex.image)
-    tex.resolve = wgpu.DeviceCreateTexture(ren.device, &{
-        usage = {.RenderAttachment, .TextureBinding, .CopyDst},
-        dimension = ._2D,
-        size = {
-            width = u32(size.x),
-            height = u32(size.y),
-            depthOrArrayLayers = 1,
-        },
-        format = resolve_format,
-        mipLevelCount = 1,
-        sampleCount = 1,
-    })
-    tex.resolve_view = wgpu.TextureCreateView(tex.resolve)
-    tex.is_solid = true //I guess
-    tex.is_trans = false
-    return
 }
 
 make_scaled_image_nearest :: proc(input: []u32, in_size, out_size: [2]uint) -> (output: []u32) {
@@ -214,10 +154,6 @@ make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (t
 }
 
 delete_texture :: proc(tex: Texture) {
-    if wgpu.TextureGetSampleCount(tex.image) > 1 {
-        wgpu.TextureRelease(tex.resolve)
-        wgpu.TextureViewRelease(tex.resolve_view)
-    }
     wgpu.TextureRelease(tex.image)
     wgpu.TextureViewRelease(tex.view)
 }
@@ -315,5 +251,49 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
 
     tex = make_texture_2D(final_texture, {uint(x), uint(y)}, true)
 
+    return
+}
+
+make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, layers: uint, cubemap: bool = false) -> (tex: Texture) {
+    log.debug("creating render target array:", size.x, "x", size.y, "x", layers)
+    tex.image = wgpu.DeviceCreateTexture(ren.device, &{
+        usage = {.RenderAttachment, .TextureBinding, .CopyDst},
+        dimension = ._2D,
+        size = {
+            width = u32(size.x),
+            height = u32(size.y),
+            depthOrArrayLayers = cubemap?u32(6*layers):u32(layers),
+        },
+        format = format,
+        mipLevelCount = 1,
+        sampleCount = 1
+    })
+    tex.view = wgpu.TextureCreateView(tex.image, &{
+        dimension = cubemap?.CubeArray:._2DArray,
+        mipLevelCount = 1,
+        arrayLayerCount = u32(layers),
+    })
+    tex.is_solid = true //I guess
+    tex.is_trans = false
+    return
+}
+
+make_render_texture :: proc(size: [2]uint, format: wgpu.TextureFormat, multisampled: bool = false) -> (tex: Texture) {
+    log.debug("creating render target:", size.x, "x", size.y)
+    tex.image = wgpu.DeviceCreateTexture(ren.device, &{
+        usage = {.RenderAttachment, .TextureBinding, .CopyDst},
+        dimension = ._2D,
+        size = {
+            width = u32(size.x),
+            height = u32(size.y),
+            depthOrArrayLayers = 1,
+        },
+        format = format,
+        mipLevelCount = 1,
+        sampleCount = 4 if multisampled else 1
+    })
+    tex.view = wgpu.TextureCreateView(tex.image)
+    tex.is_solid = true //I guess
+    tex.is_trans = false
     return
 }

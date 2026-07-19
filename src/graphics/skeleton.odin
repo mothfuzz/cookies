@@ -58,6 +58,7 @@ realloc_skeletons_buffer :: proc(new_size: int) {
             {binding = 0, buffer = skeletons_buffer, size = u64(skeletons_buffer_len)},
         }
         skeletons_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+            label = "skeletons",
             layout = skeletons_layout,
             entryCount = len(bindings),
             entries = raw_data(bindings),

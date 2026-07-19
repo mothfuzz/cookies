@@ -15,7 +15,9 @@ Renderer :: struct {
     msaa_view: wgpu.TextureView,
     depth_buffer: Texture,
     accum: Texture,
+    accum_resolve: Texture,
     revealage: Texture,
+    revealage_resolve: Texture,
     config: wgpu.SurfaceConfiguration,
     queue: wgpu.Queue,
     shader: wgpu.ShaderModule,
@@ -122,16 +124,18 @@ configure_render_targets :: proc() {
     if ren.depth_buffer.image != nil {
         delete_texture(ren.depth_buffer)
     }
-    ren.depth_buffer = make_render_target({uint(ren.config.width), uint(ren.config.height)}, .Depth24PlusStencil8, .Depth24PlusStencil8)
+    ren.depth_buffer = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .Depth24PlusStencil8, true)
 
     if ren.accum.image != nil {
         delete_texture(ren.accum)
     }
-    ren.accum = make_render_target({uint(ren.config.width), uint(ren.config.height)}, .RGBA16Float, .RGBA16Float)
+    ren.accum = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .RGBA16Float, true)
+    ren.accum_resolve = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .RGBA16Float)
     if ren.revealage.image != nil {
         delete_texture(ren.revealage)
     }
-    ren.revealage = make_render_target({uint(ren.config.width), uint(ren.config.height)}, .R8Unorm, .R8Unorm)
+    ren.revealage = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .R8Unorm, true)
+    ren.revealage_resolve = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .R8Unorm)
 
     //only re-bind when those textures actually change.
     if ren.composite_bind_group != nil {
@@ -139,8 +143,8 @@ configure_render_targets :: proc() {
     }
     composite_bindings := []wgpu.BindGroupEntry{
         {binding = 0, sampler=ren.composite_sampler},
-        {binding = 1, textureView=ren.accum.resolve_view},
-        {binding = 2, textureView=ren.revealage.resolve_view},
+        {binding = 1, textureView=ren.accum_resolve.view},
+        {binding = 2, textureView=ren.revealage_resolve.view},
     }
     ren.composite_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
         layout = ren.composite_bind_group_layout,
@@ -561,6 +565,8 @@ Frame :: struct {
     //resources
     meshes: map[Mesh_Hash]Mesh,
     materials: map[Material_Hash]Material,
+    render_targets: map[Render_Target_Hash]Render_Target_Draw,
+    screen_target: Render_Target_Draw,
 }
 
 @(private)
@@ -581,6 +587,11 @@ delete_frame :: proc() {
     delete(frame.action)
     delete(frame.meshes)
     delete(frame.materials)
+    for _, render_target in frame.render_targets {
+        delete(render_target.cameras)
+    }
+    delete(frame.render_targets)
+    delete(frame.screen_target.cameras)
 }
 
 @(private)
@@ -590,6 +601,11 @@ clear_frame :: proc() {
     clear_action(&frame)
     clear(&frame.meshes)
     clear(&frame.materials)
+    for _, render_target in frame.render_targets {
+        delete(render_target.cameras)
+    }
+    clear(&frame.render_targets)
+    clear(&frame.screen_target.cameras)
 }
 
 //static frame so commands can be called context-free
@@ -615,8 +631,34 @@ draw_camera :: proc(camera: Camera, trans: matrix[4,4]f32 = 1, layers: Layer_Mas
     if layers != All_Layers {
         camera.layer_mask = layers
     }
+    append(&frame.screen_target.cameras, len(frame.cameras))
     append(&frame.cameras, calculate_camera(camera, trans)) //compute once, don't defer
 }
+
+@(export)
+draw_render_target :: proc(camera: Camera, target: Render_Target, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
+    target := target
+    camera := calculate_camera(camera, trans, &target)
+    if layers != All_Layers {
+        camera.layer_mask = layers
+    }
+    if !(target.hash in frame.render_targets) {
+        frame.render_targets[target.hash] = {
+            target.output.view,
+            target.msaa.view,
+            target.depth.view,
+            target.accum.view,
+            target.accum_resolve.view,
+            target.revealage.view,
+            target.revealage_resolve.view,
+            make([dynamic]int),
+        }
+    }
+    render_target := &frame.render_targets[target.hash]
+    append(&render_target.cameras, len(frame.cameras))
+    append(&frame.cameras, camera)
+}
+
 
 @(export)
 draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
@@ -933,6 +975,188 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
     }
 }
 
+@(private)
+clear_render_target :: proc(command_encoder: wgpu.CommandEncoder, target: Render_Target_Draw) {
+    clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+        label = "render_target_clear",
+        colorAttachmentCount = 1,
+        colorAttachments = &wgpu.RenderPassColorAttachment{
+            view = target.msaa,
+            resolveTarget = target.output,
+            loadOp = .Clear,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            clearValue = {0, 0, 0, 1},
+        },
+        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+            view = target.depth,
+            depthLoadOp = .Clear,
+            depthStoreOp = .Store,
+            depthClearValue = 1.0,
+            stencilLoadOp = .Clear,
+            stencilStoreOp = .Store,
+            stencilClearValue = 1.0,
+        },
+    })
+    wgpu.RenderPassEncoderEnd(clear_pass)
+    wgpu.RenderPassEncoderRelease(clear_pass)
+
+    trans_clear_attachments := []wgpu.RenderPassColorAttachment{
+        {
+            view = target.accum,
+            resolveTarget = target.accum_resolve,
+            loadOp = .Clear,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            clearValue = {0, 0, 0, 0},
+        },
+        {
+            view = target.revealage,
+            resolveTarget = target.revealage_resolve,
+            loadOp = .Clear,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            clearValue = {1, 0, 0, 0},
+        },
+    }
+    trans_clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+        label = "render_target_trans_clear",
+        colorAttachmentCount = len(trans_clear_attachments),
+        colorAttachments = raw_data(trans_clear_attachments),
+        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+            view = target.depth,
+            depthLoadOp = .Load,
+            depthStoreOp = .Store,
+            stencilLoadOp = .Load,
+            stencilStoreOp = .Store,
+        },
+    })
+    wgpu.RenderPassEncoderEnd(trans_clear_pass)
+    wgpu.RenderPassEncoderRelease(trans_clear_pass)
+}
+
+render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera_Draw, solid_passes, trans_passes: []Pass, target: Render_Target_Draw, draw_solid, draw_trans: bool) {
+    //start with a fill pass for each camera marked 'fill'
+    //(this is in a separate loop because cameras may have overlapping viewports)
+    camera_fill_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+        label = "camera_fill",
+        colorAttachmentCount = 1,
+        colorAttachments = &wgpu.RenderPassColorAttachment{
+            view = target.msaa,
+            resolveTarget = target.output,
+            loadOp = .Load,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+        },
+    })
+    wgpu.RenderPassEncoderSetPipeline(camera_fill_pass, ren.camera_fill_pipeline)
+    for i in target.cameras {
+        camera := cameras[i]
+        if !camera.fill do continue
+        wgpu.RenderPassEncoderSetBindGroup(camera_fill_pass, 0, camera.bind_group)
+        x, y, w, h := expand_values(camera.viewport)
+        wgpu.RenderPassEncoderSetViewport(camera_fill_pass, x, y, w, h, 0, 1)
+        wgpu.RenderPassEncoderSetScissorRect(camera_fill_pass, u32(x), u32(y), u32(w), u32(h))
+        wgpu.RenderPassEncoderDraw(camera_fill_pass, 3, 1, 0, 0)
+    }
+    wgpu.RenderPassEncoderEnd(camera_fill_pass)
+    wgpu.RenderPassEncoderRelease(camera_fill_pass)
+
+    for i in target.cameras {
+
+        camera := cameras[i]
+
+        //perform solid pass
+        if draw_solid {
+            render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+                label = "solid",
+                colorAttachmentCount = 1,
+                colorAttachments = &wgpu.RenderPassColorAttachment{
+                    view = target.msaa,
+                    resolveTarget = target.output,
+                    loadOp = .Load,
+                    storeOp = .Store,
+                    depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+                },
+                depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+                    view = target.depth,
+                    depthLoadOp = .Load,
+                    depthStoreOp = .Store,
+                    stencilLoadOp = .Load,
+                    stencilStoreOp = .Store,
+                },
+            })
+            wgpu.RenderPassEncoderSetPipeline(render_pass, ren.solid_pipeline)
+            bind_camera(render_pass, 0, camera)
+            bind_lights(render_pass, 3, u32(i))
+            execute_draw_calls(render_pass, solid_passes[i].draw_calls[:])
+            wgpu.RenderPassEncoderEnd(render_pass)
+            wgpu.RenderPassEncoderRelease(render_pass)
+        }
+
+        //then perform trans pass
+        if draw_trans {
+            trans_color_attachments := []wgpu.RenderPassColorAttachment{
+                //accum
+                {
+                    view = target.accum,
+                    resolveTarget = target.accum_resolve,
+                    loadOp = .Load,
+                    storeOp = .Store,
+                    depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+                },
+                //revealage
+                {
+                    view = target.revealage,
+                    resolveTarget = target.revealage_resolve,
+                    loadOp = .Load,
+                    storeOp = .Store,
+                    depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+                },
+            }
+            render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+                label = "trans",
+                colorAttachmentCount = len(trans_color_attachments),
+                colorAttachments = raw_data(trans_color_attachments),
+                depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+                    view = target.depth,
+                    depthLoadOp = .Load,
+                    depthStoreOp = .Store, //remember to disable depth-store for transparent.
+                    stencilLoadOp = .Load,
+                    stencilStoreOp = .Store,
+                },
+            })
+            wgpu.RenderPassEncoderSetPipeline(render_pass, ren.trans_pipeline)
+            bind_camera(render_pass, 0, camera)
+            bind_lights(render_pass, 3, u32(i))
+            execute_draw_calls(render_pass, trans_passes[i].draw_calls[:])
+            wgpu.RenderPassEncoderEnd(render_pass)
+            wgpu.RenderPassEncoderRelease(render_pass)
+        }
+    }
+
+    //finally, execute the composite pass for the output
+    if draw_trans {
+        composite_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+            label = "composite",
+            colorAttachmentCount = 1,
+            colorAttachments = &wgpu.RenderPassColorAttachment{
+                view = target.msaa,
+                resolveTarget = target.output,
+                loadOp = .Load,
+                storeOp = .Store,
+                depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            },
+        })
+        wgpu.RenderPassEncoderSetPipeline(composite_pass, ren.composite_pipeline)
+        wgpu.RenderPassEncoderSetBindGroup(composite_pass, 0, ren.composite_bind_group)
+        wgpu.RenderPassEncoderDraw(composite_pass, 3, 1, 0, 0)
+        wgpu.RenderPassEncoderEnd(composite_pass)
+        wgpu.RenderPassEncoderRelease(composite_pass)
+    }
+    
+}
+
 @(export)
 render_frame :: proc() {
     if !ren.ready do return
@@ -945,6 +1169,7 @@ render_frame :: proc() {
     }*/
     defer clear_frame()
 
+    
     //prepare the screen surface
     surface_tex := wgpu.SurfaceGetCurrentTexture(ren.surface)
     switch surface_tex.status {
@@ -969,6 +1194,79 @@ render_frame :: proc() {
     command_encoder := wgpu.DeviceCreateCommandEncoder(ren.device, nil)
     defer wgpu.CommandEncoderRelease(command_encoder)
 
+    //blast it all off at the end of the proc
+    defer {
+        command_buffer := wgpu.CommandEncoderFinish(command_encoder)
+        defer wgpu.CommandBufferRelease(command_buffer)
+
+        wgpu.QueueSubmit(ren.queue, {command_buffer})
+        wgpu.SurfacePresent(ren.surface)
+    }
+
+    //first things first, begin with a simple clear pass
+    clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+        label = "clear",
+        colorAttachmentCount = 1,
+        colorAttachments = &wgpu.RenderPassColorAttachment{
+            view = ren.msaa_view,
+            resolveTarget = screen,
+            loadOp = .Clear,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            clearValue = {0, 0, 0, 1},
+        },
+        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+            view = ren.depth_buffer.view,
+            depthLoadOp = .Clear,
+            depthStoreOp = .Store,
+            depthClearValue = 1.0,
+            stencilLoadOp = .Clear,
+            stencilStoreOp = .Store,
+            stencilClearValue = 1.0,
+        },
+    })
+    wgpu.RenderPassEncoderEnd(clear_pass)
+    wgpu.RenderPassEncoderRelease(clear_pass)
+
+    //then execute a clear pass for the main transparent targets as well...
+    trans_clear_attachments := []wgpu.RenderPassColorAttachment{
+        //accum
+        {
+            view = ren.accum.view,
+            resolveTarget = ren.accum_resolve.view,
+            loadOp = .Clear,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            clearValue = {0, 0, 0, 0},
+        },
+        //revealage
+        {
+            view = ren.revealage.view,
+            resolveTarget = ren.revealage_resolve.view,
+            loadOp = .Clear,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            clearValue = {1, 0, 0, 0},
+        },
+    }
+    trans_clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+        label = "trans_clear",
+        colorAttachmentCount = len(trans_clear_attachments),
+        colorAttachments = raw_data(trans_clear_attachments),
+        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+            view = ren.depth_buffer.view,
+            depthLoadOp = .Load,
+            depthStoreOp = .Store,
+            stencilLoadOp = .Load,
+            stencilStoreOp = .Store,
+        },
+    })
+    wgpu.RenderPassEncoderEnd(trans_clear_pass)
+    wgpu.RenderPassEncoderRelease(trans_clear_pass)
+
+    //if no cameras we can return early and skip everything
+    if len(frame.cameras) == 0 do return
+
     //master record of mesh draws this frame
     batches := flatten_action(frame)
     defer delete(batches)
@@ -980,7 +1278,7 @@ render_frame :: proc() {
     lights := calculate_lights(frame.lights[:], frame.cameras[:])
     defer delete_lights(lights)
 
-    //compute all instance data for passes
+    //compute all instance data for all passes
     passes := compute_passes(batches, lights, frame.cameras[:])
     defer delete_passes(passes)
 
@@ -1029,191 +1327,43 @@ render_frame :: proc() {
         }
     }
 
-    //then for the screen, begin with a simple clear pass
-    clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-        label = "clear",
-        colorAttachmentCount = 1,
-        colorAttachments = &wgpu.RenderPassColorAttachment{
-            view = ren.msaa_view,
-            resolveTarget = screen,
-            loadOp = .Clear,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = {0, 0, 0, 1},
-        },
-        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-            view = ren.depth_buffer.view,
-            depthLoadOp = .Clear,
-            depthStoreOp = .Store,
-            depthClearValue = 1.0,
-            stencilLoadOp = .Clear,
-            stencilStoreOp = .Store,
-            stencilClearValue = 1.0,
-        },
-    })
-    wgpu.RenderPassEncoderEnd(clear_pass)
-    wgpu.RenderPassEncoderRelease(clear_pass)
-
-    //then execute a clear pass for the transparent targets as well...
-    trans_clear_attachments := []wgpu.RenderPassColorAttachment{
-        //accum
-        {
-            view = ren.accum.view,
-            resolveTarget = ren.accum.resolve_view,
-            loadOp = .Clear,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = {0, 0, 0, 0},
-        },
-        //revealage
-        {
-            view = ren.revealage.view,
-            resolveTarget = ren.revealage.resolve_view,
-            loadOp = .Clear,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = {1, 0, 0, 0},
-        },
-    }
-    trans_clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-        label = "trans_clear",
-        colorAttachmentCount = len(trans_clear_attachments),
-        colorAttachments = raw_data(trans_clear_attachments),
-        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-            view = ren.depth_buffer.view,
-            depthLoadOp = .Load,
-            depthStoreOp = .Store,
-            stencilLoadOp = .Load,
-            stencilStoreOp = .Store,
-        },
-    })
-    wgpu.RenderPassEncoderEnd(trans_clear_pass)
-    wgpu.RenderPassEncoderRelease(trans_clear_pass)
-
-    //next get started going through the current frame's render batches & actuall drawing them...
-
-    //start with a fill pass for each camera marked 'fill'
-    camera_fill_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-        label = "camera_fill",
-        colorAttachmentCount = 1,
-        colorAttachments = &wgpu.RenderPassColorAttachment{
-            view = ren.msaa_view,
-            resolveTarget = screen,
-            loadOp = .Load,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-        },
-    })
-    wgpu.RenderPassEncoderSetPipeline(camera_fill_pass, ren.camera_fill_pipeline)
-    for camera in frame.cameras {
-        if !camera.fill do continue
-        wgpu.RenderPassEncoderSetBindGroup(camera_fill_pass, 0, camera.bind_group)
-        x, y, w, h := expand_values(camera.viewport)
-        wgpu.RenderPassEncoderSetViewport(camera_fill_pass, x, y, w, h, 0, 1)
-        wgpu.RenderPassEncoderSetScissorRect(camera_fill_pass, u32(x), u32(y), u32(w), u32(h))
-        wgpu.RenderPassEncoderDraw(camera_fill_pass, 3, 1, 0, 0)
-    }
-    wgpu.RenderPassEncoderEnd(camera_fill_pass)
-    wgpu.RenderPassEncoderRelease(camera_fill_pass)
-
     //make sure to upload + offset lights per-camera.
     write_light_buffers(lights, frame.cameras[:], shadow_offsets)
 
-    for &camera, i in frame.cameras {
+    //now actually render the main passes
+    frame.screen_target.output = screen
+    frame.screen_target.msaa = ren.msaa_view
+    frame.screen_target.depth = ren.depth_buffer.view
+    frame.screen_target.accum = ren.accum.view
+    frame.screen_target.accum_resolve = ren.accum_resolve.view
+    frame.screen_target.revealage = ren.revealage.view
+    frame.screen_target.revealage_resolve = ren.revealage_resolve.view
 
-        //perform solid pass
-        render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-            label = "solid",
-            colorAttachmentCount = 1,
-            colorAttachments = &wgpu.RenderPassColorAttachment{
-                view = ren.msaa_view,
-                resolveTarget = screen,
-                loadOp = .Load,
-                storeOp = .Store,
-                depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            },
-            depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-                view = ren.depth_buffer.view,
-                depthLoadOp = .Load,
-                depthStoreOp = .Store,
-                stencilLoadOp = .Load,
-                stencilStoreOp = .Store,
-            },
-        })
-        wgpu.RenderPassEncoderSetPipeline(render_pass, ren.solid_pipeline)
-        bind_camera(render_pass, 0, camera)
-        bind_lights(render_pass, 3, u32(i))
-        execute_draw_calls(render_pass, passes.solid_main[i].draw_calls[:])
-        wgpu.RenderPassEncoderEnd(render_pass)
-        wgpu.RenderPassEncoderRelease(render_pass)
-
-        //then perform trans pass
-        trans_color_attachments := []wgpu.RenderPassColorAttachment{
-            //accum
-            {
-                view = ren.accum.view,
-                resolveTarget = ren.accum.resolve_view,
-                loadOp = .Load,
-                storeOp = .Store,
-                depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            },
-            //revealage
-            {
-                view = ren.revealage.view,
-                resolveTarget = ren.revealage.resolve_view,
-                loadOp = .Load,
-                storeOp = .Store,
-                depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            },
+    //get number of draw calls, in case we need to skip a pass
+    draw_solid: bool = false
+    for pass in passes.solid_main {
+        if len(pass.draw_calls) > 0 {
+            draw_solid = true
+            break
         }
-        render_pass = wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-            label = "trans",
-            colorAttachmentCount = len(trans_color_attachments),
-            colorAttachments = raw_data(trans_color_attachments),
-            depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-                view = ren.depth_buffer.view,
-                depthLoadOp = .Load,
-                depthStoreOp = .Store, //remember to disable depth-store for transparent.
-                stencilLoadOp = .Load,
-                stencilStoreOp = .Store,
-            },
-        })
-        wgpu.RenderPassEncoderSetPipeline(render_pass, ren.trans_pipeline)
-        bind_camera(render_pass, 0, camera)
-        bind_lights(render_pass, 3, u32(i))
-        execute_draw_calls(render_pass, passes.trans_main[i].draw_calls[:])
-        wgpu.RenderPassEncoderEnd(render_pass)
-        wgpu.RenderPassEncoderRelease(render_pass)
+    }
+    draw_trans: bool = false
+    for pass in passes.solid_main {
+        if len(pass.draw_calls) > 0 {
+            draw_trans = true
+            break
+        }
     }
 
-    //finally, execute the composite pass
-    composite_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-        label = "composite",
-        colorAttachmentCount = 1,
-        colorAttachments = &wgpu.RenderPassColorAttachment{
-            view = ren.msaa_view,
-            resolveTarget = screen,
-            loadOp = .Load,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-        },
-    })
-    wgpu.RenderPassEncoderSetPipeline(composite_pass, ren.composite_pipeline)
-    wgpu.RenderPassEncoderSetBindGroup(composite_pass, 0, ren.composite_bind_group)
-    //should be default
-    //wgpu.RenderPassEncoderSetViewport(composite_pass, 0, 0, f32(ren.config.width), f32(ren.config.height), 0, 1)
-    //wgpu.RenderPassEncoderSetScissorRect(composite_pass, 0, 0, ren.config.width, ren.config.height)
-    wgpu.RenderPassEncoderDraw(composite_pass, 3, 1, 0, 0)
-    wgpu.RenderPassEncoderEnd(composite_pass)
-    wgpu.RenderPassEncoderRelease(composite_pass)
+    //render to custom render targets first
+    for hash, target in frame.render_targets {
+        clear_render_target(command_encoder, target)
+        render_main_pass(command_encoder, frame.cameras[:], passes.solid_main, passes.trans_main, target, draw_solid, draw_trans)
+    }
+
+    //then finally render to screen (already cleared above)...
+    render_main_pass(command_encoder, frame.cameras[:], passes.solid_main, passes.trans_main, frame.screen_target, draw_solid, draw_trans)
 
     //render the UI on top of everything else
     render_ui(screen, command_encoder)
-
-    //then blast it!!!
-    command_buffer := wgpu.CommandEncoderFinish(command_encoder)
-    defer wgpu.CommandBufferRelease(command_buffer)
-
-    wgpu.QueueSubmit(ren.queue, {command_buffer})
-    wgpu.SurfacePresent(ren.surface)
 }

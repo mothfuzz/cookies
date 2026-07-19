@@ -178,6 +178,8 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
     tiling := [2]bool{false, false}
     base_color_tex: Texture = white_tex
     base_color_tint: [4]f32 = 1
+    pbr_tint: [4]f32 = 1
+    emissive_tint: [4]f32 = 1
     if material.pbr_metallic_roughness.base_color_texture.texture != nil {
         base_color_index := cgltf.image_index(data, material.pbr_metallic_roughness.base_color_texture.texture.image_)
         base_color_tex = scene.textures[base_color_index]
@@ -198,10 +200,17 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
 
     }
 
-    pbr_tex: Texture = white_tex
+    pbr_tex: Texture = pbr_tex
     if material.pbr_metallic_roughness.metallic_roughness_texture.texture != nil {
         pbr_index := cgltf.image_index(data, material.pbr_metallic_roughness.metallic_roughness_texture.texture.image_)
         pbr_tex = scene.textures[pbr_index]
+    }
+    //no such occlusion_factor, so no pbr_tint.r
+    if material.pbr_metallic_roughness.roughness_factor != 0 {
+        pbr_tint.g = material.pbr_metallic_roughness.roughness_factor
+    }
+    if material.pbr_metallic_roughness.metallic_factor != 0 {
+        pbr_tint.b = material.pbr_metallic_roughness.metallic_factor
     }
 
     emissive_tex: Texture = black_tex
@@ -209,9 +218,12 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
         emissive_index := cgltf.image_index(data, material.emissive_texture.texture.image_)
         emissive_tex = scene.textures[emissive_index]
     }
+    if material.emissive_factor != 0 {
+        emissive_tint.rgb = material.emissive_factor
+    }
 
     ret_material := make_material(base_color_tex, normal_tex, pbr_tex, emissive_tex, filtering, tiling)
-    return {ret_material, {base_color_tint=base_color_tint}}
+    return {ret_material, {base_color_tint=base_color_tint, pbr_tint=pbr_tint, emissive_tint=emissive_tint}}
 }
 
 @(private)
