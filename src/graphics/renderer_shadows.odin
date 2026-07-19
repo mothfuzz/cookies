@@ -6,7 +6,7 @@ Shadow_Renderer :: struct {
     //shadow map data
     shadow_layout: wgpu.PipelineLayout,
     shadow_pipeline: wgpu.RenderPipeline,
-    shadow_depth_sampler: wgpu.Sampler, //set CompareFunc for auto-PCF
+    shadow_depth_sampler: wgpu.Sampler,
     shadow_color_sampler: wgpu.Sampler,
     spot_light_shadow_depth: Texture,
     spot_light_shadow_color: Texture,
@@ -28,7 +28,7 @@ init_shadows :: proc() {
             bufferCount = len(vertex_buffer_layouts),
             buffers = raw_data(vertex_buffer_layouts),
         },
-        /*fragment = &{
+        fragment = &{
             module = ren.shader,
             entryPoint = "shadow_main",
             targetCount = 1,
@@ -48,7 +48,7 @@ init_shadows :: proc() {
                     },
                 },
             },
-        },*/
+        },
         primitive = {
             topology = .TriangleList,
             cullMode = .None,

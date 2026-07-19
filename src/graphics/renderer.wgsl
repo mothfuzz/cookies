@@ -330,5 +330,9 @@ fn trans_main(in: VSOut) -> TransOut {
 
 @fragment
 fn shadow_main(in: VSOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(0, 0, 0, 1);
+    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint;
+    if base_color.a < 0.9 {
+        discard;
+    }
+    return vec4<f32>(1, 1, 1, 1);
 }

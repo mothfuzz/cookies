@@ -1300,14 +1300,14 @@ render_frame :: proc() {
             
             shadow_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
                 label = "spot light shadows",
-                colorAttachmentCount = 0,
-                /*colorAttachments = &wgpu.RenderPassColorAttachment{
+                colorAttachmentCount = 1,
+                colorAttachments = &wgpu.RenderPassColorAttachment{
                     view = shadow_color,
                     loadOp = .Clear,
                     storeOp = .Store,
                     depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
                     clearValue = [4]f64{1, 1, 1, 1},
-                },*/
+                },
                 depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
                     view = shadow_depth,
                     depthLoadOp = .Clear,
