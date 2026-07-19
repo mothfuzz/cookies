@@ -172,6 +172,9 @@ pixels_byte_to_word :: proc(in_pixels: []byte, x, y: uint) -> (out_pixels: []u32
 load_data_2d :: proc(img: []byte) -> (img_u32: []u32, x, y: uint) {
     imgx, imgy, imgc: i32
     img := stbi.load_from_memory(raw_data(img), i32(len(img)), &imgx, &imgy, &imgc, 4)
+    if img == nil {
+        log.error("Failed to parse image!")
+    }
 
     x = uint(imgx)
     y = uint(imgy)
@@ -254,6 +257,7 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
     return
 }
 
+// NOTE: if you want multisampled render texture arrays, you'd need to render to a single multisampled render texture, then *resolve* it to one of the array layers.
 make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, layers: uint, cubemap: bool = false) -> (tex: Texture) {
     log.debug("creating render target array:", size.x, "x", size.y, "x", layers)
     tex.image = wgpu.DeviceCreateTexture(ren.device, &{

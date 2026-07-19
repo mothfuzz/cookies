@@ -237,10 +237,10 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
             if(theta < outer_cutoff) {
                 continue;
             }
-            var shadow = 0.0;
-            var transmittance = vec3<f32>(0.0);
+            var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
             let layer = spot_lights[i].shadow_index.r;
             if(layer != -1) {
+                light_factor = vec3<f32>(0.0);
                 let frag_in_light = spot_lights[i].view_to_shadow * in.position;
                 let ndc = frag_in_light.xyz / frag_in_light.w;
                 var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
@@ -252,18 +252,17 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
                     for(var y = -1; y <= 1; y++) {
                         let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
                         let visibility = textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref - bias);
-                        shadow += visibility;
-                        transmittance += textureSample(spot_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
+                        let transmittance = textureSample(spot_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
+                        light_factor += visibility * transmittance;
                     }
                 }
-                transmittance /= max(shadow, 1e-5);
-                shadow /= 9.0;
+                light_factor /= 9.0;
             }
-            if(shadow > 0) {
+            if(all(light_factor > vec3<f32>(0))) {
                 let epsilon = inner_cutoff - outer_cutoff;
                 let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
-                let radiance = spot_lights[i].color.rgb * spot_lights[i].color.a * falloff * shadow * transmittance;
-                //light += calculate_influence_phong(n, v, l, radiance) * shadow;
+                let radiance = spot_lights[i].color.rgb * spot_lights[i].color.a * falloff * light_factor;
+                //light += calculate_influence_phong(n, v, l, radiance);
                 light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
             }
         }

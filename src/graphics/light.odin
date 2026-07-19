@@ -109,7 +109,7 @@ lights_layout_entries := []wgpu.BindGroupLayoutEntry{
     wgpu.BindGroupLayoutEntry{
         binding = 5,
         visibility = {.Fragment},
-        sampler = {type = .NonFiltering}
+        sampler = {type = .Filtering}
     },
     //spot light depth shadows
     wgpu.BindGroupLayoutEntry{

@@ -129,8 +129,8 @@ init_shadows :: proc() {
         maxAnisotropy = 1,
     })
     ren.shadow_color_sampler = wgpu.DeviceCreateSampler(ren.device, &{
-        minFilter = .Nearest,
-        magFilter = .Nearest,
+        minFilter = .Linear,
+        magFilter = .Linear,
         mipmapFilter = .Nearest,
         addressModeU = .ClampToEdge,
         addressModeV = .ClampToEdge,
