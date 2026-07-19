@@ -149,14 +149,14 @@ load_image :: proc(gltf_path: cstring, opts: cgltf.options, image: ^cgltf.image,
             img_base64_cstring := strings.clone_to_cstring(img_base64)
             img_data, res := cgltf.load_buffer_base64(opts, uint(img_size), img_base64_cstring)
             delete(img_base64_cstring)
-            return make_texture_from_image(slice.bytes_from_ptr(img_data, img_size))
+            return make_texture_from_image(slice.bytes_from_ptr(img_data, img_size), linear)
         }
     }
     //load texture from buffer
     if image.buffer_view != nil {
         buffer_data := slice.bytes_from_ptr(image.buffer_view.buffer.data, int(image.buffer_view.buffer.size))
         img_data := buffer_data[image.buffer_view.offset:image.buffer_view.size]
-        return make_texture_from_image(img_data)
+        return make_texture_from_image(img_data, linear)
     }
     //lastly but not leastly... it's a file. use the file manager
     
