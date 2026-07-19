@@ -94,7 +94,7 @@ load_material :: proc(mat: ^graphics.Material) {
     }
     pbr_tex := graphics.Texture{path=mat.pbr, linear=true}
     if mat.pbr == nil || string(mat.pbr) == "" {
-        pbr_tex = graphics.white_tex
+        pbr_tex = graphics.pbr_tex
     } else {
         load(&pbr_tex)
     }

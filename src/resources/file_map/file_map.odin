@@ -12,7 +12,9 @@ loaded_paths: map[rawptr]cstring
 
 unload_files :: proc() {
     for path, file in loaded_files {
-        delete(file.data)
+        if !file.preloaded {
+            delete(file.data)
+        }
     }
     delete(loaded_files)
     delete(loaded_paths)

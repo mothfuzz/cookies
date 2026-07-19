@@ -112,12 +112,12 @@ tick :: proc() {
 
 draw :: proc(alpha, delta: f64) {
 
-    graphics.draw_camera(&cam, transform.get_world_smooth(&tree, cam_trans, alpha))
+    graphics.draw_camera(cam, transform.get_world_smooth(&tree, cam_trans, alpha))
     graphics.draw_mesh(quad, quad_mat)
 
     graphics.draw_spot_light(spot_light)
 
-    graphics.draw_scene(maxwell, alpha, delta)
+    graphics.draw_scene(maxwell, alpha)
 }
 
 quit :: proc() {

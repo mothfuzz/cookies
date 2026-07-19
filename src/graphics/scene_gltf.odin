@@ -64,7 +64,6 @@ Scene :: struct {
     //assets (TODO: move to resource manager)
     meshes: []Mesh, //'primitives'
     colliders: []spatial.Tri_Mesh, // TODO: get this out of here.
-    textures: []Texture,
     materials: []Combined_Material,
     skeletons: []Skeleton, //'skins'
     animations: []Animation,
@@ -86,7 +85,6 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     //assets
     s.meshes = scene.meshes
     s.colliders = scene.colliders
-    s.textures = scene.textures
     s.materials = scene.materials
     s.skeletons = scene.skeletons
     s.animations = scene.animations
@@ -145,7 +143,7 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
 // if the user wants to load arbitrary data they can load the texture themselves :P
 
 @(private)
-load_image :: proc(gltf_path: cstring, opts: cgltf.options, image: cgltf.image) -> (tex: Texture) {
+load_image :: proc(gltf_path: cstring, opts: cgltf.options, image: ^cgltf.image, linear: bool = false) -> (tex: Texture) {
     //load textures
     if prefix, ok := strings.substring(string(image.uri), 0, 5); ok {
         if prefix == "data:" {
@@ -167,13 +165,13 @@ load_image :: proc(gltf_path: cstring, opts: cgltf.options, image: cgltf.image) 
     //lastly but not leastly... it's a file. use the file manager
     
     path := resolve_image_path(gltf_path, image.uri)
-    tex = make_texture_from_image(file_map.read(path))
+    tex = make_texture_from_image(file_map.read(path), linear)
     file_map.release(path)
     return
 }
 
 @(private)
-load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material) -> Combined_Material {
+load_material :: proc(gltf_path: cstring, opts: cgltf.options, material: cgltf.material) -> Combined_Material {
     filtering := true
     tiling := [2]bool{false, false}
     base_color_tex: Texture = white_tex
@@ -181,8 +179,7 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
     pbr_tint: [4]f32 = 1
     emissive_tint: [4]f32 = 1
     if material.pbr_metallic_roughness.base_color_texture.texture != nil {
-        base_color_index := cgltf.image_index(data, material.pbr_metallic_roughness.base_color_texture.texture.image_)
-        base_color_tex = scene.textures[base_color_index]
+        base_color_tex = load_image(gltf_path, opts, material.pbr_metallic_roughness.base_color_texture.texture.image_)
 
         sampler := material.pbr_metallic_roughness.base_color_texture.texture.sampler
         filtering = sampler.mag_filter == .linear
@@ -195,15 +192,13 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
 
     normal_tex: Texture = normal_tex
     if material.normal_texture.texture != nil {
-        normal_index := cgltf.image_index(data, material.normal_texture.texture.image_)
-        normal_tex = scene.textures[normal_index]
+        normal_tex = load_image(gltf_path, opts, material.normal_texture.texture.image_, true)
 
     }
 
     pbr_tex: Texture = pbr_tex
     if material.pbr_metallic_roughness.metallic_roughness_texture.texture != nil {
-        pbr_index := cgltf.image_index(data, material.pbr_metallic_roughness.metallic_roughness_texture.texture.image_)
-        pbr_tex = scene.textures[pbr_index]
+        pbr_tex = load_image(gltf_path, opts, material.pbr_metallic_roughness.metallic_roughness_texture.texture.image_, true)
     }
     //no such occlusion_factor, so no pbr_tint.r
     if material.pbr_metallic_roughness.roughness_factor != 0 {
@@ -215,8 +210,7 @@ load_material :: proc(data: ^cgltf.data, scene: ^Scene, material: cgltf.material
 
     emissive_tex: Texture = black_tex
     if material.emissive_texture.texture != nil {
-        emissive_index := cgltf.image_index(data, material.emissive_texture.texture.image_)
-        emissive_tex = scene.textures[emissive_index]
+        emissive_tex = load_image(gltf_path, opts, material.emissive_texture.texture.image_)
     }
     if material.emissive_factor != 0 {
         emissive_tint.rgb = material.emissive_factor
@@ -380,14 +374,9 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, tree: ^transform
     // TODO: load lights...
     // TODO: load cameras...
 
-    scene.textures = make([]Texture, len(data.images))
-    for image, i in data.images {
-        scene.textures[i] = load_image(filename, opts, image)
-    }
-
     scene.materials = make([]Combined_Material, len(data.materials))
     for material, i in data.materials {
-        scene.materials[i] = load_material(data, &scene, material)
+        scene.materials[i] = load_material(filename, opts, material)
     }
 
     scene.models = make([]Model, len(data.meshes))
@@ -575,15 +564,16 @@ unlink_scene_transform :: proc(scene: ^Scene) {
 
 delete_scene :: proc(scene: Scene) {
     if !scene.copied {
-        for texture in scene.textures {
-            delete_texture(texture)
-        }
-        delete(scene.textures)
         for mesh in scene.meshes {
             delete_mesh(mesh)
         }
         delete(scene.meshes)
         for material in scene.materials {
+            //delete textures if not the defaults
+            if material.base.base_color_tex.image != white_tex.image do delete_texture(material.base.base_color_tex)
+            if material.base.normal_tex.image != normal_tex.image do delete_texture(material.base.normal_tex)
+            if material.base.pbr_tex.image != pbr_tex.image do delete_texture(material.base.pbr_tex)
+            if material.base.emissive_tex.image != black_tex.image do delete_texture(material.base.emissive_tex)
             delete_material(material.base)
         }
         delete(scene.materials)
