@@ -801,7 +801,7 @@ Pass :: struct {
 //passes slice into instance buffer per-camera
 Passes :: struct {
     solid_shadows: []Pass,
-    //trans_shadows: []Pass,
+    trans_shadows: []Pass,
     solid_main: []Pass,
     trans_main: []Pass,
 }
@@ -888,21 +888,24 @@ compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_
     //[solid shadow cam 0][trans shadow cam 0][solid main cam 0][trans main cam 0][etc.]
 
     solid_shadows_staging := make([]Pass_Staging, len(lights.shadow_cameras))
+    trans_shadows_staging := make([]Pass_Staging, len(lights.shadow_cameras))
     solid_main_staging := make([]Pass_Staging, len(cameras))
     trans_main_staging := make([]Pass_Staging, len(cameras))
     defer delete(solid_shadows_staging)
+    defer delete(trans_shadows_staging)
     defer delete(solid_main_staging)
     defer delete(trans_main_staging)
 
     //this should ACTUALLY be a single list of Camera_Draw for all shadows. The pass should be 'take a camera, draw a shadow map'
     //no matter how many cameras (1 per spot light, 6 per point light, num_cascades*num_main_cameras per directional light)
     passes.solid_shadows = make([]Pass, len(lights.shadow_cameras))
+    passes.trans_shadows = make([]Pass, len(lights.shadow_cameras))
     passes.solid_main = make([]Pass, len(cameras))
     passes.trans_main = make([]Pass, len(cameras))
 
     //first generate staging buffers
     for cam, i in lights.shadow_cameras {
-        compute_pass(batches, cam, &solid_shadows_staging[i], nil)
+        compute_pass(batches, cam, &solid_shadows_staging[i], &trans_shadows_staging[i])
     }
     for cam, i in cameras {
         compute_pass(batches, cam, &solid_main_staging[i], &trans_main_staging[i])
@@ -912,6 +915,9 @@ compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_
     running_offset: u64
     for &pass, i in passes.solid_shadows {
         write_pass(&pass, &solid_shadows_staging[i], &running_offset)
+    }
+    for &pass, i in passes.trans_shadows {
+        write_pass(&pass, &trans_shadows_staging[i], &running_offset)
     }
     for &pass, i in passes.solid_main {
         write_pass(&pass, &solid_main_staging[i], &running_offset)
@@ -924,6 +930,9 @@ compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_
 
     //write the vertex buffer...
     for &pass in passes.solid_shadows {
+        write_pass_instances(&pass)
+    }
+    for &pass in passes.trans_shadows {
         write_pass_instances(&pass)
     }
     for &pass in passes.solid_main {
@@ -947,6 +956,9 @@ delete_passes :: proc(passes: Passes) {
     for &pass in passes.solid_shadows {
         delete_pass(&pass)
     }
+    for &pass in passes.trans_shadows {
+        delete_pass(&pass)
+    }
     for &pass in passes.solid_main {
         delete_pass(&pass)
     }
@@ -954,6 +966,7 @@ delete_passes :: proc(passes: Passes) {
         delete_pass(&pass)
     }
     delete(passes.solid_shadows)
+    delete(passes.trans_shadows)
     delete(passes.solid_main)
     delete(passes.trans_main)
 }
@@ -1297,9 +1310,12 @@ render_frame :: proc() {
             defer wgpu.TextureViewRelease(shadow_color)
             shadow_depth := wgpu.TextureCreateView(ren.spot_light_shadow_depth.image, &view_descriptor)
             defer wgpu.TextureViewRelease(shadow_depth)
+
+            shadow_index := shadow_offsets.s + spot_light.shadow_index
+            camera := lights.shadow_cameras[shadow_index]
             
-            shadow_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-                label = "spot light shadows",
+            solid_shadow_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+                label = "spot light solid shadows",
                 colorAttachmentCount = 1,
                 colorAttachments = &wgpu.RenderPassColorAttachment{
                     view = shadow_color,
@@ -1315,15 +1331,36 @@ render_frame :: proc() {
                     depthClearValue = 1.0,
                 },
             })
-            wgpu.RenderPassEncoderSetPipeline(shadow_pass, ren.shadow_pipeline)
+            wgpu.RenderPassEncoderSetPipeline(solid_shadow_pass, ren.solid_shadow_pipeline)
 
-            shadow_index := shadow_offsets.s + spot_light.shadow_index
-            camera := lights.shadow_cameras[shadow_index]
-            bind_camera(shadow_pass, 0, camera)
-            execute_draw_calls(shadow_pass, passes.solid_shadows[shadow_index].draw_calls[:])
+            bind_camera(solid_shadow_pass, 0, camera)
+            execute_draw_calls(solid_shadow_pass, passes.solid_shadows[shadow_index].draw_calls[:])
 
-            wgpu.RenderPassEncoderEnd(shadow_pass)
-            wgpu.RenderPassEncoderRelease(shadow_pass)
+            wgpu.RenderPassEncoderEnd(solid_shadow_pass)
+            wgpu.RenderPassEncoderRelease(solid_shadow_pass)
+
+            trans_shadow_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+                label = "spot light trans shadows",
+                colorAttachmentCount = 1,
+                colorAttachments = &wgpu.RenderPassColorAttachment{
+                    view = shadow_color,
+                    loadOp = .Load,
+                    storeOp = .Store,
+                    depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+                },
+                depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+                    view = shadow_depth,
+                    depthLoadOp = .Load,
+                    depthStoreOp = .Store,
+                },
+            })
+            wgpu.RenderPassEncoderSetPipeline(trans_shadow_pass, ren.trans_shadow_pipeline)
+
+            bind_camera(trans_shadow_pass, 0, camera)
+            execute_draw_calls(trans_shadow_pass, passes.trans_shadows[shadow_index].draw_calls[:])
+
+            wgpu.RenderPassEncoderEnd(trans_shadow_pass)
+            wgpu.RenderPassEncoderRelease(trans_shadow_pass)
         }
     }
 

@@ -238,6 +238,7 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
                 continue;
             }
             var shadow = 0.0;
+            var transmittance = vec3<f32>(0.0);
             let layer = spot_lights[i].shadow_index.r;
             if(layer != -1) {
                 let frag_in_light = spot_lights[i].view_to_shadow * in.position;
@@ -250,17 +251,20 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
                 for(var x = -1; x <= 1; x++) {
                     for(var y = -1; y <= 1; y++) {
                         let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                        shadow += textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref - bias);
+                        let visibility = textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref - bias);
+                        shadow += visibility;
+                        transmittance += textureSample(spot_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
                     }
                 }
+                transmittance /= max(shadow, 1e-5);
                 shadow /= 9.0;
             }
             if(shadow > 0) {
                 let epsilon = inner_cutoff - outer_cutoff;
                 let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
-                let radiance = spot_lights[i].color.rgb * spot_lights[i].color.a * falloff;
+                let radiance = spot_lights[i].color.rgb * spot_lights[i].color.a * falloff * shadow * transmittance;
                 //light += calculate_influence_phong(n, v, l, radiance) * shadow;
-                light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic) * shadow;
+                light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
             }
         }
 
@@ -329,10 +333,20 @@ fn trans_main(in: VSOut) -> TransOut {
 }
 
 @fragment
-fn shadow_main(in: VSOut) -> @location(0) vec4<f32> {
+fn solid_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
     let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint;
     if base_color.a < 0.9 {
         discard;
     }
     return vec4<f32>(1, 1, 1, 1);
+}
+
+@fragment
+fn trans_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
+    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint;
+    if !(base_color.a > 0 && base_color.a < 1) {
+        discard;
+    }
+    //let t = pow(base_color.a, 0.5);
+    return vec4<f32>(mix(vec3(1.0), base_color.rgb, base_color.a), 1.0);
 }

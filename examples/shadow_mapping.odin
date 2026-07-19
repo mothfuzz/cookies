@@ -19,6 +19,12 @@ quad_mat: graphics.Material
 teapot: graphics.Scene
 teapot_trans: transform.Node
 
+teapot2: graphics.Scene
+teapot2_trans: transform.Node
+
+teapot3: graphics.Scene
+teapot3_trans: transform.Node
+
 spot_light: graphics.Spot_Light
 spot_light_trans: transform.Node
 
@@ -46,8 +52,19 @@ init :: proc() {
     quad_mat = graphics.make_material(quad_tex, filtering=false)
 
     teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"), &tree)
+    teapot.models[0].materials[0].base_color_tint = {1, 0, 0, 0.5}
     teapot_trans = transform.create_node(&tree, {translation={0, 0.2, 0}, scale=0.01})
     graphics.link_scene_transform(&teapot, teapot_trans)
+
+    teapot2 = graphics.copy_scene(&teapot)
+    teapot2.models[0].materials[0].base_color_tint = {0, 1, 0, 0.5}
+    teapot2_trans = transform.create_node(&tree, {translation={0.1, 0.4, 0}, scale=0.01})
+    graphics.link_scene_transform(&teapot2, teapot2_trans)
+
+    teapot3 = graphics.copy_scene(&teapot)
+    teapot3.models[0].materials[0].base_color_tint = {0, 0, 1, 0.5}
+    teapot3_trans = transform.create_node(&tree, {translation={-0.1, 0.4, 0}, scale=0.01})
+    graphics.link_scene_transform(&teapot3, teapot3_trans)
 
     spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, 0.1, 0.2, {1, 1, 1, 5})
     spot_light_trans = transform.create_node(&tree, {translation={0, 2, 0}})
@@ -85,8 +102,10 @@ tick :: proc() {
 
 draw :: proc(alpha, delta: f64) {
     graphics.draw_camera(cam, transform.get_world_smooth(&tree, cam_trans, alpha))
-    graphics.draw_mesh(quad, quad_mat)
+    graphics.draw_mesh(quad, quad_mat, base_color_tint={1, 1, 1, 1})
     graphics.draw_scene(teapot, alpha)
+    graphics.draw_scene(teapot2, alpha)
+    graphics.draw_scene(teapot3, alpha)
     graphics.draw_spot_light(spot_light, transform.get_world_smooth(&tree, spot_light_trans, alpha))
 }
 
@@ -96,6 +115,8 @@ quit :: proc() {
     graphics.delete_texture(quad_tex)
     graphics.delete_mesh(quad)
     graphics.delete_scene(teapot)
+    graphics.delete_scene(teapot2)
+    graphics.delete_scene(teapot3)
     graphics.delete_spot_light(spot_light)
 }
 

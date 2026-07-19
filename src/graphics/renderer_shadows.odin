@@ -5,7 +5,8 @@ import "vendor:wgpu"
 Shadow_Renderer :: struct {
     //shadow map data
     shadow_layout: wgpu.PipelineLayout,
-    shadow_pipeline: wgpu.RenderPipeline,
+    solid_shadow_pipeline: wgpu.RenderPipeline,
+    trans_shadow_pipeline: wgpu.RenderPipeline,
     shadow_depth_sampler: wgpu.Sampler,
     shadow_color_sampler: wgpu.Sampler,
     spot_light_shadow_depth: Texture,
@@ -19,8 +20,8 @@ init_shadows :: proc() {
         bindGroupLayouts = raw_data(bind_group_layouts),
     })
 
-    ren.shadow_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
-        label = "shadows",
+    ren.solid_shadow_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+        label = "solid shadows",
         layout = ren.shadow_layout,
         vertex = {
             module = ren.shader,
@@ -30,7 +31,7 @@ init_shadows :: proc() {
         },
         fragment = &{
             module = ren.shader,
-            entryPoint = "shadow_main",
+            entryPoint = "solid_shadow_main",
             targetCount = 1,
             targets = &wgpu.ColorTargetState{
                 format = .RGBA8Unorm,
@@ -68,6 +69,51 @@ init_shadows :: proc() {
             mask = 0xffffffff,
         },
     })
+    ren.trans_shadow_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+        label = "trans shadows",
+        layout = ren.shadow_layout,
+        vertex = {
+            module = ren.shader,
+            entryPoint = "vs_main",
+            bufferCount = len(vertex_buffer_layouts),
+            buffers = raw_data(vertex_buffer_layouts),
+        },
+        fragment = &{
+            module = ren.shader,
+            entryPoint = "trans_shadow_main",
+            targetCount = 1,
+            targets = &wgpu.ColorTargetState{
+                format = .RGBA8Unorm,
+                writeMask = wgpu.ColorWriteMaskFlags_All,
+                blend = &{
+                    color = {
+                        operation = .Add,
+                        srcFactor = .Zero,
+                        dstFactor = .Src,
+                    },
+                    alpha = {
+                        operation = .Add,
+                        srcFactor = .One,
+                        dstFactor = .Zero,
+                    },
+                },
+            },
+        },
+        primitive = {
+            topology = .TriangleList,
+            cullMode = .None,
+            frontFace = .CCW,
+        },
+        depthStencil = &{
+            format = .Depth32Float,
+            depthWriteEnabled = .False,
+            depthCompare = .Less,
+        },
+        multisample = {
+            count = 1,
+            mask = 0xffffffff,
+        },
+    })
 
     size: [2]uint = {SPOT_LIGHT_SHADOW_MAP_RES, SPOT_LIGHT_SHADOW_MAP_RES}
     ren.spot_light_shadow_depth = make_render_texture_array(size, .Depth32Float, 1)
@@ -94,7 +140,8 @@ init_shadows :: proc() {
 }
 
 delete_shadows :: proc() {
-    wgpu.RenderPipelineRelease(ren.shadow_pipeline)
+    wgpu.RenderPipelineRelease(ren.solid_shadow_pipeline)
+    wgpu.RenderPipelineRelease(ren.trans_shadow_pipeline)
     wgpu.PipelineLayoutRelease(ren.shadow_layout)
     wgpu.SamplerRelease(ren.shadow_depth_sampler)
     wgpu.SamplerRelease(ren.shadow_color_sampler)
