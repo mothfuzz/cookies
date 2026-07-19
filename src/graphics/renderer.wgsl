@@ -298,6 +298,8 @@ fn solid_main(in: VSOut) -> @location(0) vec4<f32> {
         discard;
     }
     final_color = apply_lights(in, final_color);
+    let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
+    final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
     final_color = apply_fog(in.position, final_color);
 
     return final_color * camera.color.a;
@@ -317,6 +319,8 @@ fn trans_main(in: VSOut) -> TransOut {
     }
     var final_color = base_color;
     final_color = apply_lights(in, final_color);
+    let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
+    final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
     final_color = apply_fog(in.position, final_color);
     //final_color.a = base_color.a;
     final_color = vec4<f32>(final_color.rgb * camera.color.a, final_color.a);
