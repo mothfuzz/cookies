@@ -138,10 +138,6 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     return
 }
 
-// TODO: rewrite load_image and load_material to load w/correct linear + premultiplied alpha depending on how the image is used in the material
-// skip loading textures not used in any material.
-// if the user wants to load arbitrary data they can load the texture themselves :P
-
 @(private)
 load_image :: proc(gltf_path: cstring, opts: cgltf.options, image: ^cgltf.image, linear: bool = false) -> (tex: Texture) {
     //load textures
