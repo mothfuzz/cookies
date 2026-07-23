@@ -651,6 +651,7 @@ draw_render_target :: proc(camera: Camera, target: Render_Target, trans: matrix[
             target.accum_resolve.view,
             target.revealage.view,
             target.revealage_resolve.view,
+            target.composite_bind_group,
             make([dynamic]int),
         }
     }
@@ -1162,7 +1163,7 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
             },
         })
         wgpu.RenderPassEncoderSetPipeline(composite_pass, ren.composite_pipeline)
-        wgpu.RenderPassEncoderSetBindGroup(composite_pass, 0, ren.composite_bind_group)
+        wgpu.RenderPassEncoderSetBindGroup(composite_pass, 0, target.composite_bind_group)
         wgpu.RenderPassEncoderDraw(composite_pass, 3, 1, 0, 0)
         wgpu.RenderPassEncoderEnd(composite_pass)
         wgpu.RenderPassEncoderRelease(composite_pass)
@@ -1375,6 +1376,7 @@ render_frame :: proc() {
     frame.screen_target.accum_resolve = ren.accum_resolve.view
     frame.screen_target.revealage = ren.revealage.view
     frame.screen_target.revealage_resolve = ren.revealage_resolve.view
+    frame.screen_target.composite_bind_group = ren.composite_bind_group
 
     //get number of draw calls, in case we need to skip a pass
     draw_solid: bool = false
