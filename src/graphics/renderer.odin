@@ -1387,7 +1387,7 @@ render_frame :: proc() {
         }
     }
     draw_trans: bool = false
-    for pass in passes.solid_main {
+    for pass in passes.trans_main {
         if len(pass.draw_calls) > 0 {
             draw_trans = true
             break
