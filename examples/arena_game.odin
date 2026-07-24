@@ -35,21 +35,19 @@ BOX VS SPHERES (title displayed in window)
 Player :: struct {
     hp: uint,
     score: uint,
-    trans: transform.Node,
+    trans: transform.Transform,
 }
 Bullet :: struct {
     handle: hm.Handle16,
-    trans: transform.Node,
+    trans: transform.Transform,
     trajectory: f32,
 }
 
 Enemy :: struct {
     handle: hm.Handle16,
-    trans: transform.Node,
+    trans: transform.Transform,
     trajectory: f32,
 }
-
-scene_graph: transform.Tree
 
 player: Player
 enemies: hm.Dynamic_Handle_Map(Enemy, hm.Handle16)
@@ -105,13 +103,11 @@ init :: proc() {
     big_font = graphics.make_font_from_file(unifont, Big_Font_Size*2)
     regular_font = graphics.make_font_from_file(unifont, Regular_Font_Size*2)
 
-    scene_graph = transform.make_tree()
-
     //player resources
     player_sprite = graphics.make_texture_from_image(#load("arena_game_player.png"))
     player_mat = graphics.make_material(base_color=player_sprite, filtering=false)
-    player.trans = transform.create_node(&scene_graph)
-    transform.write(&scene_graph, player.trans).scale = 2
+    player.trans = transform.make()
+    transform.write(player.trans).scale = 2
     player.hp = 10
     player.score = 0
 
@@ -130,7 +126,7 @@ init :: proc() {
 
 update_player :: proc() {
 
-    player_trans := transform.write(&scene_graph, player.trans)
+    player_trans := transform.write(player.trans)
 
     mouse_pos := [2]f32{f32(input.mouse_position().x), f32(input.mouse_position().y)}
     mouse_vec := mouse_pos - player_trans.translation.xy
@@ -169,7 +165,7 @@ update_player :: proc() {
     if input.mouse_pressed(.Left) {
         new_trans := transform.ORIGIN
         new_trans.translation = player_trans.translation
-        new_node := transform.create_node(&scene_graph, new_trans)
+        new_node := transform.make(new_trans)
         _ = hm.add(&bullets, Bullet{trans=new_node, trajectory=angle})
     }
 
@@ -184,7 +180,7 @@ spawn_enemy :: proc() {
     new_trans := transform.ORIGIN
     new_trans.translation = {x, y, 0}
     new_trans.scale = 4
-    new_node := transform.create_node(&scene_graph, new_trans)
+    new_node := transform.make(new_trans)
 
     _ = hm.add(&enemies, Enemy{trans=new_node})
 }
@@ -198,9 +194,9 @@ update_enemies :: proc() {
 
     it := hm.iterator_make(&enemies)
     for enemy, handle in hm.iterate(&it) {
-        player_trans := transform.read(&scene_graph, player.trans)
+        player_trans := transform.read(player.trans)
         player_pos := player_trans.translation
-        enemy_trans := transform.write(&scene_graph, enemy.trans)
+        enemy_trans := transform.write(enemy.trans)
         enemy_pos := enemy_trans.translation
         player_vec := player_pos.xy - enemy_pos.xy
         angle := linalg.atan2(player_vec.y, player_vec.x)
@@ -221,7 +217,7 @@ update_enemies :: proc() {
         }
         for p in player_points {
             if (p.x - e.x)*(p.x - e.x) + (p.y - e.y)*(p.y - e.y) < r*r {
-                transform.delete_node(&scene_graph, enemy.trans)
+                transform.delete(enemy.trans)
                 hm.remove(&enemies, handle)
                 player.hp -= 1
                 break
@@ -231,10 +227,10 @@ update_enemies :: proc() {
         //for each bullet, just check the bullet's center point
         bit := hm.iterator_make(&bullets)
         for bullet, bhandle in hm.iterate(&bit) {
-            b := transform.read(&scene_graph, bullet.trans).translation.xy
+            b := transform.read(bullet.trans).translation.xy
             if (b.x - e.x)*(b.x - e.x) + (b.y - e.y)*(b.y - e.y) < r*r {
-                transform.delete_node(&scene_graph, enemy.trans)
-                transform.delete_node(&scene_graph, bullet.trans)
+                transform.delete(enemy.trans)
+                transform.delete(bullet.trans)
                 hm.remove(&enemies, handle)
                 hm.remove(&bullets, bhandle)
                 player.score += 1
@@ -247,7 +243,7 @@ update_enemies :: proc() {
 update_bullets :: proc() {
     it := hm.iterator_make(&bullets)
     for bullet, handle in hm.iterate(&it) {
-        bullet_trans := transform.write(&scene_graph, bullet.trans)
+        bullet_trans := transform.write(bullet.trans)
         x := linalg.cos(bullet.trajectory)*Bullet_Speed
         y := linalg.sin(bullet.trajectory)*Bullet_Speed
         bullet_trans.translation += {x, y, 0}
@@ -256,7 +252,7 @@ update_bullets :: proc() {
             bullet_pos.x < -Screen_Width/2 ||
             bullet_pos.y > Screen_Height/2 ||
             bullet_pos.y < -Screen_Height/2 {
-                transform.delete_node(&scene_graph, bullet.trans)
+                transform.delete(bullet.trans)
                 hm.remove(&bullets, handle)
             }
     }
@@ -303,10 +299,10 @@ tick :: proc() {
 
 
 draw_player :: proc(a: f64) {
-    player_world := transform.get_world_smooth(&scene_graph, player.trans, a)
+    player_world := transform.get_world_smooth(player.trans, a)
     player_pos := transform.get_world_translation(player_world)
     for i in 0..<16 {
-        trans := transform.read(&scene_graph, player.trans)
+        trans := transform.read(player.trans)
         trans.translation = {player_pos.x, player_pos.y + f32(i), f32(i)}
         model := transform.compute(trans)
         graphics.draw_sprite(player_mat, model, clip_rect={f32(i)*16, 0, 16, 16})
@@ -319,17 +315,17 @@ draw_player :: proc(a: f64) {
 draw_bullets :: proc(a: f64) {
     it := hm.iterator_make(&bullets)
     for bullet, handle in hm.iterate(&it) {
-        graphics.draw_sprite(bullet_mat, transform.get_world_smooth(&scene_graph, bullet.trans, a))
+        graphics.draw_sprite(bullet_mat, transform.get_world_smooth(bullet.trans, a))
     }
 }
 
 draw_enemies :: proc(a: f64) {
     it := hm.iterator_make(&enemies)
     for enemy, handle in hm.iterate(&it) {
-        enemy_world := transform.get_world_smooth(&scene_graph, enemy.trans, a)
+        enemy_world := transform.get_world_smooth(enemy.trans, a)
         enemy_pos := transform.get_world_translation(enemy_world)
         for i in 0..<16 {
-            trans := transform.read(&scene_graph, enemy.trans)
+            trans := transform.read(enemy.trans)
             trans.translation = {enemy_pos.x, enemy_pos.y + f32(i)*2, f32(i)*2}
             model := transform.compute(trans)
             graphics.draw_sprite(enemy_mat, model, clip_rect={f32(i)*16, 0, 16, 16})
@@ -393,7 +389,6 @@ draw :: proc(t: f64, dt: f64) {
 }
 
 kill :: proc() {
-    transform.delete_tree(&scene_graph)
     hm.dynamic_destroy(&enemies)
     hm.dynamic_destroy(&bullets)
     graphics.delete_font(big_font)

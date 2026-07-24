@@ -100,7 +100,7 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
         source_channels := &anim.scene.animations[i].channels
         for &channel, c in a.channels {
             node := anim.scene.nodes[source_channels[c].target_node]
-            trans := transform.write(anim.scene.tree, node)
+            trans := transform.write(node)
             trans^ = node.original_trans
         }
     }
@@ -167,7 +167,7 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
                 if a.weight == 0 do continue //still progress time, but skip calcs
 
                 node := anim.scene.nodes[source_channel.target_node]
-                trans := transform.write(anim.scene.tree, node)
+                trans := transform.write(node)
                 switch o in source_channel.output {
                 case Keyframes_Translation:
                     prev_frame := o[channel.prev_frame]
@@ -200,7 +200,7 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
                 if a.weight == 0 do continue
                 source_channel := &source_channels[c]
                 node := anim.scene.nodes[source_channel.target_node]
-                trans := transform.write(anim.scene.tree, node)
+                trans := transform.write(node)
                 switch o in source_channel.output {
                 case Keyframes_Translation:
                     translation := o[channel.next_frame]
@@ -225,7 +225,7 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
     for &node, i in anim.scene.nodes {
         accum := rot_accum[i]
         if accum == 0 do continue
-        trans := transform.write(anim.scene.tree, node)
+        trans := transform.write(node)
         trans.rotation = linalg.normalize(accum) * node.original_trans.rotation
     }
 }
@@ -258,7 +258,7 @@ stop :: proc(anim: ^Animation_Player, id: int, return_to_rest: bool = false) {
         if return_to_rest {
             source_channel := &anim.scene.animations[id].channels[i]
             node := &anim.scene.nodes[source_channel.target_node]
-            trans := transform.write(anim.scene.tree, node)
+            trans := transform.write(node)
             trans^ = node.original_trans
         }
     }

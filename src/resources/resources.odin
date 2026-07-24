@@ -123,7 +123,7 @@ unload_material :: proc(mat: ^graphics.Material) {
 }
 load_scene :: proc(s: ^graphics.Scene) {
     //should ideally use resources but all assets are specific to the scene anyway...
-    s^ = graphics.make_scene_from_file(s.path, file_map.read(s.path), s.tree)
+    s^ = graphics.make_scene_from_file(s.path, file_map.read(s.path))
 }
 unload_scene :: proc(s: ^graphics.Scene) {
     graphics.delete_scene(s^)

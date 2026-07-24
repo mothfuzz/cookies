@@ -8,24 +8,18 @@ import "cookies:transform"
 import "cookies:resources"
 import "core:fmt"
 
-tree: transform.Tree
-
 cam: graphics.Camera
 
 light: graphics.Directional_Light
 
 brainstem: graphics.Scene
-brainstem_trans: transform.Node
 brainstem_anim: graphics.Animation_Player
 
 brainstem2: graphics.Scene
-brainstem2_trans: transform.Node
 brainstem2_anim: graphics.Animation_Player
 
 init :: proc() {
     window.set_size(800, 800)
-
-    tree = transform.make_tree()
 
     cam = graphics.make_camera()
     graphics.set_background_color(&cam, {1, 0, 1})
@@ -36,16 +30,14 @@ init :: proc() {
     //light = graphics.make_directional_light({0.6, 0.4, 0}, {1, 0, 0, 10})
     light = graphics.make_directional_light({0.6, 0.4, 0}, {1, 0, 0, 10})
     
-    brainstem = graphics.make_scene_from_file("BrainStem.gltf", #load("../resources/BrainStem.gltf"), &tree)
-    brainstem_trans = transform.create_node(&tree, {translation={0, -1, 5}})
-    graphics.link_scene_transform(&brainstem, brainstem_trans)
+    brainstem = graphics.make_scene_from_file("BrainStem.gltf", #load("../resources/BrainStem.gltf"))
+    transform.init(brainstem.root, {translation={0, -1, 5}})
     brainstem_anim = graphics.animate(&brainstem)
     graphics.play(&brainstem_anim, 0, true, 0.5, weight=0.6)
     fmt.printfln("%#v", brainstem.nodes[0])
 
     brainstem2 = graphics.copy_scene(&brainstem)
-    brainstem2_trans = transform.create_node(&tree, {translation={2, -1, 2}, scale=0.5})
-    graphics.link_scene_transform(&brainstem2, brainstem2_trans)
+    transform.init(brainstem2.root, {translation={2, -1, 2}, scale=0.5})
     brainstem2_anim = graphics.animate(&brainstem2)
     graphics.play(&brainstem2_anim, 0, true)
     fmt.printfln("%#v", brainstem2.nodes[0])
@@ -56,7 +48,7 @@ tick :: proc() {
     if input.key_pressed(.Key_Escape) {
         window.close()
     }
-    brainstem_trans := transform.write(&tree, brainstem_trans)
+    brainstem_trans := transform.write(brainstem.root)
     //transform.rotatex(brainstem_trans, math.to_radians(f32(-5)))
     if input.key_down(.Key_Up) {
         brainstem_trans.translation -= {0, 0, 0.25}
@@ -99,7 +91,6 @@ quit :: proc() {
     graphics.deanimate(brainstem2_anim)
     graphics.delete_scene(brainstem2)
     resources.unload_files()
-    transform.delete_tree(&tree)
 }
 
 main :: proc() {

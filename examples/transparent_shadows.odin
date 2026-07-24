@@ -8,9 +8,7 @@ import "cookies:transform"
 import "core:math/linalg"
 
 cam: graphics.Camera
-cam_trans: transform.Node
-
-tree: transform.Tree
+cam_trans: transform.Transform
 
 quad: graphics.Mesh
 quad_tex: graphics.Texture
@@ -21,18 +19,16 @@ stained_glass_tex: graphics.Texture
 stained_glass_mat: graphics.Material
 
 teapot: graphics.Scene
-teapot_trans: transform.Node
+teapot_trans: transform.Transform
 
 spot_light: graphics.Spot_Light
-spot_light_trans: transform.Node
+spot_light_trans: transform.Transform
 
 init :: proc() {
     window.set_size(800, 800)
 
-    tree = transform.make_tree()
-
     cam = graphics.make_camera()
-    cam_trans = transform.create_node(&tree, {translation={0, 0.5, 1}})
+    cam_trans = transform.make({translation={0, 0.5, 1}})
 
     quad = graphics.make_mesh([]graphics.Vertex{
         {position={-0.5, 0.0, -0.5}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
@@ -66,12 +62,11 @@ init :: proc() {
     stained_glass_tex = graphics.make_texture_from_image(#load("../resources/darksanctuary.png"))
     stained_glass_mat = graphics.make_material(base_color=stained_glass_tex)
 
-    teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"), &tree)
-    teapot_trans = transform.create_node(&tree, {translation={0, 0.2, 0}, scale=0.01})
-    graphics.link_scene_transform(&teapot, teapot_trans)
+    teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
+    transform.init(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
 
     spot_light = graphics.make_spot_light({0, 0, 0}, {0, -0.6, 0.4}, 0.1, 0.2, {1, 1, 1, 5})
-    spot_light_trans = transform.create_node(&tree, {translation={0, 2, -1.5}})
+    spot_light_trans = transform.make({translation={0, 2, -1.5}})
 }
 
 tick :: proc() {
@@ -79,7 +74,7 @@ tick :: proc() {
         window.close()
     }
 
-    cam_trans := transform.write(&tree, cam_trans)
+    cam_trans := transform.write(cam_trans)
     if input.key_down(.Key_W) {
         cam_trans.translation.z -= 0.01
     }
@@ -99,17 +94,17 @@ tick :: proc() {
     counter += 0.01
     light_angle_range: f32 = 10
     sin := linalg.sin(counter)*linalg.to_radians(light_angle_range)
-    trans := transform.write(&tree, spot_light_trans)
+    trans := transform.write(spot_light_trans)
     trans.rotation = transform.rotation_from_angles({0, 0, sin})
 
 }
 
 draw :: proc(alpha, delta: f64) {
-    graphics.draw_camera(cam, transform.get_world_smooth(&tree, cam_trans, alpha))
+    graphics.draw_camera(cam, transform.world(cam_trans, alpha))
     graphics.draw_mesh(quad, quad_mat, base_color_tint={1, 1, 1, 1})
     graphics.draw_mesh(wall, stained_glass_mat, base_color_tint={1, 1, 1, 1})
     graphics.draw_scene(teapot, alpha)
-    graphics.draw_spot_light(spot_light, transform.get_world_smooth(&tree, spot_light_trans, alpha))
+    graphics.draw_spot_light(spot_light, transform.world(spot_light_trans, alpha))
 }
 
 quit :: proc() {

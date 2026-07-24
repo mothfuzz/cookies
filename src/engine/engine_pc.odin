@@ -10,6 +10,7 @@ import "cookies:graphics"
 import "cookies:input"
 import "cookies:audio"
 import "cookies:resources"
+import "cookies:transform"
 
 @(private)
 set_exe_working_dir :: proc() -> os.Error {
@@ -40,6 +41,13 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
     icon := sdl3.LoadBMP_IO(sdl3.IOFromConstMem(raw_data(img), len(img)), true)
     sdl3.SetWindowIcon(window.window, icon)
     sdl3.DestroySurface(icon)
+
+    transform.tree_allocator = new(transform.Tree)
+    transform.tree_allocator^ = transform.make_tree()
+    defer {
+        transform.delete_tree(transform.tree_allocator)
+        free(transform.tree_allocator)
+    }
 
     audio.init()
     defer audio.quit()

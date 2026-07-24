@@ -9,6 +9,7 @@ import "cookies:graphics"
 import "cookies:input"
 import "cookies:audio"
 import "cookies:resources"
+import "cookies:transform"
 
 user_init: proc() = nil
 user_tick: proc() = nil
@@ -46,6 +47,8 @@ step :: proc(delta_time: f64) -> bool {
         }
         graphics.wait_idle()
         graphics.quit()
+        transform.delete_tree(transform.tree_allocator)
+        free(transform.tree_allocator)
         audio.quit()
         resources.unregister_loaders()
         resources.unload_files()
@@ -112,6 +115,9 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
         input.current_mouse_position.x = i32(pos.x) - i32(rect.x/2)
         input.current_mouse_position.y = i32(rect.y/2) - i32(pos.y)
     })
+
+    transform.tree_allocator = new(transform.Tree)
+    transform.tree_allocator^ = transform.make_tree()
 
     graphics.init(window.get_wgpu_surface, window.get_size())
 }
