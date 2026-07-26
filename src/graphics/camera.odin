@@ -224,11 +224,14 @@ get_viewport_size :: proc(cam: Camera, render_target: ^Render_Target = nil) -> (
 }
 
 //returns the z coordinate which the camera should be at to have sprites rendered at z=0 be pixel-perfect
-//(assumes FOV = default of 60 degrees)
 @(export)
 z_2d :: proc(cam: Camera) -> f32 {
     width, height := get_viewport_size(cam)
-    return linalg.sqrt(linalg.pow(height, 2) - linalg.pow(height/2.0, 2))
+    fov := cam.range[0]
+    if fov == 0 {
+        fov = linalg.to_radians(f32(FOV))
+    }
+    return height / (2 * linalg.tan(fov * 0.5))
 }
 
 //returns the minimum z-value you can offset sprites so that they will be depth-sorted but not visibly scaled by perspective (within tolerance)
