@@ -63,7 +63,7 @@ init :: proc() {
     spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, 0.1, 0.2, {0, 1, 0, 5})
     spot_light_trans = transform.make({translation={0, 2, 0}})
 
-    point_light = graphics.make_point_light({0.2, 2, 0.1}, {1, 0, 0, 3})
+    point_light = graphics.make_point_light({0.5, 0.1, -0.5}, {1, 0, 0, 10})
 
     directional_light = graphics.make_directional_light({0.2, 0, -0.8}, {0, 0, 1, 3})
 }
