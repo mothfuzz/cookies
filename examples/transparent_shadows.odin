@@ -108,7 +108,6 @@ draw :: proc(alpha, delta: f64) {
 }
 
 quit :: proc() {
-    graphics.delete_camera(cam)
     graphics.delete_material(quad_mat)
     graphics.delete_texture(quad_tex)
     graphics.delete_mesh(quad)
@@ -116,7 +115,6 @@ quit :: proc() {
     graphics.delete_texture(stained_glass_tex)
     graphics.delete_mesh(wall)
     graphics.delete_scene(teapot)
-    graphics.delete_spot_light(spot_light)
 }
 
 main :: proc() {

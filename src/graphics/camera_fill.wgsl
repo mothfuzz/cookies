@@ -17,6 +17,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> CameraFillOut {
 
 struct Camera {
     view: mat4x4<f32>,
+    inv_view: mat4x4<f32>,
     projection: mat4x4<f32>,
     color: vec4<f32>, //rgb + exposure
     fog_distance: vec2<f32>, //fog onset + render distance

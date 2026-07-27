@@ -1,5 +1,6 @@
 struct Camera {
     view: mat4x4<f32>,
+    inv_view: mat4x4<f32>,
     projection: mat4x4<f32>,
     color: vec4<f32>, //rgb + exposure
     fog_distance: vec2<f32>, //fog onset + render distance
@@ -16,7 +17,6 @@ struct Camera {
 struct PointLight {
     position: vec4<f32>, //view space xyz+radius
     color: vec4<f32>, //rgb+intensity
-    view_to_shadow: mat4x4<f32>,
     shadow_index: vec4<i32>,
 }
 @group(3) @binding(0) var<storage, read> point_lights: array<PointLight>;
@@ -35,7 +35,8 @@ struct SpotLight {
     direction: vec4<f32>,//xyz+outer angle
     color: vec4<f32>,
     view_to_shadow: mat4x4<f32>,
-    shadow_index: vec4<i32>,
+    shadow_index: i32,
+    range: f32,
 }
 @group(3) @binding(2) var<storage, read> spot_lights: array<SpotLight>;
 
@@ -48,8 +49,10 @@ struct LightCount {
 @group(3) @binding(3) var<uniform> light_count: LightCount;
 @group(3) @binding(4) var shadow_depth_sampler: sampler_comparison;
 @group(3) @binding(5) var shadow_color_sampler: sampler;
-@group(3) @binding(6) var spot_light_shadow_depth: texture_depth_2d_array;
-@group(3) @binding(7) var spot_light_shadow_color: texture_2d_array<f32>;
+@group(3) @binding(6) var point_light_shadow_depth: texture_depth_cube_array;
+@group(3) @binding(7) var point_light_shadow_color: texture_cube_array<f32>;
+@group(3) @binding(8) var spot_light_shadow_depth: texture_depth_2d_array;
+@group(3) @binding(9) var spot_light_shadow_color: texture_2d_array<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -185,6 +188,122 @@ fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: v
     return (diffuse_color + transmission_color)*base_color.a + specular_color;
 }
 
+struct LightInput {
+    position: vec4<f32>,
+    n: vec3<f32>,
+    v: vec3<f32>,
+    surface_color: vec4<f32>,
+    roughness: f32,
+    metallic: f32,
+}
+
+fn apply_point_light(in: LightInput, p: PointLight) -> vec3<f32> {
+    if(p.color.a == 0) {
+        return vec3<f32>(0);
+    }
+    let l = normalize(p.position.xyz - in.position.xyz);
+    let d = distance(in.position.xyz, p.position.xyz);
+    let r = p.position.w;
+    if d < r {
+        var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
+        let layer = p.shadow_index.r;
+        if(layer != -1) {
+            let texelSize = 2.0 / f32(textureDimensions(point_light_shadow_depth).x); //cubemap faces are -1 to 1, so 2x UV space
+            var up = vec3<f32>(0, 1, 0);
+            let dir_view = in.position.xyz - p.position.xyz;
+            let dir_world = normalize((camera.inv_view * vec4<f32>(dir_view, 0.0)).xyz); //cubemaps must be sampled in world space
+            if(abs(dir_world.y) > 0.99) {
+                up = vec3<f32>(1, 0, 0);
+            }
+            let right = normalize(cross(up, dir_world));
+            up = cross(dir_world, right);
+            let near = 0.1;
+            let far = p.position.w; //radius
+            let depth_ref = near / (far - near) * (far / d - 1.0);
+            let bias = max(0.05 * (1.0 - dot(in.n, l)), 0.005);
+            for(var x = -1; x <= 1; x++) {
+                for(var y = -1; y <= 1; y++) {
+                    let offset_x = right * f32(x) * texelSize;
+                    let offset_y = up * f32(y) * texelSize;
+                    let offset_dir = normalize(dir_world + offset_x + offset_y);
+                    let visibility = textureSampleCompare(point_light_shadow_depth, shadow_depth_sampler, offset_dir, layer, depth_ref + bias);
+                    let transmittance = textureSample(point_light_shadow_color, shadow_color_sampler, offset_dir, layer).rgb;
+                    light_factor += visibility * transmittance;
+                }
+            }
+            light_factor /= 9.0;
+        }
+
+        if(all(light_factor > vec3<f32>(0))) {
+            let attenuation = smoothstep(r, 0.0, d);
+            let radiance = p.color.rgb * p.color.a * attenuation * light_factor;
+            //let attenuation = 1.0 / (d*d);
+            //return calculate_influence_phong(in.n, in.v, l, radiance);
+            return calculate_influence_pbr(in.n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic);
+        }
+    }
+    return vec3<f32>(0);
+    
+}
+
+fn apply_directional_light(in: LightInput, d: DirectionalLight) -> vec3<f32> {
+    if(d.color.a == 0) {
+        return vec3<f32>(0);
+    }
+    let l = normalize(-d.direction.xyz);
+    let radiance = d.color.rgb * d.color.a;
+    //return calculate_influence_phong(in.n, in.v, l, radiance);
+    return calculate_influence_pbr(in.n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic);
+    
+}
+
+fn apply_spot_light(in: LightInput, s: SpotLight) -> vec3<f32> {
+    if(s.color.a == 0) {
+        return vec3<f32>(0);
+    }
+    let l = normalize(s.position.xyz - in.position.xyz);
+    let d = distance(in.position.xyz, s.position.xyz);
+    if(d > s.range) {
+        return vec3<f32>(0);
+    }
+    let theta = dot(l, normalize(-s.direction.xyz));
+    let inner_cutoff = s.position.w;
+    let outer_cutoff = s.direction.w;
+    if(theta < outer_cutoff) {
+        return vec3<f32>(0);
+    }
+    var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
+    let layer = s.shadow_index;
+    if(layer != -1) {
+        light_factor = vec3<f32>(0.0);
+        let frag_in_light = s.view_to_shadow * in.position;
+        let ndc = frag_in_light.xyz / frag_in_light.w;
+        var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
+        shadow_uv.y = 1.0 - shadow_uv.y;
+        let depth_ref = ndc.z;
+        let bias = max(0.05 * (1.0 - dot(in.n, l)), 0.005);
+        let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(spot_light_shadow_depth));
+        for(var x = -1; x <= 1; x++) {
+            for(var y = -1; y <= 1; y++) {
+                let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
+                let visibility = textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref + bias);
+                let transmittance = textureSample(spot_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
+                light_factor += visibility * transmittance;
+            }
+        }
+        light_factor /= 9.0;
+    }
+    if(all(light_factor > vec3<f32>(0))) {
+        let epsilon = inner_cutoff - outer_cutoff;
+        let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
+        let attenuation = smoothstep(s.range, 0.0, d);
+        let radiance = s.color.rgb * s.color.a * falloff * attenuation * light_factor;
+        //return calculate_influence_phong(in.n, in.v, l, radiance);
+        return calculate_influence_pbr(in.n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic);
+    }
+    return vec3<f32>(0);
+}
+
 fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
     var final_color = in_color;
 
@@ -205,66 +324,18 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
         }
         let v = normalize(-in.position.xyz); //already in view space
 
+        let light_input = LightInput(in.position, n, v, final_color, roughness, metallic);
+
         let ambient_color = vec3<f32>(0.03) * final_color.rgb * ambient_occlusion; //initial ambient value
         var light = ambient_color * final_color.a;
         for (var i: u32 = 0; i < light_count.point; i++) {
-            let l = normalize(point_lights[i].position.xyz - in.position.xyz);
-
-            let d = distance(in.position.xyz, point_lights[i].position.xyz);
-            let r = point_lights[i].position.w;
-            if d < r {
-                let attenuation = smoothstep(r, 0.0, d);
-                let radiance = point_lights[i].color.rgb * point_lights[i].color.a * attenuation;
-                //let attenuation = 1.0 / (d*d);
-                //light += calculate_influence_phong(n, v, l, radiance);
-                light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
-            }
+            light += apply_point_light(light_input, point_lights[i]);
         }
         for (var i: u32 = 0; i < light_count.directional; i++) {
-            let l = normalize(-directional_lights[i].direction.xyz);
-            let radiance = directional_lights[i].color.rgb * directional_lights[i].color.a;
-            //light += calculate_influence_phong(n, v, l, radiance);
-            light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
+            light += apply_directional_light(light_input, directional_lights[i]);
         }
         for (var i: u32 = 0; i < light_count.spot; i++) {
-            if(spot_lights[i].color.a == 0) {
-                continue;
-            }
-            let l = normalize(spot_lights[i].position.xyz - in.position.xyz);
-            let theta = dot(l, normalize(-spot_lights[i].direction.xyz));
-            let inner_cutoff = spot_lights[i].position.w;
-            let outer_cutoff = spot_lights[i].direction.w;
-            if(theta < outer_cutoff) {
-                continue;
-            }
-            var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
-            let layer = spot_lights[i].shadow_index.r;
-            if(layer != -1) {
-                light_factor = vec3<f32>(0.0);
-                let frag_in_light = spot_lights[i].view_to_shadow * in.position;
-                let ndc = frag_in_light.xyz / frag_in_light.w;
-                var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
-                shadow_uv.y = 1.0 - shadow_uv.y;
-                let depth_ref = ndc.z;
-                let bias = max(0.05 * (1.0 - dot(n, l)), 0.005);
-                let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(spot_light_shadow_depth));
-                for(var x = -1; x <= 1; x++) {
-                    for(var y = -1; y <= 1; y++) {
-                        let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                        let visibility = textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref - bias);
-                        let transmittance = textureSample(spot_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
-                        light_factor += visibility * transmittance;
-                    }
-                }
-                light_factor /= 9.0;
-            }
-            if(all(light_factor > vec3<f32>(0))) {
-                let epsilon = inner_cutoff - outer_cutoff;
-                let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
-                let radiance = spot_lights[i].color.rgb * spot_lights[i].color.a * falloff * light_factor;
-                //light += calculate_influence_phong(n, v, l, radiance);
-                light += calculate_influence_pbr(n, v, l, radiance, final_color, roughness, metallic);
-            }
+            light += apply_spot_light(light_input, spot_lights[i]);
         }
 
         //reinhard tonemap for PBR

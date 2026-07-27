@@ -814,7 +814,7 @@ Pass_Staging :: struct {
 }
 
 @(private)
-compute_pass :: proc(batches: []Mesh_Batch, cam: Camera_Draw, solid, trans: ^Pass_Staging) {
+compute_pass :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pass_Staging) {
     for batch in batches {
         solid_start, trans_start: u32
         if solid != nil {
@@ -1067,10 +1067,11 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
     for i in target.cameras {
         camera := cameras[i]
         if !camera.fill do continue
-        wgpu.RenderPassEncoderSetBindGroup(camera_fill_pass, 0, camera.bind_group)
-        x, y, w, h := expand_values(camera.viewport)
-        wgpu.RenderPassEncoderSetViewport(camera_fill_pass, x, y, w, h, 0, 1)
-        wgpu.RenderPassEncoderSetScissorRect(camera_fill_pass, u32(x), u32(y), u32(w), u32(h))
+        bind_camera(camera_fill_pass, 0, camera)
+        //wgpu.RenderPassEncoderSetBindGroup(camera_fill_pass, 0, camera.bind_group)
+        //x, y, w, h := expand_values(camera.viewport)
+        //wgpu.RenderPassEncoderSetViewport(camera_fill_pass, x, y, w, h, 0, 1)
+        //wgpu.RenderPassEncoderSetScissorRect(camera_fill_pass, u32(x), u32(y), u32(w), u32(h))
         wgpu.RenderPassEncoderDraw(camera_fill_pass, 3, 1, 0, 0)
     }
     wgpu.RenderPassEncoderEnd(camera_fill_pass)
@@ -1292,80 +1293,18 @@ render_frame :: proc() {
     lights := calculate_lights(frame.lights[:], frame.cameras[:])
     defer delete_lights(lights)
 
-    //compute all instance data for all passes
+    //then batch all the cameras...
+    write_camera_buffer(lights.shadow_cameras[:], frame.cameras[:])
+
+    //compute all instance data for all passes (shadow maps + user RTT + final screen passes)
     passes := compute_passes(batches, lights, frame.cameras[:])
     defer delete_passes(passes)
 
     //go through lights & render shadow maps...
-    shadow_offsets := shadow_offsets(lights, frame.cameras[:])
-    for &spot_light, i in lights.spot_lights {
-        if spot_light.render_shadows {
-            //render to a specific spot in the texture array
-            view_descriptor := wgpu.TextureViewDescriptor{
-                dimension = ._2D,
-                mipLevelCount = 1,
-                arrayLayerCount = 1,
-                baseArrayLayer=u32(spot_light.shadow_index),
-            }
-            shadow_color := wgpu.TextureCreateView(ren.spot_light_shadow_color.image, &view_descriptor)
-            defer wgpu.TextureViewRelease(shadow_color)
-            shadow_depth := wgpu.TextureCreateView(ren.spot_light_shadow_depth.image, &view_descriptor)
-            defer wgpu.TextureViewRelease(shadow_depth)
-
-            shadow_index := shadow_offsets.s + spot_light.shadow_index
-            camera := lights.shadow_cameras[shadow_index]
-            
-            solid_shadow_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-                label = "spot light solid shadows",
-                colorAttachmentCount = 1,
-                colorAttachments = &wgpu.RenderPassColorAttachment{
-                    view = shadow_color,
-                    loadOp = .Clear,
-                    storeOp = .Store,
-                    depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-                    clearValue = [4]f64{1, 1, 1, 1},
-                },
-                depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-                    view = shadow_depth,
-                    depthLoadOp = .Clear,
-                    depthStoreOp = .Store,
-                    depthClearValue = 1.0,
-                },
-            })
-            wgpu.RenderPassEncoderSetPipeline(solid_shadow_pass, ren.solid_shadow_pipeline)
-
-            bind_camera(solid_shadow_pass, 0, camera)
-            execute_draw_calls(solid_shadow_pass, passes.solid_shadows[shadow_index].draw_calls[:])
-
-            wgpu.RenderPassEncoderEnd(solid_shadow_pass)
-            wgpu.RenderPassEncoderRelease(solid_shadow_pass)
-
-            trans_shadow_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-                label = "spot light trans shadows",
-                colorAttachmentCount = 1,
-                colorAttachments = &wgpu.RenderPassColorAttachment{
-                    view = shadow_color,
-                    loadOp = .Load,
-                    storeOp = .Store,
-                    depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-                },
-                depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-                    view = shadow_depth,
-                    depthLoadOp = .Load,
-                    depthStoreOp = .Store,
-                },
-            })
-            wgpu.RenderPassEncoderSetPipeline(trans_shadow_pass, ren.trans_shadow_pipeline)
-
-            bind_camera(trans_shadow_pass, 0, camera)
-            execute_draw_calls(trans_shadow_pass, passes.trans_shadows[shadow_index].draw_calls[:])
-
-            wgpu.RenderPassEncoderEnd(trans_shadow_pass)
-            wgpu.RenderPassEncoderRelease(trans_shadow_pass)
-        }
-    }
+    render_shadow_maps(command_encoder, passes, lights.shadow_cameras)
 
     //make sure to upload + offset lights per-camera.
+    shadow_offsets := shadow_offsets(lights, frame.cameras[:])
     write_light_buffers(lights, frame.cameras[:], shadow_offsets)
 
     //now actually render the main passes

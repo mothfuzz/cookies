@@ -3,6 +3,8 @@ package graphics
 import "vendor:wgpu"
 import "base:runtime"
 
+//user render targets
+
 Render_Target_Hash :: distinct uintptr
 
 Render_Target :: struct {

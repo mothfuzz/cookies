@@ -275,7 +275,7 @@ make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, lay
     tex.view = wgpu.TextureCreateView(tex.image, &{
         dimension = cubemap?.CubeArray:._2DArray,
         mipLevelCount = 1,
-        arrayLayerCount = u32(layers),
+        arrayLayerCount = cubemap?u32(6*layers):u32(layers),
     })
     tex.is_solid = true //I guess
     tex.is_trans = false

@@ -23,6 +23,10 @@ teapot3: graphics.Scene
 spot_light: graphics.Spot_Light
 spot_light_trans: transform.Transform
 
+point_light: graphics.Point_Light
+
+directional_light: graphics.Directional_Light
+
 init :: proc() {
     window.set_size(800, 800)
 
@@ -45,19 +49,23 @@ init :: proc() {
     quad_mat = graphics.make_material(quad_tex, filtering=false)
 
     teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
-    teapot.models[0].materials[0].base_color_tint = {1, 0, 0, 0.5}
+    //teapot.models[0].materials[0].base_color_tint = {1, 0, 0, 0.5}
     transform.init(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
 
     teapot2 = graphics.copy_scene(&teapot)
-    teapot2.models[0].materials[0].base_color_tint = {0, 1, 0, 0.5}
+    //teapot2.models[0].materials[0].base_color_tint = {0, 1, 0, 0.5}
     transform.init(teapot2.root, {translation={0.1, 0.4, 0}, scale=0.01})
 
     teapot3 = graphics.copy_scene(&teapot)
-    teapot3.models[0].materials[0].base_color_tint = {0, 0, 1, 0.5}
+    //teapot3.models[0].materials[0].base_color_tint = {0, 0, 1, 0.5}
     transform.init(teapot3.root, {translation={-0.1, 0.4, 0}, scale=0.01})
 
-    spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, 0.1, 0.2, {1, 1, 1, 5})
+    spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, 0.1, 0.2, {0, 1, 0, 5})
     spot_light_trans = transform.make({translation={0, 2, 0}})
+
+    point_light = graphics.make_point_light({0.2, 2, 0.1}, {1, 0, 0, 3})
+
+    directional_light = graphics.make_directional_light({0.2, 0, -0.8}, {0, 0, 1, 3})
 }
 
 tick :: proc() {
@@ -96,18 +104,18 @@ draw :: proc(alpha, delta: f64) {
     graphics.draw_scene(teapot, alpha)
     graphics.draw_scene(teapot2, alpha)
     graphics.draw_scene(teapot3, alpha)
+    graphics.draw_point_light(point_light)
+    graphics.draw_directional_light(directional_light)
     graphics.draw_spot_light(spot_light, transform.get_world_smooth(spot_light_trans, alpha))
 }
 
 quit :: proc() {
-    graphics.delete_camera(cam)
     graphics.delete_material(quad_mat)
     graphics.delete_texture(quad_tex)
     graphics.delete_mesh(quad)
     graphics.delete_scene(teapot)
     graphics.delete_scene(teapot2)
     graphics.delete_scene(teapot3)
-    graphics.delete_spot_light(spot_light)
 }
 
 main :: proc() {

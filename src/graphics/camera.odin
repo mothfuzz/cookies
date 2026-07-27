@@ -2,32 +2,38 @@ package graphics
 
 import "vendor:wgpu"
 import "core:math/linalg"
+import "base:runtime"
 
 camera_layout_entries :: []wgpu.BindGroupLayoutEntry{
     wgpu.BindGroupLayoutEntry{
         binding = 0,
         visibility = {.Vertex, .Fragment},
-        buffer = {type=.Uniform}
+        buffer = {type = .Uniform, hasDynamicOffset = true}
     },
 }
 camera_layout: wgpu.BindGroupLayout
 
 Camera_Uniforms :: struct {
     view: matrix[4,4]f32,
+    inv_view: matrix[4,4]f32,
     projection: matrix[4,4]f32,
     color: [4]f32,
     fog_distance: [2]f32,
 }
 
-//everythang needed to render (to) a camera...
-Camera_Draw :: struct {
-    //buffer: wgpu.Buffer,
-    bind_group: wgpu.BindGroup,
-    viewport: [4]f32,
-    fill: bool,
+Camera_View :: struct {
     using uniforms: Camera_Uniforms,
+    buffer_index: u32,
     viewproj: matrix[4,4]f32, //optimization
     layer_mask: Layer_Mask,
+}
+
+//everythang needed to render (to) a camera...
+Camera_Draw :: struct {
+    using camera_view: Camera_View,
+    //bind_group: wgpu.BindGroup,
+    viewport: [4]f32,
+    fill: bool,
 }
 
 Camera :: struct {
@@ -95,15 +101,6 @@ render to HDR (i.e. floating point) target so you can do post-processing
 
 @(export)
 make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = 0, fov: f32 = 0, fill: bool = true, layers: Layer_Mask = All_Layers) -> (cam: Camera) {
-    cam.buffer = wgpu.DeviceCreateBuffer(ren.device, &{usage={.Uniform, .CopyDst}, size=size_of(Camera_Uniforms)})
-    bindings := []wgpu.BindGroupEntry{
-        {binding = 0, buffer = cam.buffer, size = size_of(Camera_Uniforms)},
-    }
-    cam.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
-        layout = camera_layout,
-        entryCount = len(bindings),
-        entries = raw_data(bindings),
-    })
     cam.viewport = viewport
     cam.range = {fov, near, far, (far - near) / 2}
     cam.rotation = 1
@@ -141,8 +138,8 @@ inverse_view :: proc(trans: matrix[4,4]f32) -> (inv_view: matrix[4,4]f32) {
 
 FOV :: 60.0
 calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Target = nil) -> (draw: Camera_Draw) {
-    draw.bind_group = cam.bind_group
-    draw.view = inverse_view(trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1))
+    draw.inv_view = trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1)
+    draw.view = inverse_view(draw.inv_view)
     fov := cam.range[0]
     if fov == 0 {
         fov = linalg.to_radians(f32(FOV))
@@ -164,23 +161,87 @@ calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Tar
     draw.fill = cam.fill
     draw.layer_mask = cam.layer_mask
     draw.fog_distance = {fog_onset, far}
-    wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &draw.uniforms, size_of(Camera_Uniforms))
+    //wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &draw.uniforms, size_of(Camera_Uniforms))
     draw.viewproj = draw.projection * draw.view
     return
+}
+
+Camera_Buffer :: struct {
+    capacity: int,
+    buffer: wgpu.Buffer,
+    bind_group: wgpu.BindGroup,
+    stride: int,
+    count: int,
+}
+
+cam_buffer: Camera_Buffer
+
+realloc_camera_buffer :: proc() {
+    cam_buffer.stride = max(uniform_alignment, int(runtime.align_forward(size_of(Camera_Uniforms), uniform_alignment)))
+    new_cap := cam_buffer.count * cam_buffer.stride
+    if new_cap <= cam_buffer.capacity do return
+    cam_buffer.capacity = new_cap
+    if cam_buffer.buffer != nil do wgpu.BufferRelease(cam_buffer.buffer)
+    cam_buffer.buffer = wgpu.DeviceCreateBuffer(ren.device, &{
+        usage = {.Uniform, .CopyDst},
+        size = u64(cam_buffer.capacity)
+    })
+
+    if cam_buffer.bind_group != nil do wgpu.BindGroupRelease(cam_buffer.bind_group)
+    bindings := []wgpu.BindGroupEntry{
+        {binding = 0, buffer = cam_buffer.buffer, size = u64(cam_buffer.stride)},
+    }
+    cam_buffer.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+        layout = camera_layout,
+        entryCount = 1,
+        entries = raw_data(bindings)
+    })
+}
+
+write_camera_buffer :: proc(shadow_cams: []Shadow_Camera_Draw, cameras: []Camera_Draw) {
+    cam_buffer.count = len(shadow_cams) + len(cameras)
+    realloc_camera_buffer()
+    
+    //stage so we can have one QueueWriteBuffer
+    staging := make([]u8, cam_buffer.count * cam_buffer.stride)
+    defer delete(staging)
+
+    for &cam, i in shadow_cams {
+        cam.buffer_index = u32(i)
+        byte_offset := cam.buffer_index * u32(cam_buffer.stride)
+        ptr := cast(^Camera_Uniforms)(raw_data(staging[byte_offset:]))
+        ptr^ = cam.uniforms
+    }
+    offset := len(shadow_cams)
+    for &cam, i in cameras {
+        cam.buffer_index = u32(i + offset)
+        byte_offset := cam.buffer_index * u32(cam_buffer.stride)
+        ptr := cast(^Camera_Uniforms)(raw_data(staging[byte_offset:]))
+        ptr^ = cam.uniforms
+    }
+
+    wgpu.QueueWriteBuffer(ren.queue, cam_buffer.buffer, 0, raw_data(staging), uint(len(staging)))
+}
+
+bind_camera_uniforms :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, buffer_index: u32) {
+    offset := buffer_index * u32(cam_buffer.stride)
+    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, cam_buffer.bind_group, {offset})
 }
 
 bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera_Draw) {
     x, y, w, h := expand_values(cam.viewport)
     wgpu.RenderPassEncoderSetViewport(render_pass, x, y, w, h, 0, 1)
     wgpu.RenderPassEncoderSetScissorRect(render_pass, u32(x), u32(y), u32(w), u32(h))
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, cam.bind_group)
+    bind_camera_uniforms(render_pass, slot, cam.buffer_index)
 }
 
+/*
 @(export)
 delete_camera :: proc(cam: Camera) {
     wgpu.BufferRelease(cam.buffer)
     wgpu.BindGroupRelease(cam.bind_group)
 }
+*/
 
 @(export)
 set_viewport :: proc(cam: ^Camera, viewport: [4]f32) {
@@ -266,7 +327,7 @@ z_layer :: proc(cam: Camera, layer: int, num_layers: int = MAX_Z_LAYERS) -> f32 
     return f32(layer) * z_min_step(cam, num_layers) 
 }
 
-bounds_in_frustum :: proc(cam: Camera_Draw, bounding_box: [8][4]f32) -> bool {
+bounds_in_frustum :: proc(cam: Camera_View, bounding_box: [8][4]f32) -> bool {
     //need to check if all planes are passing (i.e. at least one point is inside)
     passing: [6]bool = false
     //OBB check for meshes
