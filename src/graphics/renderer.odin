@@ -627,7 +627,7 @@ set_screen_target :: proc(frame: ^Frame, screen: wgpu.TextureView) {
 
 
 //static frame so commands can be called context-free
-frame := Frame{}
+frame: Frame
 
 @(export)
 draw_point_light :: proc(light: Point_Light, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
@@ -827,28 +827,24 @@ Pass :: struct {
     draw_calls: []Draw_Call,
 }
 
-//need separate staging so that each pass 'knows' what slice of instances it has.
-Pass_Staging :: struct {
-    instances: [dynamic]Instance,
-    draw_calls: [dynamic]Draw_Call,
-}
-
 //passes slice into instance buffer per-camera
 Passes :: struct {
-    //the big buffer...
-    //[solid shadow cam 0][trans shadow cam 0][solid main cam 0][trans main cam 0][etc.]
-
     solid_shadows: []Pass,
     trans_shadows: []Pass,
     solid_main: []Pass,
     trans_main: []Pass,
 }
 
+//need separate staging so that each pass 'knows' what slice of instances it has.
+Pass_Staging :: struct {
+    instances: [dynamic]Instance,
+    draw_calls: [dynamic]Draw_Call,
+}
+
+
 
 @(private)
-compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pass_Staging) -> (mini, maxi: [3]f32) {
-    mini = math.INF_F32
-    maxi = math.NEG_INF_F32
+compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pass_Staging) {
     for batch in batches {
         solid_start, trans_start: u32
         if solid != nil {
@@ -896,7 +892,6 @@ compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, tra
             })
         }
     }
-    return
 }
 
 //write from staging into real pass data
@@ -957,6 +952,9 @@ compute_passes :: proc(batches: []Mesh_Batch, cameras: []Camera_Draw, shadow_cam
     for &pass, i in passes.trans_main {
         write_pass(&pass, &trans_main_staging[i], &running_offset)
     }
+
+    //the big buffer...
+    //[solid shadow cam 0][trans shadow cam 0][solid main cam 0][trans main cam 0][etc.]
 
     realloc_instance_buffer(running_offset)
 
@@ -1319,7 +1317,7 @@ render_frame :: proc() {
     //gather up them bones (global data)
     write_skeletons(batches)
 
-    //then gather up all lights (need be done after main staging so we have scene extents)
+    //then gather up all lights
     lights := calculate_lights(frame.lights[:], frame.cameras[:], frame.scene_extents)
     defer delete_lights(lights)
 
