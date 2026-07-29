@@ -287,7 +287,6 @@ calculate_lights :: proc(lights: []Light_Draw, cameras: []Camera_Draw, scene_ext
                     world_up = {0, 0, 1}
                 }
 
-                //start without cascades for now...
                 for cam, i in cameras {
                     near, far, scale_x, scale_y, scene_aabb := fit_frustum(cam, scene_extents)
                     splits := calculate_cascade_splits(near, far)

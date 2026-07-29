@@ -5,14 +5,6 @@
 - once you have dynamic loading, add modding/scripting subsystem
 - (maybe this can wait until post-1.0)
 
-- weighting/crossfading for animations
-  - possibly move 'animation state' into a generic structure that can animate skeletons, textures, or even sprite frames (ala Aseprites' animation JSON format)
-  - basically separate the concept of 'time progression' from 'animation data'
-
-- shadow mapping needs to be completed for directional lights & point lights (can largely use the existing functionality, with caveats (cascades for directional, cubemaps for point))
-  
-- translucent/colored shadows for alpha-blended surfaces (use Multiply blending when rendering to shadow map, requires lights to render in two passes though)
-
 - fix transmission system to be more physically-based, possibly using an SSS map / compute thickness from shadow map (if present) (might also be a post-1.0 feature)
 
 - some kind of dynamic environment probe (not baked IBL or spherical harmonics) for metallic reflections, possibly also a planar reflection capture in addition, using the same general mechanism
@@ -36,7 +28,6 @@
 
 - more rendering primitives - lines, line lists, line strips, wireframes, fill-boxes, collider shapes, etc.
 
-- render-to-texture/framebuffer API
 - simple non-shadery postprocessing parameters (logical resolution as mentioned, LUTs, exposure/gamma settings)
 - maybe have all these in the Screen_Uniforms and separate from Camera
   - more involved/stylized shaders like bloom/DoF/motion blur/vignetting/film grain/etc. would have to be written in by users and added as their own pipelines/passes. So build the pipes, but not the water.
