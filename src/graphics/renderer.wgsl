@@ -21,11 +21,13 @@ struct PointLight {
 }
 @group(3) @binding(0) var<storage, read> point_lights: array<PointLight>;
 
+const DIRECTIONAL_CASCADES = 4;
+
 struct DirectionalLight {
     direction: vec4<f32>, //view space xyz+radius
     color: vec4<f32>, //rgb+intensity
-    view_to_shadow_near: mat4x4<f32>,
-    view_to_shadow_far: mat4x4<f32>,
+    view_to_shadow: array<mat4x4<f32>, DIRECTIONAL_CASCADES>,
+    cascade_splits: vec4<f32>,
     shadow_index: vec4<i32>,
 }
 @group(3) @binding(1) var<storage, read> directional_lights: array<DirectionalLight>;
@@ -51,8 +53,10 @@ struct LightCount {
 @group(3) @binding(5) var shadow_color_sampler: sampler;
 @group(3) @binding(6) var point_light_shadow_depth: texture_depth_cube_array;
 @group(3) @binding(7) var point_light_shadow_color: texture_cube_array<f32>;
-@group(3) @binding(8) var spot_light_shadow_depth: texture_depth_2d_array;
-@group(3) @binding(9) var spot_light_shadow_color: texture_2d_array<f32>;
+@group(3) @binding(8) var directional_light_shadow_depth: texture_depth_2d_array;
+@group(3) @binding(9) var directional_light_shadow_color: texture_2d_array<f32>;
+@group(3) @binding(10) var spot_light_shadow_depth: texture_depth_2d_array;
+@group(3) @binding(11) var spot_light_shadow_color: texture_2d_array<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -208,6 +212,7 @@ fn apply_point_light(in: LightInput, p: PointLight) -> vec3<f32> {
         var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
         let layer = p.shadow_index.r;
         if(layer != -1) {
+            light_factor = vec3<f32>(0.0);
             let texelSize = 2.0 / f32(textureDimensions(point_light_shadow_depth).x); //cubemap faces are -1 to 1, so 2x UV space
             var up = vec3<f32>(0, 1, 0);
             let dir_view = in.position.xyz - p.position.xyz;
@@ -250,11 +255,42 @@ fn apply_directional_light(in: LightInput, d: DirectionalLight) -> vec3<f32> {
     if(d.color.a == 0) {
         return vec3<f32>(0);
     }
+    let depth = -in.position.z;
+    var cascade = 0;
+    for(var i = 0; i < DIRECTIONAL_CASCADES; i++) {
+        if(depth < d.cascade_splits[i]) {
+            cascade = i;
+            break;
+        }
+    }
     let l = normalize(-d.direction.xyz);
-    let radiance = d.color.rgb * d.color.a;
-    //return calculate_influence_phong(in.n, in.v, l, radiance);
-    return calculate_influence_pbr(in.n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic);
-    
+    var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
+    let layer = d.shadow_index.r + cascade;
+    if(layer != -1) {
+        light_factor = vec3<f32>(0.0);
+        let frag_in_light = d.view_to_shadow[cascade] * in.position;
+        let ndc = frag_in_light.xyz / frag_in_light.w;
+        var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
+        shadow_uv.y = 1.0 - shadow_uv.y;
+        let depth_ref = ndc.z;
+        let bias = max(0.05 * (1.0 - dot(in.n, l)), 0.005);
+        let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(directional_light_shadow_depth));
+        for(var x = -1; x <= 1; x++) {
+            for(var y = -1; y <= 1; y++) {
+                let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
+                let visibility = textureSampleCompare(directional_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref + bias);
+                let transmittance = textureSample(directional_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
+                light_factor += visibility * transmittance;
+            }
+        }
+        light_factor /= 9.0;
+    }
+    if(all(light_factor > vec3<f32>(0))) {
+        let radiance = d.color.rgb * d.color.a * light_factor;
+        //return calculate_influence_phong(in.n, in.v, l, radiance);
+        return calculate_influence_pbr(in.n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic);
+    }
+    return vec3<f32>(0);
 }
 
 fn apply_spot_light(in: LightInput, s: SpotLight) -> vec3<f32> {

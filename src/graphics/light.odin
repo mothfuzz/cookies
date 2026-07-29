@@ -49,8 +49,8 @@ Directional_Light :: struct {
 Directional_Light_Uniforms :: struct #packed {
     direction: [4]f32,
     color: [4]f32,
-    view_to_shadow_near: matrix[4,4]f32,
-    view_to_shadow_far: matrix[4,4]f32,
+    view_to_shadow: [DIRECTIONAL_CASCADES]matrix[4,4]f32,
+    cascade_splits: [4]f32,
     shadow_index: [4]i32,
 }
 Spot_Light :: struct {
@@ -124,15 +124,27 @@ lights_layout_entries := []wgpu.BindGroupLayoutEntry{
         visibility = {.Fragment},
         texture = {sampleType = .Float, viewDimension = .CubeArray, multisampled=false},
     },
-    //spot light depth shadows
+    //directional light depth shadows
     wgpu.BindGroupLayoutEntry{
         binding = 8,
         visibility = {.Fragment},
         texture = {sampleType = .Depth, viewDimension = ._2DArray, multisampled=false},
     },
-    //spot light color shadows
+    //directional light color shadows
     wgpu.BindGroupLayoutEntry{
         binding = 9,
+        visibility = {.Fragment},
+        texture = {sampleType = .Float, viewDimension = ._2DArray, multisampled=false},
+    },
+    //spot light depth shadows
+    wgpu.BindGroupLayoutEntry{
+        binding = 10,
+        visibility = {.Fragment},
+        texture = {sampleType = .Depth, viewDimension = ._2DArray, multisampled=false},
+    },
+    //spot light color shadows
+    wgpu.BindGroupLayoutEntry{
+        binding = 11,
         visibility = {.Fragment},
         texture = {sampleType = .Float, viewDimension = ._2DArray, multisampled=false},
     },
@@ -212,7 +224,7 @@ vecdir :: proc(d: [3]f32) -> [4]f32 {
 }
 
 
-calculate_lights :: proc(lights: []Light_Draw, cameras: []Camera_Draw) -> Lights {
+calculate_lights :: proc(lights: []Light_Draw, cameras: []Camera_Draw, scene_extents: [2][3]f32) -> Lights {
     point_lights := make([dynamic]Point_Light)
     directional_lights := make([dynamic]Directional_Light)
     spot_lights := make([dynamic]Spot_Light)
@@ -254,7 +266,7 @@ calculate_lights :: proc(lights: []Light_Draw, cameras: []Camera_Draw) -> Lights
                     {{0, 0, -1}, {0, -1, 0}},
                 }
                 for i in 0..<6 {
-                    shadow_cam := calculate_shadow_camera_perspective(pl.position, directions[i][0], directions[i][1], linalg.PI / 2, 0.1, pl.range)
+                    shadow_cam := calculate_shadow_camera_positional(pl.position, directions[i][0], directions[i][1], linalg.PI / 2, 0.1, pl.range)
                     shadow_cam.layer_mask = light.layer_mask
                     shadow_cam.layer = uint(pl.shadow_index*6+i)
                     shadow_cam.target = .Point
@@ -266,11 +278,28 @@ calculate_lights :: proc(lights: []Light_Draw, cameras: []Camera_Draw) -> Lights
             dl := l
             dl.direction = (light.transform * vecdir(l.direction)).xyz
             if dl.render_shadows {
-                //dl.shadow_index = num_directional_shadows
-                //num_directional_shadows += 1
-                //for i in 0..<num_cascades * num_cameras {
-                //append(&shadow_cameras, calculate_camera(...))
-                //}
+                dl.shadow_index = num_directional_shadows
+                num_directional_shadows += 1
+
+                //handle parallel-to-up case
+                world_up: [3]f32 = {0, 1, 0}
+                if linalg.abs(linalg.dot(dl.direction, world_up)) >= 0.9 {
+                    world_up = {0, 0, 1}
+                }
+
+                //start without cascades for now...
+                for cam, i in cameras {
+                    near, far, scale_x, scale_y, scene_aabb := fit_frustum(cam, scene_extents)
+                    splits := calculate_cascade_splits(near, far)
+                    for c in 1..=DIRECTIONAL_CASCADES {
+                        near, far := splits[c-1], splits[c]
+                        shadow_cam := calculate_shadow_camera_directional(dl.direction, world_up, near, far, scale_x, scale_y, cam.inv_view, scene_aabb)
+                        shadow_cam.layer_mask = light.layer_mask
+                        shadow_cam.layer = uint((dl.shadow_index * len(cameras) + i) * DIRECTIONAL_CASCADES + (c - 1))
+                        shadow_cam.target = .Directional
+                        append(&dl_shadow_cameras, shadow_cam)
+                    }
+                }
             }
             append(&directional_lights, dl)
         case Spot_Light:
@@ -287,7 +316,7 @@ calculate_lights :: proc(lights: []Light_Draw, cameras: []Camera_Draw) -> Lights
                     world_up = {0, 0, 1}
                 }
 
-                shadow_cam := calculate_shadow_camera_perspective(sl.position, sl.direction, world_up, sl.outer_angle * 2, 0.1, sl.range)
+                shadow_cam := calculate_shadow_camera_positional(sl.position, sl.direction, world_up, sl.outer_angle * 2, 0.1, sl.range)
                 shadow_cam.layer_mask = light.layer_mask
                 shadow_cam.layer = uint(sl.shadow_index)
                 shadow_cam.target = .Spot
@@ -317,6 +346,15 @@ calculate_lights :: proc(lights: []Light_Draw, cameras: []Camera_Draw) -> Lights
         ren.point_light_shadow_depth = make_render_texture_array(size, .Depth32Float, uint(num_point_shadows), true)
         delete_texture(ren.point_light_shadow_color)
         ren.point_light_shadow_color = make_render_texture_array(size, .RGBA8Unorm, uint(num_point_shadows), true)
+        rebind = true
+    }
+    num_directional_shadow_textures := num_directional_shadows * DIRECTIONAL_CASCADES * len(cameras)
+    if u32(num_directional_shadow_textures) > wgpu.TextureGetDepthOrArrayLayers(ren.directional_light_shadow_depth.image) {
+        delete_texture(ren.directional_light_shadow_depth)
+        size: [2]uint = {DIRECTIONAL_LIGHT_SHADOW_MAP_RES, DIRECTIONAL_LIGHT_SHADOW_MAP_RES}
+        ren.directional_light_shadow_depth = make_render_texture_array(size, .Depth32Float, uint(num_directional_shadow_textures))
+        delete_texture(ren.directional_light_shadow_color)
+        ren.directional_light_shadow_color = make_render_texture_array(size, .RGBA8Unorm, uint(num_directional_shadow_textures))
         rebind = true
     }
     if u32(num_spot_shadows) > wgpu.TextureGetDepthOrArrayLayers(ren.spot_light_shadow_depth.image) {
@@ -355,15 +393,17 @@ Lights_Uniforms :: struct {
 
 Shadow_Offsets :: struct {
     p, d, s: int,
+    num_cameras: int,
 }
 shadow_offsets :: proc(lights: Lights, cameras: []Camera_Draw) -> (offsets: Shadow_Offsets) {
     offsets.p = 0
     offsets.d = lights.num_point_shadows * 6
     offsets.s = offsets.d + lights.num_directional_shadows * len(cameras) * DIRECTIONAL_CASCADES
+    offsets.num_cameras = len(cameras)
     return
 }
 
-calculate_lights_uniforms :: proc(lights: Lights, camera: Camera_Uniforms, offsets: Shadow_Offsets) -> Lights_Uniforms {
+calculate_lights_uniforms :: proc(lights: Lights, camera: Camera_Uniforms, camera_index: int, offsets: Shadow_Offsets) -> Lights_Uniforms {
     //convert lights to view-space & pack into uniform buffers
 
     point_light_uniforms := make([]Point_Light_Uniforms, len(lights.point_lights))
@@ -385,9 +425,13 @@ calculate_lights_uniforms :: proc(lights: Lights, camera: Camera_Uniforms, offse
         dl.direction.xyz = linalg.normalize((camera.view * vecdir(dl_in.direction)).xyz)
         dl.color = dl_in.color
         if dl_in.render_shadows {
-            //light_cam = lights.shadow_cameras[dl_in.shadow_index]
-            //do that for each cascade...
             dl.shadow_index = i32(dl_in.shadow_index)
+            base := offsets.d + (dl_in.shadow_index * offsets.num_cameras + camera_index) * DIRECTIONAL_CASCADES
+            for c in 0..<DIRECTIONAL_CASCADES {
+                light_cam := lights.shadow_cameras[base + c]
+                dl.view_to_shadow[c] = light_cam.projection * light_cam.view * camera.inv_view
+                dl.cascade_splits[c] = light_cam.split_far
+            }
         } else {
             dl.shadow_index = -1
         }
@@ -493,8 +537,10 @@ realloc_light_buffers :: proc(lights: Lights, num_cameras: int) {
             {binding = 5, sampler=ren.shadow_color_sampler},
             {binding = 6, textureView=ren.point_light_shadow_depth.view},
             {binding = 7, textureView=ren.point_light_shadow_color.view},
-            {binding = 8, textureView=ren.spot_light_shadow_depth.view},
-            {binding = 9, textureView=ren.spot_light_shadow_color.view},
+            {binding = 8, textureView=ren.directional_light_shadow_depth.view},
+            {binding = 9, textureView=ren.directional_light_shadow_color.view},
+            {binding = 10, textureView=ren.spot_light_shadow_depth.view},
+            {binding = 11, textureView=ren.spot_light_shadow_color.view},
         }
         light_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
             label = "lights",
@@ -509,7 +555,7 @@ realloc_light_buffers :: proc(lights: Lights, num_cameras: int) {
 write_light_buffers :: proc(lights: Lights, cameras: []Camera_Draw, offsets: Shadow_Offsets) {
     realloc_light_buffers(lights, len(cameras))
     for camera, i in cameras {
-        lights_uniforms := calculate_lights_uniforms(lights, camera, offsets)
+        lights_uniforms := calculate_lights_uniforms(lights, camera, i, offsets)
         defer delete_lights_uniforms(lights_uniforms)
         if len(lights_uniforms.point_lights) > 0 {
             pl_offset := u64(i * int(pl_buffer.size_aligned))

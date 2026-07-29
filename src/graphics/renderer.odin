@@ -4,6 +4,7 @@ import "core:log"
 import "base:runtime"
 
 import "vendor:wgpu"
+import "core:math"
 
 Renderer :: struct {
     ctx: runtime.Context,
@@ -567,6 +568,8 @@ Frame :: struct {
     materials: map[Material_Hash]Material,
     render_targets: map[Render_Target_Hash]Render_Target_Draw,
     screen_target: Render_Target_Draw,
+    //running extents
+    scene_extents: [2][3]f32,
 }
 
 @(private)
@@ -606,10 +609,25 @@ clear_frame :: proc() {
     }
     clear(&frame.render_targets)
     clear(&frame.screen_target.cameras)
+    frame.scene_extents[0] = math.INF_F32
+    frame.scene_extents[1] = math.NEG_INF_F32
 }
 
+@(private)
+set_screen_target :: proc(frame: ^Frame, screen: wgpu.TextureView) {
+    frame.screen_target.output = screen
+    frame.screen_target.msaa = ren.msaa_view
+    frame.screen_target.depth = ren.depth_buffer.view
+    frame.screen_target.accum = ren.accum.view
+    frame.screen_target.accum_resolve = ren.accum_resolve.view
+    frame.screen_target.revealage = ren.revealage.view
+    frame.screen_target.revealage_resolve = ren.revealage_resolve.view
+    frame.screen_target.composite_bind_group = ren.composite_bind_group
+}
+
+
 //static frame so commands can be called context-free
-frame: Frame
+frame := Frame{}
 
 @(export)
 draw_point_light :: proc(light: Point_Light, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
@@ -703,6 +721,16 @@ draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
     }
     draw := Mesh_Draw{{transform, dynamic_material, 0}, sprite, billboard, bones, {}, layers}
     calculate_mesh_local(&draw, mesh, material)
+    mini := &frame.scene_extents[0]
+    maxi := &frame.scene_extents[1]
+    for p in draw.bounding_box {
+        if p.x < mini.x do mini.x = p.x
+        if p.y < mini.y do mini.y = p.y
+        if p.z < mini.z do mini.z = p.z
+        if p.x > maxi.x do maxi.x = p.x
+        if p.y > maxi.y do maxi.y = p.y
+        if p.z > maxi.z do maxi.z = p.z
+    }
 
     append(instances, draw)
 }
@@ -799,22 +827,28 @@ Pass :: struct {
     draw_calls: []Draw_Call,
 }
 
-//passes slice into instance buffer per-camera
-Passes :: struct {
-    solid_shadows: []Pass,
-    trans_shadows: []Pass,
-    solid_main: []Pass,
-    trans_main: []Pass,
-}
-
 //need separate staging so that each pass 'knows' what slice of instances it has.
 Pass_Staging :: struct {
     instances: [dynamic]Instance,
     draw_calls: [dynamic]Draw_Call,
 }
 
+//passes slice into instance buffer per-camera
+Passes :: struct {
+    //the big buffer...
+    //[solid shadow cam 0][trans shadow cam 0][solid main cam 0][trans main cam 0][etc.]
+
+    solid_shadows: []Pass,
+    trans_shadows: []Pass,
+    solid_main: []Pass,
+    trans_main: []Pass,
+}
+
+
 @(private)
-compute_pass :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pass_Staging) {
+compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pass_Staging) -> (mini, maxi: [3]f32) {
+    mini = math.INF_F32
+    maxi = math.NEG_INF_F32
     for batch in batches {
         solid_start, trans_start: u32
         if solid != nil {
@@ -862,8 +896,10 @@ compute_pass :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pas
             })
         }
     }
+    return
 }
 
+//write from staging into real pass data
 @(private)
 write_pass :: proc(pass: ^Pass, staging: ^Pass_Staging, running_offset: ^u64) {
     pass.buffer_offset = running_offset^
@@ -875,44 +911,39 @@ write_pass :: proc(pass: ^Pass, staging: ^Pass_Staging, running_offset: ^u64) {
     running_offset^ += u64(len(pass.instances)) * size_of(Instance)
 }
 
+//write from pass into instance buffer
 //trying to do this all at once overwhelmed temp_alloc :C
 @(private)
-write_pass_instances :: proc(pass: ^Pass) {
+write_pass_instances :: proc(pass: Pass) {
     if len(pass.instances) == 0 do return
     size := u64(len(pass.instances)) * size_of(Instance)
     wgpu.QueueWriteBuffer(ren.queue, instance_buffer, pass.buffer_offset, raw_data(pass.instances), uint(size))
 }
 
 @(private)
-compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_Draw) -> (passes: Passes) {
-    //the big buffer...
-    //[solid shadow cam 0][trans shadow cam 0][solid main cam 0][trans main cam 0][etc.]
-
-    solid_shadows_staging := make([]Pass_Staging, len(lights.shadow_cameras))
-    trans_shadows_staging := make([]Pass_Staging, len(lights.shadow_cameras))
-    solid_main_staging := make([]Pass_Staging, len(cameras))
-    trans_main_staging := make([]Pass_Staging, len(cameras))
+compute_passes :: proc(batches: []Mesh_Batch, cameras: []Camera_Draw, shadow_cameras: []Shadow_Camera_Draw) -> (passes: Passes) {
+    solid_shadows_staging := make([]Pass_Staging, len(shadow_cameras))
     defer delete(solid_shadows_staging)
+    trans_shadows_staging := make([]Pass_Staging, len(shadow_cameras))
     defer delete(trans_shadows_staging)
+    solid_main_staging := make([]Pass_Staging, len(cameras))
     defer delete(solid_main_staging)
+    trans_main_staging := make([]Pass_Staging, len(cameras))
     defer delete(trans_main_staging)
 
-    //this should ACTUALLY be a single list of Camera_Draw for all shadows. The pass should be 'take a camera, draw a shadow map'
-    //no matter how many cameras (1 per spot light, 6 per point light, num_cascades*num_main_cameras per directional light)
-    passes.solid_shadows = make([]Pass, len(lights.shadow_cameras))
-    passes.trans_shadows = make([]Pass, len(lights.shadow_cameras))
     passes.solid_main = make([]Pass, len(cameras))
     passes.trans_main = make([]Pass, len(cameras))
+    passes.solid_shadows = make([]Pass, len(shadow_cameras))
+    passes.trans_shadows = make([]Pass, len(shadow_cameras))
 
-    //first generate staging buffers
-    for cam, i in lights.shadow_cameras {
-        compute_pass(batches, cam, &solid_shadows_staging[i], &trans_shadows_staging[i])
-    }
     for cam, i in cameras {
-        compute_pass(batches, cam, &solid_main_staging[i], &trans_main_staging[i])
+        compute_pass_staging(batches, cam, &solid_main_staging[i], &trans_main_staging[i])
+    }
+    for cam, i in shadow_cameras {
+        compute_pass_staging(batches, cam, &solid_shadows_staging[i], &trans_shadows_staging[i])
     }
 
-    //then actually pack the staging passes to the real passes
+    //actually pack the staging passes to the real passes
     running_offset: u64
     for &pass, i in passes.solid_shadows {
         write_pass(&pass, &solid_shadows_staging[i], &running_offset)
@@ -931,18 +962,17 @@ compute_passes :: proc(batches: []Mesh_Batch, lights: Lights, cameras: []Camera_
 
     //write the vertex buffer...
     for &pass in passes.solid_shadows {
-        write_pass_instances(&pass)
+        write_pass_instances(pass)
     }
     for &pass in passes.trans_shadows {
-        write_pass_instances(&pass)
+        write_pass_instances(pass)
     }
     for &pass in passes.solid_main {
-        write_pass_instances(&pass)
+        write_pass_instances(pass)
     }
     for &pass in passes.trans_main {
-        write_pass_instances(&pass)
+        write_pass_instances(pass)
     }
-
     return
 }
 
@@ -1286,36 +1316,30 @@ render_frame :: proc() {
     batches := flatten_action(frame)
     defer delete(batches)
 
-    //gather up them bones
+    //gather up them bones (global data)
     write_skeletons(batches)
 
-    //then gather up all lights
-    lights := calculate_lights(frame.lights[:], frame.cameras[:])
+    //then gather up all lights (need be done after main staging so we have scene extents)
+    lights := calculate_lights(frame.lights[:], frame.cameras[:], frame.scene_extents)
     defer delete_lights(lights)
 
-    //then batch all the cameras...
+    //batch all the cameras into one...
     write_camera_buffer(lights.shadow_cameras[:], frame.cameras[:])
-
-    //compute all instance data for all passes (shadow maps + user RTT + final screen passes)
-    passes := compute_passes(batches, lights, frame.cameras[:])
-    defer delete_passes(passes)
-
-    //go through lights & render shadow maps...
-    render_shadow_maps(command_encoder, passes, lights.shadow_cameras)
 
     //make sure to upload + offset lights per-camera.
     shadow_offsets := shadow_offsets(lights, frame.cameras[:])
     write_light_buffers(lights, frame.cameras[:], shadow_offsets)
 
+    //now compute all instance data for all passes (shadow maps + user RTT + final screen passes)
+    passes := compute_passes(batches, frame.cameras[:], lights.shadow_cameras)
+    defer delete_passes(passes)
+
+    //now on to actual drawing!
+
+    //go through lights & render shadow maps...
+    render_shadow_maps(command_encoder, passes, lights.shadow_cameras)
+
     //now actually render the main passes
-    frame.screen_target.output = screen
-    frame.screen_target.msaa = ren.msaa_view
-    frame.screen_target.depth = ren.depth_buffer.view
-    frame.screen_target.accum = ren.accum.view
-    frame.screen_target.accum_resolve = ren.accum_resolve.view
-    frame.screen_target.revealage = ren.revealage.view
-    frame.screen_target.revealage_resolve = ren.revealage_resolve.view
-    frame.screen_target.composite_bind_group = ren.composite_bind_group
 
     //get number of draw calls, in case we need to skip a pass
     draw_solid: bool = false
@@ -1340,6 +1364,7 @@ render_frame :: proc() {
     }
 
     //then finally render to screen (already cleared above)...
+    set_screen_target(&frame, screen)
     render_main_pass(command_encoder, frame.cameras[:], passes.solid_main, passes.trans_main, frame.screen_target, draw_solid, draw_trans)
 
     //render the UI on top of everything else

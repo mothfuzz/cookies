@@ -85,12 +85,10 @@ draw :: proc(a: f64, dt: f64) {
 }
 
 quit :: proc() {
-    graphics.delete_camera(cam)
     graphics.deanimate(brainstem_anim)
     graphics.delete_scene(brainstem)
     graphics.deanimate(brainstem2_anim)
     graphics.delete_scene(brainstem2)
-    resources.unload_files()
 }
 
 main :: proc() {

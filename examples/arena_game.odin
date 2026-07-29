@@ -393,7 +393,6 @@ kill :: proc() {
     hm.dynamic_destroy(&bullets)
     graphics.delete_font(big_font)
     graphics.delete_font(regular_font)
-    graphics.delete_camera(cam)
     fmt.println("さよなら!!!!")
 }
 

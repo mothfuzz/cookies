@@ -21,8 +21,8 @@ stained_glass_mat: graphics.Material
 teapot: graphics.Scene
 teapot_trans: transform.Transform
 
-spot_light: graphics.Spot_Light
-spot_light_trans: transform.Transform
+light: graphics.Directional_Light
+light_trans: transform.Transform
 
 init :: proc() {
     window.set_size(800, 800)
@@ -52,12 +52,12 @@ init :: proc() {
         {position={+0.5, -0.0, -0.5}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
         {position={-0.5, -0.0, -0.5}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
         //back side
-        {position={-0.5, -0.0, -0.5}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
-        {position={+0.5, -0.0, -0.5}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
-        {position={+0.5, +1.0, -0.5}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
-        {position={-0.5, +1.0, -0.5}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
-    }, {2, 1, 0, 3, 2, 0,
-        6, 5, 4, 7, 6, 4})
+        //{position={-0.5, -0.0, -0.5}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
+        //{position={+0.5, -0.0, -0.5}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
+        //{position={+0.5, +1.0, -0.5}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
+        //{position={-0.5, +1.0, -0.5}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
+    }, {2, 1, 0, 3, 2, 0})
+        //6, 5, 4, 7, 6, 4})
 
     stained_glass_tex = graphics.make_texture_from_image(#load("../resources/darksanctuary.png"))
     stained_glass_mat = graphics.make_material(base_color=stained_glass_tex)
@@ -65,8 +65,8 @@ init :: proc() {
     teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
     transform.init(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
 
-    spot_light = graphics.make_spot_light({0, 0, 0}, {0, -0.6, 0.4}, 0.1, 0.2, {1, 1, 1, 5})
-    spot_light_trans = transform.make({translation={0, 2, -1.5}})
+    light = graphics.make_directional_light({0, -0.6, 0.4}, {0.4, 0.5, 1.0, 4})
+    light_trans = transform.make()
 }
 
 tick :: proc() {
@@ -94,7 +94,7 @@ tick :: proc() {
     counter += 0.01
     light_angle_range: f32 = 10
     sin := linalg.sin(counter)*linalg.to_radians(light_angle_range)
-    trans := transform.write(spot_light_trans)
+    trans := transform.write(light_trans)
     trans.rotation = transform.rotation_from_angles({0, 0, sin})
 
 }
@@ -104,7 +104,7 @@ draw :: proc(alpha, delta: f64) {
     graphics.draw_mesh(quad, quad_mat, base_color_tint={1, 1, 1, 1})
     graphics.draw_mesh(wall, stained_glass_mat, base_color_tint={1, 1, 1, 1})
     graphics.draw_scene(teapot, alpha)
-    graphics.draw_spot_light(spot_light, transform.world(spot_light_trans, alpha))
+    graphics.draw_directional_light(light, transform.world(light_trans, alpha))
 }
 
 quit :: proc() {
