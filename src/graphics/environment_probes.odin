@@ -16,7 +16,7 @@ mipmaps are already allocated when creating the texture, so resolution will be c
 
 */
 
-ENVIRONMENT_CUBEMAP_RES :: 1024
+ENVIRONMENT_CUBEMAP_RES :: 512
 
 probe_capture: Render_Target //executed 6 times per cubemap, resolving to cubemap faces.
 
@@ -65,7 +65,6 @@ delete_probe_capture :: proc() {
     delete(cubemaps_free)
 }
 
-import "core:fmt"
 realloc_cubemaps :: proc(command_encoder: wgpu.CommandEncoder = nil, new_size: int = 0) -> (rebind: bool) {
     format := with_srgb(ren.config.format)
     if cubemaps.image == nil {

@@ -108,8 +108,8 @@ tick :: proc() {
 
 draw :: proc(alpha, delta: f64) {
     graphics.draw_camera(cam, transform.world(cam_trans, alpha))
-    graphics.draw_mesh(quad, quad_mat, base_color_tint={1, 1, 1, 1})
-    graphics.draw_mesh(wall, stained_glass_mat, base_color_tint={1, 1, 1, 1})
+    graphics.draw_mesh(quad, quad_mat, base_color_tint={1, 1, 1, 1}, metallic_tint=0)
+    graphics.draw_mesh(wall, stained_glass_mat, base_color_tint={1, 1, 1, 1}, metallic_tint=0)
     graphics.draw_scene(teapot, alpha)
     graphics.draw_directional_light(light, transform.world(light_trans, alpha))
     graphics.draw_environment_probe(env)

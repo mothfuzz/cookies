@@ -345,53 +345,56 @@ fn apply_spot_light(in: LightInput, s: SpotLight) -> vec3<f32> {
     return vec3<f32>(0);
 }
 
-fn calculate_environment_pbr(n: vec3<f32>, v: vec3<f32>, environment: vec3<f32>, base_color: vec4<f32>, roughness: f32, metallic: f32) -> vec3<f32> {
-    let cos_theta = max(dot(n, v), 0.0);
+fn calculate_environment_pbr(in: LightInput, environment: vec3<f32>) -> vec3<f32> {
+    let cos_theta = max(dot(in.n, in.v), 0.0);
     var base_reflectance = vec3<f32>(0.04); //base dielectric reflectance
-    base_reflectance = mix(base_reflectance, base_color.rgb, metallic);
+    base_reflectance = mix(base_reflectance, in.surface_color.rgb, in.metallic);
     let reflectance = fresnel_schlick_reflectance(cos_theta, base_reflectance);
 
     let specular_color = reflectance * environment;
-    let diffuse_color = (1.0 - metallic) * (vec3<f32>(1.0) - reflectance) * base_color.rgb * 0.03; //base diffuse ambient
+    let diffuse_color = (1.0 - in.metallic) * (vec3<f32>(1.0) - reflectance) * in.surface_color.rgb * 0.03; //base diffuse ambient
 
-    return diffuse_color * base_color.a + specular_color;
+    return diffuse_color * in.surface_color.a + specular_color;
 }
 
 fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
     var final_color = in_color;
-    let pbr = textureSample(pbr, smp, in.texcoord) * in.pbr_tint;
-    let ambient_occlusion = pbr.r;
-    let roughness = pbr.g;
-    let metallic = pbr.b;
+    var light = final_color.rgb;
 
-    let ambient_color = vec3<f32>(0.03) * final_color.rgb * ambient_occlusion; //initial ambient value
-    var light = ambient_color * final_color.a;
+    if(light_count.total > 0) {
 
-    var n = normalize(in.normal);
-    if(all(in.tangent.xyz != vec3<f32>(0.0))) {
-        //if we have tangents, do extra calculations & use the normal map
-        //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
-        let binormal = normalize(cross(in.normal, in.tangent.xyz) * in.tangent.w);
-        let tangent_to_view = mat3x3<f32>(in.tangent.xyz, binormal, in.normal);
-        //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
-        n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
-    }
-    let v = normalize(-in.position.xyz); //already in view space
+        let pbr = textureSample(pbr, smp, in.texcoord) * in.pbr_tint;
+        let ambient_occlusion = pbr.r;
+        let roughness = pbr.g;
+        let metallic = pbr.b;
 
-    if(in.indices[1] != -1) {
-        let n_world = normalize((camera.inv_view * vec4<f32>(n, 0.0)).xyz);
-        let v_world = normalize((camera.inv_view * vec4<f32>(v, 0.0)).xyz);
-        let r = reflect(-v_world, n_world);
 
-        let env = textureSample(environment_probes, environment_probe_sampler, r, in.indices[1]);
-        light += calculate_environment_pbr(n, v, env.rgb, final_color, roughness, metallic);
-    } else {
-        light += calculate_environment_pbr(n, v, vec3<f32>(0.0), final_color, roughness, metallic);
-    }
-    light *= ambient_occlusion;
+        light = vec3<f32>(0.0);
 
-    if light_count.total > 0 {
+        var n = normalize(in.normal);
+        if(all(in.tangent.xyz != vec3<f32>(0.0))) {
+            //if we have tangents, do extra calculations & use the normal map
+            //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
+            let binormal = normalize(cross(in.normal, in.tangent.xyz) * in.tangent.w);
+            let tangent_to_view = mat3x3<f32>(in.tangent.xyz, binormal, in.normal);
+            //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
+            n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
+        }
+        let v = normalize(-in.position.xyz); //already in view space
+
         let light_input = LightInput(in.position, n, v, final_color, roughness, metallic);
+
+        if(in.indices[1] != -1) {
+            let n_world = normalize((camera.inv_view * vec4<f32>(n, 0.0)).xyz);
+            let v_world = normalize((camera.inv_view * vec4<f32>(v, 0.0)).xyz);
+            let r = reflect(-v_world, n_world);
+
+            let env = textureSample(environment_probes, environment_probe_sampler, r, in.indices[1]);
+            light += calculate_environment_pbr(light_input, env.rgb);
+        } else {
+            light += calculate_environment_pbr(light_input, vec3<f32>(0.0));
+        }
+        light *= ambient_occlusion;
 
         for (var i: u32 = 0; i < light_count.point; i++) {
             light += apply_point_light(light_input, point_lights[i]);

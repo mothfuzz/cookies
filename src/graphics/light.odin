@@ -3,31 +3,6 @@ package graphics
 import "vendor:wgpu"
 import "core:math/linalg"
 
-// TODO: shadow mapping
-/*
-high level:
-- keep track of previous light state (position, color, direction, radius, angles, etc.)
-- perform frustum culling as well as check if any point in BB <= radius
-- if light state has changed or list of rendered objects has changed (dunno), re-render shadow map
-- for point lights:
-- instance scene 6 times (frustum/distance culling for each, so they won't be the exact same necessarily), set up 6 render targets, render them in one shader to a cubemap
-- for directional lights:
-- render scene N times (again, frustum culling for each) for each cascade (2 right now but, you know)
-- for spot lights:
-- do frustum culling, also check if BB <= outer_angle, render scene once (easy!)
-
-- for each light in the shader:
-- discard transparent (a<0.1 or something) pixels
-- multiplicative blending (src = Zero, dst = SrcColor) to render colors
-- opaques just get 1 ig
-
-- then bind your textures in a big fat array and do shadow mapping
-- for point lights / spot lights determine if pixel is within radius/angle at all
-- for directional lights use the pixel's depth to slot it into one of the cascades depending on values (cascade ranges themselves calculated based on minimum/maximum object depth)
-
-- use Normal Offset Bias to prevent shadow acne / peter panning at the same time.
-*/
-
 Point_Light :: struct {
     position: [3]f32,
     color: [4]f32,
@@ -486,12 +461,9 @@ realloc_light_buffers :: proc(lights: Lights, num_cameras: int) {
     s_size := len(lights.spot_lights) * size_of(Spot_Light_Uniforms)
 
     rebind := lights.rebind
-    p_min_size := max(storage_alignment, size_of(Point_Light_Uniforms))
-    p_size_aligned := max(runtime.align_forward(p_size, storage_alignment), p_min_size)
-    d_min_size := max(storage_alignment, size_of(Directional_Light_Uniforms))
-    d_size_aligned := max(runtime.align_forward(d_size, storage_alignment), d_min_size)
-    s_min_size := max(storage_alignment, size_of(Spot_Light_Uniforms))
-    s_size_aligned := max(runtime.align_forward(s_size, storage_alignment), s_min_size)
+    p_size_aligned := runtime.align_forward(max(p_size, size_of(Point_Light_Uniforms)), storage_alignment)
+    d_size_aligned := runtime.align_forward(max(d_size, size_of(Directional_Light_Uniforms)), storage_alignment)
+    s_size_aligned := runtime.align_forward(max(s_size, size_of(Spot_Light_Uniforms)), storage_alignment)
     if p_size_aligned != pl_buffer.size_aligned ||
         d_size_aligned != dl_buffer.size_aligned ||
         s_size_aligned != sl_buffer.size_aligned {
@@ -563,15 +535,18 @@ write_light_buffers :: proc(lights: Lights, cameras: []Camera_Draw, offsets: Sha
         defer delete_lights_uniforms(lights_uniforms)
         if len(lights_uniforms.point_lights) > 0 {
             pl_offset := u64(i * int(pl_buffer.size_aligned))
-            wgpu.QueueWriteBuffer(ren.queue, pl_buffer.buffer, pl_offset, raw_data(lights_uniforms.point_lights), uint(pl_buffer.size_aligned))
+            pl_size := uint(len(lights_uniforms.point_lights) * size_of(Point_Light_Uniforms))
+            wgpu.QueueWriteBuffer(ren.queue, pl_buffer.buffer, pl_offset, raw_data(lights_uniforms.point_lights), pl_size)
         }
         if len(lights_uniforms.directional_lights) > 0 {
             dl_offset := u64(i * int(dl_buffer.size_aligned))
-            wgpu.QueueWriteBuffer(ren.queue, dl_buffer.buffer, dl_offset, raw_data(lights_uniforms.directional_lights), uint(dl_buffer.size_aligned))
+            dl_size := uint(len(lights_uniforms.directional_lights) * size_of(Directional_Light_Uniforms))
+            wgpu.QueueWriteBuffer(ren.queue, dl_buffer.buffer, dl_offset, raw_data(lights_uniforms.directional_lights), dl_size)
         }
         if len(lights_uniforms.spot_lights) > 0 {
             sl_offset := u64(i * int(sl_buffer.size_aligned))
-            wgpu.QueueWriteBuffer(ren.queue, sl_buffer.buffer, sl_offset, raw_data(lights_uniforms.spot_lights), uint(sl_buffer.size_aligned))
+            sl_size := uint(len(lights_uniforms.spot_lights) * size_of(Spot_Light_Uniforms))
+            wgpu.QueueWriteBuffer(ren.queue, sl_buffer.buffer, sl_offset, raw_data(lights_uniforms.spot_lights), sl_size)
         }
     }
 }
