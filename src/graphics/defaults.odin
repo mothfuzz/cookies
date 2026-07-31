@@ -14,7 +14,8 @@ init_defaults :: proc() {
     black_tex = make_texture_2D({0xff000000}, {1, 1})
     trans_tex = make_texture_2D({0x00000000}, {1, 1})
     normal_tex = make_texture_2D({0xffff8080}, {1, 1}, true)
-    pbr_tex = make_texture_2D({0xff00ffff}, {1, 1}, true)
+    //pbr_tex = make_texture_2D({0xff00ffff}, {1, 1}, true)
+    pbr_tex = make_texture_2D({0xffffffff}, {1, 1}, true)
     quad_mesh = make_mesh([]Vertex{
         {position={-0.5, +0.5, 0.0}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
         {position={+0.5, +0.5, 0.0}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},

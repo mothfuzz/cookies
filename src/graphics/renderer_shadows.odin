@@ -130,15 +130,15 @@ init_shadows :: proc() {
         },
     })
 
-    size: [2]uint = {POINT_LIGHT_SHADOW_MAP_RES, POINT_LIGHT_SHADOW_MAP_RES}
+    size: [2]uint = POINT_LIGHT_SHADOW_MAP_RES
     ren.point_light_shadow_depth = make_render_texture_array(size, .Depth32Float, 1, true)
     ren.point_light_shadow_color = make_render_texture_array(size, .RGBA8Unorm, 1, true)
 
-    size = {DIRECTIONAL_LIGHT_SHADOW_MAP_RES, DIRECTIONAL_LIGHT_SHADOW_MAP_RES}
+    size = DIRECTIONAL_LIGHT_SHADOW_MAP_RES
     ren.directional_light_shadow_depth = make_render_texture_array(size, .Depth32Float, 1)
     ren.directional_light_shadow_color = make_render_texture_array(size, .RGBA8Unorm, 1)
 
-    size = {SPOT_LIGHT_SHADOW_MAP_RES, SPOT_LIGHT_SHADOW_MAP_RES}
+    size = SPOT_LIGHT_SHADOW_MAP_RES
     ren.spot_light_shadow_depth = make_render_texture_array(size, .Depth32Float, 1)
     ren.spot_light_shadow_color = make_render_texture_array(size, .RGBA8Unorm, 1)
 

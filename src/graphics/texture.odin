@@ -257,11 +257,31 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
     return
 }
 
+cubemap_directions :: proc() -> (directions: [6][2][3]f32) {
+    //+X, -X, +Y, -Y, +Z, -Z
+    //forward, up
+    return {
+        {{+1, 0, 0}, {0, +1, 0}},
+        {{-1, 0, 0}, {0, +1, 0}},
+        {{0, +1, 0}, {0, 0, +1}},
+        {{0, -1, 0}, {0, 0, -1}},
+        {{0, 0, +1}, {0, +1, 0}},
+        {{0, 0, -1}, {0, +1, 0}},
+    }
+}
+
 // NOTE: if you want multisampled render texture arrays, you'd need to render to a single multisampled render texture, then *resolve* it to one of the array layers.
-make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, layers: uint, cubemap: bool = false) -> (tex: Texture) {
+make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, layers: uint, cubemap: bool = false, copy_dst: bool = true, copy_src: bool = false) -> (tex: Texture) {
     log.debug("creating render target array:", size.x, "x", size.y, "x", layers)
+    usage := bit_set[wgpu.TextureUsage; u64]{.RenderAttachment, .TextureBinding}
+    if copy_dst {
+        usage += {.CopyDst}
+    }
+    if copy_src {
+        usage += {.CopySrc}
+    }
     tex.image = wgpu.DeviceCreateTexture(ren.device, &{
-        usage = {.RenderAttachment, .TextureBinding, .CopyDst},
+        usage = usage,
         dimension = ._2D,
         size = {
             width = u32(size.x),

@@ -57,6 +57,8 @@ struct LightCount {
 @group(3) @binding(9) var directional_light_shadow_color: texture_2d_array<f32>;
 @group(3) @binding(10) var spot_light_shadow_depth: texture_depth_2d_array;
 @group(3) @binding(11) var spot_light_shadow_color: texture_2d_array<f32>;
+@group(3) @binding(12) var environment_probes: texture_cube_array<f32>;
+@group(3) @binding(13) var environment_probe_sampler: sampler;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -74,7 +76,7 @@ struct Vertex {
     @location(12) base_color_tint: vec4<f32>,
     @location(13) pbr_tint: vec4<f32>, //ambient, metallic, roughness
     @location(14) emissive_tint: vec4<f32>, //rgb
-    @location(15) skeleton_offset: vec4<u32>, //the last one we have... use it wisely
+    @location(15) indices: vec4<i32>, //the last one we have... use it wisely
 }
 
 struct VSOut {
@@ -87,6 +89,7 @@ struct VSOut {
     @location(5) base_color_tint: vec4<f32>,
     @location(6) pbr_tint: vec4<f32>,
     @location(7) emissive_tint: vec4<f32>,
+    @location(8) @interpolate(flat) indices: vec4<i32>,
 }
 
 fn ident() -> mat4x4<f32> {
@@ -104,10 +107,11 @@ fn calculate_bones(vertex: Vertex, instance_index: u32) -> mat4x4<f32> {
     if(all(vertex.weights == vec4<f32>(0.0))) {
         return ident();
     }
-    let bone1 = skeletons[vertex.skeleton_offset.x + u32(vertex.bones.x)] * vertex.weights.x;
-    let bone2 = skeletons[vertex.skeleton_offset.x + u32(vertex.bones.y)] * vertex.weights.y;
-    let bone3 = skeletons[vertex.skeleton_offset.x + u32(vertex.bones.z)] * vertex.weights.z;
-    let bone4 = skeletons[vertex.skeleton_offset.x + u32(vertex.bones.w)] * vertex.weights.w;
+    let skeleton_offset = u32(vertex.indices.x);
+    let bone1 = skeletons[skeleton_offset + u32(vertex.bones.x)] * vertex.weights.x;
+    let bone2 = skeletons[skeleton_offset + u32(vertex.bones.y)] * vertex.weights.y;
+    let bone3 = skeletons[skeleton_offset + u32(vertex.bones.z)] * vertex.weights.z;
+    let bone4 = skeletons[skeleton_offset + u32(vertex.bones.w)] * vertex.weights.w;
     return bone1 + bone2 + bone3 + bone4;
 }
 
@@ -129,6 +133,7 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     v.base_color_tint = vertex.base_color_tint;
     v.pbr_tint = vertex.pbr_tint;
     v.emissive_tint = vertex.emissive_tint;
+    v.indices = vertex.indices;
     return v;
 }
 
@@ -340,30 +345,54 @@ fn apply_spot_light(in: LightInput, s: SpotLight) -> vec3<f32> {
     return vec3<f32>(0);
 }
 
-fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
+fn calculate_environment_pbr(n: vec3<f32>, v: vec3<f32>, environment: vec3<f32>, base_color: vec4<f32>, roughness: f32, metallic: f32) -> vec3<f32> {
+    let cos_theta = max(dot(n, v), 0.0);
+    var base_reflectance = vec3<f32>(0.04); //base dielectric reflectance
+    base_reflectance = mix(base_reflectance, base_color.rgb, metallic);
+    let reflectance = fresnel_schlick_reflectance(cos_theta, base_reflectance);
+
+    let specular_color = reflectance * environment;
+    let diffuse_color = (1.0 - metallic) * (vec3<f32>(1.0) - reflectance) * base_color.rgb * 0.03; //base diffuse ambient
+
+    return diffuse_color * base_color.a + specular_color;
+}
+
+fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
     var final_color = in_color;
+    let pbr = textureSample(pbr, smp, in.texcoord) * in.pbr_tint;
+    let ambient_occlusion = pbr.r;
+    let roughness = pbr.g;
+    let metallic = pbr.b;
+
+    let ambient_color = vec3<f32>(0.03) * final_color.rgb * ambient_occlusion; //initial ambient value
+    var light = ambient_color * final_color.a;
+
+    var n = normalize(in.normal);
+    if(all(in.tangent.xyz != vec3<f32>(0.0))) {
+        //if we have tangents, do extra calculations & use the normal map
+        //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
+        let binormal = normalize(cross(in.normal, in.tangent.xyz) * in.tangent.w);
+        let tangent_to_view = mat3x3<f32>(in.tangent.xyz, binormal, in.normal);
+        //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
+        n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
+    }
+    let v = normalize(-in.position.xyz); //already in view space
+
+    if(in.indices[1] != -1) {
+        let n_world = normalize((camera.inv_view * vec4<f32>(n, 0.0)).xyz);
+        let v_world = normalize((camera.inv_view * vec4<f32>(v, 0.0)).xyz);
+        let r = reflect(-v_world, n_world);
+
+        let env = textureSample(environment_probes, environment_probe_sampler, r, in.indices[1]);
+        light += calculate_environment_pbr(n, v, env.rgb, final_color, roughness, metallic);
+    } else {
+        light += calculate_environment_pbr(n, v, vec3<f32>(0.0), final_color, roughness, metallic);
+    }
+    light *= ambient_occlusion;
 
     if light_count.total > 0 {
-        let pbr = textureSample(pbr, smp, in.texcoord) * in.pbr_tint;
-        let ambient_occlusion = pbr.r;
-        let roughness = pbr.g;
-        let metallic = pbr.b;
-
-        var n = normalize(in.normal);
-        if(all(in.tangent.xyz != vec3<f32>(0.0))) {
-            //if we have tangents, do extra calculations & use the normal map
-            //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
-            let binormal = normalize(cross(in.normal, in.tangent.xyz) * in.tangent.w);
-            let tangent_to_view = mat3x3<f32>(in.tangent.xyz, binormal, in.normal);
-            //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
-            n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
-        }
-        let v = normalize(-in.position.xyz); //already in view space
-
         let light_input = LightInput(in.position, n, v, final_color, roughness, metallic);
 
-        let ambient_color = vec3<f32>(0.03) * final_color.rgb * ambient_occlusion; //initial ambient value
-        var light = ambient_color * final_color.a;
         for (var i: u32 = 0; i < light_count.point; i++) {
             light += apply_point_light(light_input, point_lights[i]);
         }
@@ -373,12 +402,12 @@ fn apply_lights(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
         for (var i: u32 = 0; i < light_count.spot; i++) {
             light += apply_spot_light(light_input, spot_lights[i]);
         }
-
-        //reinhard tonemap for PBR
-        //light = light / (light + vec3<f32>(1.0));
-        //light = pow(light, vec3<f32>(1.0/2.2));
-        final_color = vec4<f32>(light, in_color.a);
     }
+
+    //reinhard tonemap for PBR
+    //light = light / (light + vec3<f32>(1.0));
+    //light = pow(light, vec3<f32>(1.0/2.2));
+    final_color = vec4<f32>(light, in_color.a);
     return final_color;
 }
 
@@ -403,7 +432,7 @@ fn solid_main(in: VSOut) -> @location(0) vec4<f32> {
     if final_color.a < 0.9 {
         discard;
     }
-    final_color = apply_lights(in, final_color);
+    final_color = apply_light_environment(in, final_color);
     let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
     final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
     final_color = apply_fog(in.position, final_color);
@@ -424,7 +453,7 @@ fn trans_main(in: VSOut) -> TransOut {
         discard;
     }
     var final_color = base_color;
-    final_color = apply_lights(in, final_color);
+    final_color = apply_light_environment(in, final_color);
     let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
     final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
     final_color = apply_fog(in.position, final_color);

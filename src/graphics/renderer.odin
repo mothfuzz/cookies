@@ -484,6 +484,8 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
 
     realloc_skeletons_buffer(0) //need minimum size for valid bindings
 
+    make_probe_capture()
+
     ren.ready = true
     log.debug("renderer SAYS it's ready.")
     log.debug(status)
@@ -521,6 +523,7 @@ quit :: proc() {
     delete_defaults()
     delete_lights_buffer()
     delete_skeletons_buffer()
+    delete_probe_capture()
     delete_instance_buffer()
     wgpu.RenderPipelineRelease(ren.solid_pipeline)
     wgpu.RenderPipelineRelease(ren.trans_pipeline)
@@ -568,6 +571,10 @@ Frame :: struct {
     materials: map[Material_Hash]Material,
     render_targets: map[Render_Target_Hash]Render_Target_Draw,
     screen_target: Render_Target_Draw,
+    //environment probe stuff
+    environment_probes: [dynamic]Environment_Probe, //all probes drawn (might be static/1-shot)
+    environment_probe_captures: [dynamic]Environment_Probe_Draw, //probes that actually need capture
+    max_cubemap_slot: int,
     //running extents
     scene_extents: [2][3]f32,
 }
@@ -595,6 +602,12 @@ delete_frame :: proc() {
     }
     delete(frame.render_targets)
     delete(frame.screen_target.cameras)
+    for render_target in frame.environment_probe_captures {
+        wgpu.TextureViewRelease(render_target.output)
+        delete(render_target.cameras)
+    }
+    delete(frame.environment_probe_captures)
+    delete(frame.environment_probes)
 }
 
 @(private)
@@ -611,6 +624,12 @@ clear_frame :: proc() {
     clear(&frame.screen_target.cameras)
     frame.scene_extents[0] = math.INF_F32
     frame.scene_extents[1] = math.NEG_INF_F32
+    for render_target in frame.environment_probe_captures {
+        wgpu.TextureViewRelease(render_target.output)
+        delete(render_target.cameras)
+    }
+    clear(&frame.environment_probe_captures)
+    clear(&frame.environment_probes)
 }
 
 @(private)
@@ -678,6 +697,20 @@ draw_render_target :: proc(camera: Camera, target: Render_Target, trans: matrix[
     append(&frame.cameras, camera)
 }
 
+@(export)
+draw_environment_probe :: proc(probe: Environment_Probe, layers: Layer_Mask = All_Layers) {
+
+    frame.max_cubemap_slot = max(frame.max_cubemap_slot, probe.cubemap_slot)
+
+    probe := probe
+    if layers != All_Layers {
+        probe.camera.layer_mask = layers
+    }
+
+    append(&frame.environment_probes, probe) //meshes need all drawn cubemaps, not just ones with capture this frame
+
+}
+
 
 @(export)
 draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
@@ -719,7 +752,7 @@ draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
         copy(owned_bones, bones)
         bones = owned_bones
     }
-    draw := Mesh_Draw{{transform, dynamic_material, 0}, sprite, billboard, bones, {}, layers}
+    draw := Mesh_Draw{{transform, dynamic_material, 0}, sprite, billboard, bones, {}, 0, 0, layers}
     calculate_mesh_local(&draw, mesh, material)
     mini := &frame.scene_extents[0]
     maxi := &frame.scene_extents[1]
@@ -787,7 +820,7 @@ write_skeletons :: proc(batches: []Mesh_Batch) {
     for &batch in batches {
         for &draw in batch.instances {
             if draw.bones == nil do continue
-            draw.skeleton_offset[0] = u32(running_offset)
+            draw.indices[0] = i32(running_offset)
             running_offset += len(draw.bones)
         }
     }
@@ -795,9 +828,82 @@ write_skeletons :: proc(batches: []Mesh_Batch) {
     for batch in batches {
         for draw in batch.instances {
             if draw.bones == nil do continue
-            offset := draw.skeleton_offset[0] * size_of(matrix[4,4]f32)
+            offset := draw.indices[0] * size_of(matrix[4,4]f32)
             size := len(draw.bones) * size_of(matrix[4,4]f32)
             wgpu.QueueWriteBuffer(ren.queue, skeletons_buffer, u64(offset), raw_data(draw.bones), uint(size))
+        }
+    }
+}
+
+calculate_environment_probes :: proc(probes: []Environment_Probe) {
+    append_rts :: proc(probe: Environment_Probe, capture_state: ^Capture_State, faces: int) {
+        probe := probe
+        directions := cubemap_directions()
+        for i in 0..<faces {
+            face := int(capture_state.current_face)
+            view_descriptor := wgpu.TextureViewDescriptor{
+                dimension = ._2D,
+                mipLevelCount = 1,
+                arrayLayerCount = 1,
+                baseArrayLayer=u32(probe.cubemap_slot*6 + face),
+            }
+            //this whole procedure needs to be separate as it depends on the cubemaps_capture.image
+            //so it should be called *after* realloc only.
+            capture_output_view := wgpu.TextureCreateView(cubemaps_capture.image, &view_descriptor)
+            probe_rt := Environment_Probe_Draw{
+                capture_output_view,
+                probe_capture.msaa.view,
+                probe_capture.depth.view,
+                probe_capture.accum.view,
+                probe_capture.accum_resolve.view,
+                probe_capture.revealage.view,
+                probe_capture.revealage_resolve.view,
+                probe_capture.composite_bind_group,
+                make([dynamic]int), //will only ever be 1...
+            }
+            look_at(&probe.camera, probe.position, probe.position + directions[face][0], directions[face][1])
+            camera := calculate_camera(probe.camera, 1, &probe_capture)
+            append(&probe_rt.cameras, len(frame.cameras))
+            append(&frame.cameras, camera)
+            append(&frame.environment_probe_captures, probe_rt)
+            capture_state.current_face += 1
+            capture_state.current_face %= 6
+        }
+    }
+
+    for probe in probes {
+        capture_state := &capture_states[probe.cubemap_slot]
+
+        if probe.faces_per_frame == 0 {
+            //render all 6 at once
+            if !capture_state.one_shot {
+                append_rts(probe, capture_state, 6)
+                capture_state.one_shot = true
+            }
+        } else {
+            //render just the ones for this frame
+            append_rts(probe, capture_state, probe.faces_per_frame)
+        }
+    }
+    
+}
+
+assign_cubemaps :: proc(batches: []Mesh_Batch) {
+    for &batch in batches {
+        for &draw in batch.instances {
+            draw.indices[1] = -1
+            for probe in frame.environment_probes {
+                mini := probe.position + probe.extents[0]
+                maxi := probe.position + probe.extents[1]
+                if draw.bounding_center.x > mini.x &&
+                    draw.bounding_center.x < maxi.x &&
+                    draw.bounding_center.y > mini.y &&
+                    draw.bounding_center.y < maxi.y &&
+                    draw.bounding_center.z > mini.z &&
+                    draw.bounding_center.z < maxi.z {
+                        draw.indices[1] = i32(probe.cubemap_slot)
+                    }
+            }
         }
     }
 }
@@ -1317,8 +1423,15 @@ render_frame :: proc() {
     //gather up them bones (global data)
     write_skeletons(batches)
 
+    //allocate cubemaps
+    rebind := realloc_cubemaps(command_encoder, frame.max_cubemap_slot+1)
+    assign_cubemaps(batches)
+
+    //schedule cubemap captures...
+    calculate_environment_probes(frame.environment_probes[:])
+
     //then gather up all lights
-    lights := calculate_lights(frame.lights[:], frame.cameras[:], frame.scene_extents)
+    lights := calculate_lights(frame.lights[:], frame.cameras[:], frame.scene_extents, rebind)
     defer delete_lights(lights)
 
     //batch all the cameras into one...
@@ -1355,7 +1468,15 @@ render_frame :: proc() {
         }
     }
 
-    //render to custom render targets first
+    //first render environment probes
+    for target in frame.environment_probe_captures {
+        target := Render_Target_Draw(target)
+        clear_render_target(command_encoder, target)
+        render_main_pass(command_encoder, frame.cameras[:], passes.solid_main, passes.trans_main, target, draw_solid, draw_trans)
+    }
+    copy_cubemaps(command_encoder)
+
+    //then render to custom render targets
     for hash, target in frame.render_targets {
         clear_render_target(command_encoder, target)
         render_main_pass(command_encoder, frame.cameras[:], passes.solid_main, passes.trans_main, target, draw_solid, draw_trans)
