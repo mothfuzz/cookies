@@ -57,8 +57,15 @@ struct LightCount {
 @group(3) @binding(9) var directional_light_shadow_color: texture_2d_array<f32>;
 @group(3) @binding(10) var spot_light_shadow_depth: texture_depth_2d_array;
 @group(3) @binding(11) var spot_light_shadow_color: texture_2d_array<f32>;
+
+struct EnvironmentProbeBox {
+    center: vec4<f32>,
+    mini: vec4<f32>,
+    maxi: vec4<f32>,
+}
 @group(3) @binding(12) var environment_probes: texture_cube_array<f32>;
 @group(3) @binding(13) var environment_probe_sampler: sampler;
+@group(3) @binding(14) var<storage, read> environment_probe_boxes: array<EnvironmentProbeBox>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -357,6 +364,22 @@ fn calculate_environment_pbr(in: LightInput, environment: vec3<f32>, ambient: ve
     return diffuse_color * in.surface_color.a + specular_color;
 }
 
+fn box_project(r: vec3<f32>, position: vec3<f32>, box: EnvironmentProbeBox) -> vec3<f32> {
+    if (box.center.w < 0.5) {
+        return r;
+    }
+    let bmin = box.center.xyz + box.mini.xyz;
+    let bmax = box.center.xyz + box.maxi.xyz;
+    //distance along r to each plane
+    let t1 = (bmin - position) / r;
+    let t2 = (bmax - position) / r;
+    //get exit plane per axis (larger t), then nearest of those
+    let tmax = max(t1, t2);
+    let t = min(min(tmax.x, tmax.y), tmax.z);
+    let hit = position + r * t;
+    return hit - box.center.xyz;
+}
+
 fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
     var final_color = in_color;
     var light = final_color.rgb;
@@ -384,13 +407,16 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
         let light_input = LightInput(in.position, n, v, final_color, roughness, metallic);
 
         if(in.indices[1] != -1) {
+            let p_world = (camera.inv_view * vec4<f32>(in.position.xyz, 1.0)).xyz;
             let n_world = normalize((camera.inv_view * vec4<f32>(n, 0.0)).xyz);
             let v_world = normalize((camera.inv_view * vec4<f32>(v, 0.0)).xyz);
             let r = reflect(-v_world, n_world);
+            let box = environment_probe_boxes[in.indices[1]];
+            let r_env = box_project(r, p_world, box);
 
             let max_mip = f32(textureNumLevels(environment_probes) - 1);
 
-            let env = textureSampleLevel(environment_probes, environment_probe_sampler, r, in.indices[1], roughness * max_mip);
+            let env = textureSampleLevel(environment_probes, environment_probe_sampler, r_env, in.indices[1], roughness * max_mip);
             let ambient = textureSampleLevel(environment_probes, environment_probe_sampler, n_world, in.indices[1], max_mip);
             light += calculate_environment_pbr(light_input, env.rgb, ambient.rgb);
         } else {

@@ -135,6 +135,12 @@ lights_layout_entries := []wgpu.BindGroupLayoutEntry{
         visibility = {.Fragment},
         sampler = {type = .Filtering}
     },
+    //cubemaps box buffer
+    wgpu.BindGroupLayoutEntry{
+        binding = 14,
+        visibility = {.Fragment},
+        buffer = {type = .ReadOnlyStorage},
+    }
 }
 lights_layout: wgpu.BindGroupLayout
 
@@ -519,6 +525,7 @@ realloc_light_buffers :: proc(lights: Lights, num_cameras: int) {
             {binding = 11, textureView=ren.spot_light_shadow_color.view},
             {binding = 12, textureView=cubemaps.view},
             {binding = 13, sampler=cubemaps_sampler},
+            {binding = 14, buffer=cubemaps_buffer, size = wgpu.BufferGetSize(cubemaps_buffer)},
         }
         light_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
             label = "lights",
