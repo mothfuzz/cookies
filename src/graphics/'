@@ -18,7 +18,7 @@ mipmaps are already allocated when creating the texture, so resolution will be c
 */
 
 ENVIRONMENT_CUBEMAP_RES :: 512
-environment_mip_count := mip_count(ENVIRONMENT_CUBEMAP_RES)
+mip_count := int(math.floor(math.log2(f32(ENVIRONMENT_CUBEMAP_RES)))) + 1
 
 probe_capture: Render_Target //executed 6 times per cubemap, resolving to cubemap faces.
 
@@ -32,7 +32,6 @@ capture_states: [dynamic]Capture_State
 cubemaps_capture: Texture
 cubemaps: Texture
 cubemaps_sampler: wgpu.Sampler
-cubemaps_mipmappers: [dynamic][6][]Mip_Draw
 cubemaps_free: [dynamic]int
 
 Environment_Probe :: struct {
@@ -40,13 +39,14 @@ Environment_Probe :: struct {
     position: [3]f32,
     extents: [2][3]f32,
     faces_per_frame: int,
-    camera: Camera, //so that probes can have individual bg/exposure/layer_mask
+    camera: Camera //so that probes can have individual bg/exposure/layer_mask
 }
 
 Environment_Probe_Draw :: distinct Render_Target_Draw
 
 make_probe_capture :: proc() {
-    probe_capture = make_render_target(ENVIRONMENT_CUBEMAP_RES, mipmapping=false)
+    probe_capture = make_render_target(ENVIRONMENT_CUBEMAP_RES)
+    realloc_cubemaps()
     cubemaps_sampler = wgpu.DeviceCreateSampler(ren.device, &{
         minFilter = .Linear,
         magFilter = .Linear,
@@ -59,7 +59,6 @@ make_probe_capture :: proc() {
         lodMaxClamp = 32,
     })
     append(&cubemaps_free, 0)
-    realloc_cubemaps()
 }
 
 delete_probe_capture :: proc() {
@@ -70,35 +69,19 @@ delete_probe_capture :: proc() {
     delete(cubemaps_free)
 }
 
-make_cubemaps_mipmappers :: proc(new_size: int) {
-    for mip_group in cubemaps_mipmappers {
-        for mip in mip_group {
-            delete_mipmapper(mip)
-        }
-    }
-    clear(&cubemaps_mipmappers)
-    for i in 0..<new_size {
-        mip_group: [6][]Mip_Draw
-        for mip, face in mip_group {
-            mip_group[face] = make_mipmapper(cubemaps.image, cubemaps_sampler, u32(i*6+face))
-        }
-        append(&cubemaps_mipmappers, mip_group)
-    }
-}
-
 realloc_cubemaps :: proc(command_encoder: wgpu.CommandEncoder = nil, new_size: int = 0) -> (rebind: bool) {
     format := with_srgb(ren.config.format)
     if cubemaps.image == nil {
         cubemaps_capture = make_render_texture_array(ENVIRONMENT_CUBEMAP_RES, format, 1, true, copy_src=true)
 
-        cubemaps = make_render_texture_array(ENVIRONMENT_CUBEMAP_RES, format, 1, true, mip_count=environment_mip_count)
+        mip_count := int(math.floor(math.log2(f32(ENVIRONMENT_CUBEMAP_RES)))) + 1
+        cubemaps = make_render_texture_array(ENVIRONMENT_CUBEMAP_RES, format, 1, true, mip_count=mip_count)
         append(&capture_states, Capture_State{})
-        make_cubemaps_mipmappers(1)
     } else {
         current_size := wgpu.TextureGetDepthOrArrayLayers(cubemaps.image)/6
         if u32(new_size) > current_size {
             new_cubemaps_capture := make_render_texture_array(ENVIRONMENT_CUBEMAP_RES, format, uint(new_size), true, copy_src=true)
-            new_cubemaps := make_render_texture_array(ENVIRONMENT_CUBEMAP_RES, format, uint(new_size), true, mip_count=environment_mip_count)
+            new_cubemaps := make_render_texture_array(ENVIRONMENT_CUBEMAP_RES, format, uint(new_size), true)
             extents := wgpu.Extent3D{
                 width = ENVIRONMENT_CUBEMAP_RES,
                 height = ENVIRONMENT_CUBEMAP_RES,
@@ -114,7 +97,6 @@ realloc_cubemaps :: proc(command_encoder: wgpu.CommandEncoder = nil, new_size: i
             cubemaps_capture = new_cubemaps_capture
             delete_texture(cubemaps)
             cubemaps = new_cubemaps
-            make_cubemaps_mipmappers(new_size)
         }
     }
     return
@@ -129,6 +111,7 @@ copy_cubemaps :: proc(command_encoder: wgpu.CommandEncoder) {
     wgpu.CommandEncoderCopyTextureToTexture(command_encoder, &{texture=cubemaps_capture.image}, &{texture=cubemaps.image}, &extents)
 }
 
+import "core:math"
 make_environment_probe :: proc(position, size: [3]f32, faces_per_frame: int = 6, layers: Layer_Mask = All_Layers) -> (probe: Environment_Probe) {
     probe.position = position
     probe.extents = {{-size.x/2, -size.y/2, -size.z/2}, {size.x/2, size.y/2, size.z/2}}

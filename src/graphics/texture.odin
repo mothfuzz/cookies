@@ -14,6 +14,7 @@ Texture :: struct {
     using key: Texture_Key,
     image: wgpu.Texture,
     view: wgpu.TextureView,
+    render_view: wgpu.TextureView,
     //resolve: wgpu.Texture,
     //resolve_view: wgpu.TextureView,
     is_trans: bool,
@@ -156,6 +157,9 @@ make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (t
 delete_texture :: proc(tex: Texture) {
     wgpu.TextureRelease(tex.image)
     wgpu.TextureViewRelease(tex.view)
+    if tex.render_view != nil {
+        wgpu.TextureViewRelease(tex.render_view)
+    }
 }
 
 pixels_byte_to_word :: proc(in_pixels: []byte, x, y: uint) -> (out_pixels: []u32) {
@@ -271,7 +275,7 @@ cubemap_directions :: proc() -> (directions: [6][2][3]f32) {
 }
 
 // NOTE: if you want multisampled render texture arrays, you'd need to render to a single multisampled render texture, then *resolve* it to one of the array layers.
-make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, layers: uint, cubemap: bool = false, copy_dst: bool = true, copy_src: bool = false) -> (tex: Texture) {
+make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, layers: uint, cubemap: bool = false, copy_dst: bool = true, copy_src: bool = false, mip_count: int = 1) -> (tex: Texture) {
     log.debug("creating render target array:", size.x, "x", size.y, "x", layers)
     usage := bit_set[wgpu.TextureUsage; u64]{.RenderAttachment, .TextureBinding}
     if copy_dst {
@@ -289,10 +293,15 @@ make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, lay
             depthOrArrayLayers = cubemap?u32(6*layers):u32(layers),
         },
         format = format,
-        mipLevelCount = 1,
+        mipLevelCount = u32(mip_count),
         sampleCount = 1
     })
     tex.view = wgpu.TextureCreateView(tex.image, &{
+        dimension = cubemap?.CubeArray:._2DArray,
+        mipLevelCount = u32(mip_count),
+        arrayLayerCount = cubemap?u32(6*layers):u32(layers),
+    })
+    tex.render_view = wgpu.TextureCreateView(tex.image, &{
         dimension = cubemap?.CubeArray:._2DArray,
         mipLevelCount = 1,
         arrayLayerCount = cubemap?u32(6*layers):u32(layers),
@@ -302,7 +311,7 @@ make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, lay
     return
 }
 
-make_render_texture :: proc(size: [2]uint, format: wgpu.TextureFormat, multisampled: bool = false) -> (tex: Texture) {
+make_render_texture :: proc(size: [2]uint, format: wgpu.TextureFormat, multisampled: bool = false, mip_count: int = 1) -> (tex: Texture) {
     log.debug("creating render target:", size.x, "x", size.y)
     tex.image = wgpu.DeviceCreateTexture(ren.device, &{
         usage = {.RenderAttachment, .TextureBinding, .CopyDst},
@@ -313,10 +322,11 @@ make_render_texture :: proc(size: [2]uint, format: wgpu.TextureFormat, multisamp
             depthOrArrayLayers = 1,
         },
         format = format,
-        mipLevelCount = 1,
+        mipLevelCount = u32(mip_count),
         sampleCount = 4 if multisampled else 1
     })
-    tex.view = wgpu.TextureCreateView(tex.image)
+    tex.view = wgpu.TextureCreateView(tex.image, &{arrayLayerCount=1, mipLevelCount=u32(mip_count)})
+    tex.render_view = wgpu.TextureCreateView(tex.image, &{arrayLayerCount=1, mipLevelCount=1})
     tex.is_solid = true //I guess
     tex.is_trans = false
     return

@@ -89,6 +89,8 @@ make_material :: proc(base_color: Texture=white_tex, normal: Texture=normal_tex,
         maxAnisotropy = 16 if filtering else 1,
         addressModeU = .Repeat if tiling.x else .ClampToEdge,
         addressModeV = .Repeat if tiling.y else .ClampToEdge,
+        lodMinClamp = 0,
+        lodMaxClamp = 32,
     })
     mat.base_color_tex = base_color
     mat.normal_tex = normal

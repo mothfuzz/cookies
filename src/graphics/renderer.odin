@@ -22,16 +22,16 @@ Renderer :: struct {
     config: wgpu.SurfaceConfiguration,
     queue: wgpu.Queue,
     shader: wgpu.ShaderModule,
-    composite_shader: wgpu.ShaderModule,
+    oit_composite_shader: wgpu.ShaderModule,
     camera_fill_shader: wgpu.ShaderModule,
     layout: wgpu.PipelineLayout,
     solid_pipeline: wgpu.RenderPipeline,
     trans_pipeline: wgpu.RenderPipeline,
-    composite_layout: wgpu.PipelineLayout,
-    composite_pipeline: wgpu.RenderPipeline,
-    composite_bind_group_layout: wgpu.BindGroupLayout,
-    composite_bind_group: wgpu.BindGroup,
-    composite_sampler: wgpu.Sampler,
+    oit_composite_layout: wgpu.PipelineLayout,
+    oit_composite_pipeline: wgpu.RenderPipeline,
+    oit_composite_bind_group_layout: wgpu.BindGroupLayout,
+    oit_composite_bind_group: wgpu.BindGroup,
+    oit_composite_sampler: wgpu.Sampler,
     camera_fill_layout: wgpu.PipelineLayout,
     camera_fill_pipeline: wgpu.RenderPipeline,
     using shadows: Shadow_Renderer,
@@ -139,18 +139,18 @@ configure_render_targets :: proc() {
     ren.revealage_resolve = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .R8Unorm)
 
     //only re-bind when those textures actually change.
-    if ren.composite_bind_group != nil {
-        wgpu.BindGroupRelease(ren.composite_bind_group)
+    if ren.oit_composite_bind_group != nil {
+        wgpu.BindGroupRelease(ren.oit_composite_bind_group)
     }
-    composite_bindings := []wgpu.BindGroupEntry{
-        {binding = 0, sampler=ren.composite_sampler},
+    oit_composite_bindings := []wgpu.BindGroupEntry{
+        {binding = 0, sampler=ren.oit_composite_sampler},
         {binding = 1, textureView=ren.accum_resolve.view},
         {binding = 2, textureView=ren.revealage_resolve.view},
     }
-    ren.composite_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
-        layout = ren.composite_bind_group_layout,
-        entryCount = len(composite_bindings),
-        entries = raw_data(composite_bindings),
+    ren.oit_composite_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+        layout = ren.oit_composite_bind_group_layout,
+        entryCount = len(oit_composite_bindings),
+        entries = raw_data(oit_composite_bindings),
     })
 }
 
@@ -200,10 +200,10 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         },
     })
 
-    ren.composite_shader = wgpu.DeviceCreateShaderModule(ren.device, &{
+    ren.oit_composite_shader = wgpu.DeviceCreateShaderModule(ren.device, &{
         nextInChain = &wgpu.ShaderSourceWGSL{
             sType = .ShaderSourceWGSL,
-            code = #load("composite.wgsl"),
+            code = #load("oit_composite.wgsl"),
         },
     })
 
@@ -352,7 +352,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     })
 
     log.debug("creating compositor...")
-    composite_layout_entries := []wgpu.BindGroupLayoutEntry{
+    oit_composite_layout_entries := []wgpu.BindGroupLayoutEntry{
         wgpu.BindGroupLayoutEntry{
             binding = 0,
             visibility = {.Fragment},
@@ -371,24 +371,24 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
             texture = {sampleType = .Float, viewDimension = ._2D},
         },
     }
-    ren.composite_bind_group_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
-        entryCount = len(composite_layout_entries),
-        entries = raw_data(composite_layout_entries),
+    ren.oit_composite_bind_group_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
+        entryCount = len(oit_composite_layout_entries),
+        entries = raw_data(oit_composite_layout_entries),
     })
-    ren.composite_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
+    ren.oit_composite_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
         bindGroupLayoutCount = 1,
-        bindGroupLayouts = &ren.composite_bind_group_layout,
+        bindGroupLayouts = &ren.oit_composite_bind_group_layout,
     })
-    ren.composite_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
-        label = "composite",
-        layout = ren.composite_layout,
+    ren.oit_composite_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+        label = "OIT composite",
+        layout = ren.oit_composite_layout,
         vertex = {
-            module = ren.composite_shader,
+            module = ren.oit_composite_shader,
             entryPoint = "vs_main",
             bufferCount = 0,
         },
         fragment = &{
-            module = ren.composite_shader,
+            module = ren.oit_composite_shader,
             entryPoint = "fs_main",
             targetCount = 1,
             targets = &wgpu.ColorTargetState{
@@ -423,7 +423,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
             mask = 0xffffffff,
         },
     })
-    ren.composite_sampler = wgpu.DeviceCreateSampler(ren.device, &{
+    ren.oit_composite_sampler = wgpu.DeviceCreateSampler(ren.device, &{
         minFilter=.Linear,
         magFilter=.Linear,
         mipmapFilter=.Linear, //don't use mips for fullscreen, dog
@@ -484,6 +484,8 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
 
     realloc_skeletons_buffer(0) //need minimum size for valid bindings
 
+    make_mipmapping()
+
     make_probe_capture()
 
     ren.ready = true
@@ -502,6 +504,11 @@ init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
     }
     ren.surface = surface_proc(ren.instance)
     ctx = context
+    wgpu.SetLogLevel(.Warn)
+    wgpu.SetLogCallback(proc "c" (level: wgpu.LogLevel, message: wgpu.StringView, userdata: rawptr) {
+        context = ctx
+        log.warn(message)
+    }, nil)
     wgpu.InstanceRequestAdapter(ren.instance, &{compatibleSurface = ren.surface}, {callback=request_adapter, userdata1=&ctx})
 }
 
@@ -528,11 +535,11 @@ quit :: proc() {
     wgpu.RenderPipelineRelease(ren.solid_pipeline)
     wgpu.RenderPipelineRelease(ren.trans_pipeline)
     wgpu.PipelineLayoutRelease(ren.layout)
-    wgpu.RenderPipelineRelease(ren.composite_pipeline)
-    wgpu.PipelineLayoutRelease(ren.composite_layout)
-    wgpu.BindGroupLayoutRelease(ren.composite_bind_group_layout)
-    wgpu.BindGroupRelease(ren.composite_bind_group)
-    wgpu.SamplerRelease(ren.composite_sampler)
+    wgpu.RenderPipelineRelease(ren.oit_composite_pipeline)
+    wgpu.PipelineLayoutRelease(ren.oit_composite_layout)
+    wgpu.BindGroupLayoutRelease(ren.oit_composite_bind_group_layout)
+    wgpu.BindGroupRelease(ren.oit_composite_bind_group)
+    wgpu.SamplerRelease(ren.oit_composite_sampler)
     wgpu.RenderPipelineRelease(ren.camera_fill_pipeline)
     wgpu.PipelineLayoutRelease(ren.camera_fill_layout)
     wgpu.BindGroupLayoutRelease(camera_layout)
@@ -540,7 +547,7 @@ quit :: proc() {
     wgpu.BindGroupLayoutRelease(skeletons_layout)
     wgpu.BindGroupLayoutRelease(lights_layout)
     wgpu.ShaderModuleRelease(ren.shader)
-    wgpu.ShaderModuleRelease(ren.composite_shader)
+    wgpu.ShaderModuleRelease(ren.oit_composite_shader)
     wgpu.ShaderModuleRelease(ren.camera_fill_shader)
     wgpu.TextureViewRelease(ren.msaa_view)
     wgpu.TextureRelease(ren.msaa_tex)
@@ -548,6 +555,7 @@ quit :: proc() {
     delete_texture(ren.accum)
     delete_texture(ren.revealage)
     delete_shadows()
+    delete_mipmapping()
 
     //safely clean up resources prior to releasing
     wgpu.SurfaceUnconfigure(ren.surface)
@@ -603,7 +611,7 @@ delete_frame :: proc() {
     delete(frame.render_targets)
     delete(frame.screen_target.cameras)
     for render_target in frame.environment_probe_captures {
-        wgpu.TextureViewRelease(render_target.output)
+        wgpu.TextureViewRelease(render_target.render_view)
         delete(render_target.cameras)
     }
     delete(frame.environment_probe_captures)
@@ -625,7 +633,7 @@ clear_frame :: proc() {
     frame.scene_extents[0] = math.INF_F32
     frame.scene_extents[1] = math.NEG_INF_F32
     for render_target in frame.environment_probe_captures {
-        wgpu.TextureViewRelease(render_target.output)
+        wgpu.TextureViewRelease(render_target.render_view)
         delete(render_target.cameras)
     }
     clear(&frame.environment_probe_captures)
@@ -634,6 +642,7 @@ clear_frame :: proc() {
 
 @(private)
 set_screen_target :: proc(frame: ^Frame, screen: wgpu.TextureView) {
+    frame.screen_target.render_view = screen
     frame.screen_target.output = screen
     frame.screen_target.msaa = ren.msaa_view
     frame.screen_target.depth = ren.depth_buffer.view
@@ -641,7 +650,7 @@ set_screen_target :: proc(frame: ^Frame, screen: wgpu.TextureView) {
     frame.screen_target.accum_resolve = ren.accum_resolve.view
     frame.screen_target.revealage = ren.revealage.view
     frame.screen_target.revealage_resolve = ren.revealage_resolve.view
-    frame.screen_target.composite_bind_group = ren.composite_bind_group
+    frame.screen_target.oit_composite_bind_group = ren.oit_composite_bind_group
 }
 
 
@@ -681,6 +690,7 @@ draw_render_target :: proc(camera: Camera, target: Render_Target, trans: matrix[
     }
     if !(target.hash in frame.render_targets) {
         frame.render_targets[target.hash] = {
+            target.output.render_view,
             target.output.view,
             target.msaa.view,
             target.depth.view,
@@ -688,7 +698,9 @@ draw_render_target :: proc(camera: Camera, target: Render_Target, trans: matrix[
             target.accum_resolve.view,
             target.revealage.view,
             target.revealage_resolve.view,
-            target.composite_bind_group,
+            target.sampler,
+            target.oit_composite_bind_group,
+            target.mipmapper,
             make([dynamic]int),
         }
     }
@@ -699,7 +711,6 @@ draw_render_target :: proc(camera: Camera, target: Render_Target, trans: matrix[
 
 @(export)
 draw_environment_probe :: proc(probe: Environment_Probe, layers: Layer_Mask = All_Layers) {
-
     frame.max_cubemap_slot = max(frame.max_cubemap_slot, probe.cubemap_slot)
 
     probe := probe
@@ -708,7 +719,6 @@ draw_environment_probe :: proc(probe: Environment_Probe, layers: Layer_Mask = Al
     }
 
     append(&frame.environment_probes, probe) //meshes need all drawn cubemaps, not just ones with capture this frame
-
 }
 
 
@@ -841,24 +851,29 @@ calculate_environment_probes :: proc(probes: []Environment_Probe) {
         directions := cubemap_directions()
         for i in 0..<faces {
             face := int(capture_state.current_face)
+            cubemap_layer := u32(probe.cubemap_slot*6 + face)
             view_descriptor := wgpu.TextureViewDescriptor{
                 dimension = ._2D,
                 mipLevelCount = 1,
                 arrayLayerCount = 1,
-                baseArrayLayer=u32(probe.cubemap_slot*6 + face),
+                baseArrayLayer=cubemap_layer,
             }
             //this whole procedure needs to be separate as it depends on the cubemaps_capture.image
             //so it should be called *after* realloc only.
-            capture_output_view := wgpu.TextureCreateView(cubemaps_capture.image, &view_descriptor)
+            capture_face_view := wgpu.TextureCreateView(cubemaps_capture.image, &view_descriptor)
+
             probe_rt := Environment_Probe_Draw{
-                capture_output_view,
+                capture_face_view,
+                cubemaps_capture.view,
                 probe_capture.msaa.view,
                 probe_capture.depth.view,
                 probe_capture.accum.view,
                 probe_capture.accum_resolve.view,
                 probe_capture.revealage.view,
                 probe_capture.revealage_resolve.view,
-                probe_capture.composite_bind_group,
+                probe_capture.sampler,
+                probe_capture.oit_composite_bind_group,
+                cubemaps_mipmappers[probe.cubemap_slot][face],
                 make([dynamic]int), //will only ever be 1...
             }
             look_at(&probe.camera, probe.position, probe.position + directions[face][0], directions[face][1])
@@ -1130,7 +1145,7 @@ clear_render_target :: proc(command_encoder: wgpu.CommandEncoder, target: Render
         colorAttachmentCount = 1,
         colorAttachments = &wgpu.RenderPassColorAttachment{
             view = target.msaa,
-            resolveTarget = target.output,
+            resolveTarget = target.render_view,
             loadOp = .Clear,
             storeOp = .Store,
             depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
@@ -1191,7 +1206,7 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
         colorAttachmentCount = 1,
         colorAttachments = &wgpu.RenderPassColorAttachment{
             view = target.msaa,
-            resolveTarget = target.output,
+            resolveTarget = target.render_view,
             loadOp = .Load,
             storeOp = .Store,
             depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
@@ -1222,7 +1237,7 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
                 colorAttachmentCount = 1,
                 colorAttachments = &wgpu.RenderPassColorAttachment{
                     view = target.msaa,
-                    resolveTarget = target.output,
+                    resolveTarget = target.render_view,
                     loadOp = .Load,
                     storeOp = .Store,
                     depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
@@ -1284,24 +1299,24 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
         }
     }
 
-    //finally, execute the composite pass for the output
+    //finally, execute the OIT composite pass for the output
     if draw_trans {
-        composite_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-            label = "composite",
+        oit_composite_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+            label = "OIT composite",
             colorAttachmentCount = 1,
             colorAttachments = &wgpu.RenderPassColorAttachment{
                 view = target.msaa,
-                resolveTarget = target.output,
+                resolveTarget = target.render_view,
                 loadOp = .Load,
                 storeOp = .Store,
                 depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
             },
         })
-        wgpu.RenderPassEncoderSetPipeline(composite_pass, ren.composite_pipeline)
-        wgpu.RenderPassEncoderSetBindGroup(composite_pass, 0, target.composite_bind_group)
-        wgpu.RenderPassEncoderDraw(composite_pass, 3, 1, 0, 0)
-        wgpu.RenderPassEncoderEnd(composite_pass)
-        wgpu.RenderPassEncoderRelease(composite_pass)
+        wgpu.RenderPassEncoderSetPipeline(oit_composite_pass, ren.oit_composite_pipeline)
+        wgpu.RenderPassEncoderSetBindGroup(oit_composite_pass, 0, target.oit_composite_bind_group)
+        wgpu.RenderPassEncoderDraw(oit_composite_pass, 3, 1, 0, 0)
+        wgpu.RenderPassEncoderEnd(oit_composite_pass)
+        wgpu.RenderPassEncoderRelease(oit_composite_pass)
     }
     
 }
@@ -1475,11 +1490,15 @@ render_frame :: proc() {
         render_main_pass(command_encoder, frame.cameras[:], passes.solid_main, passes.trans_main, target, draw_solid, draw_trans)
     }
     copy_cubemaps(command_encoder)
+    for target in frame.environment_probe_captures {
+        render_mips(command_encoder, target.mipmapper)
+    }
 
     //then render to custom render targets
     for hash, target in frame.render_targets {
         clear_render_target(command_encoder, target)
         render_main_pass(command_encoder, frame.cameras[:], passes.solid_main, passes.trans_main, target, draw_solid, draw_trans)
+        render_mips(command_encoder, target.mipmapper)
     }
 
     //then finally render to screen (already cleared above)...

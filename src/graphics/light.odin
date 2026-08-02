@@ -402,7 +402,9 @@ calculate_lights_uniforms :: proc(lights: Lights, camera: Camera_Uniforms, camer
         dl.direction.xyz = linalg.normalize((camera.view * vecdir(dl_in.direction)).xyz)
         dl.color = dl_in.color
         if dl_in.render_shadows {
-            dl.shadow_index = i32(dl_in.shadow_index)
+            //dl.shadow_index = i32(dl_in.shadow_index)
+            //directional shadows are unique in that cascades are actually distinct texture bindings...
+            dl.shadow_index = i32((dl_in.shadow_index * offsets.num_cameras + camera_index) * DIRECTIONAL_CASCADES)
             base := offsets.d + (dl_in.shadow_index * offsets.num_cameras + camera_index) * DIRECTIONAL_CASCADES
             for c in 0..<DIRECTIONAL_CASCADES {
                 light_cam := lights.shadow_cameras[base + c]

@@ -345,14 +345,14 @@ fn apply_spot_light(in: LightInput, s: SpotLight) -> vec3<f32> {
     return vec3<f32>(0);
 }
 
-fn calculate_environment_pbr(in: LightInput, environment: vec3<f32>) -> vec3<f32> {
+fn calculate_environment_pbr(in: LightInput, environment: vec3<f32>, ambient: vec3<f32>) -> vec3<f32> {
     let cos_theta = max(dot(in.n, in.v), 0.0);
     var base_reflectance = vec3<f32>(0.04); //base dielectric reflectance
     base_reflectance = mix(base_reflectance, in.surface_color.rgb, in.metallic);
     let reflectance = fresnel_schlick_reflectance(cos_theta, base_reflectance);
 
     let specular_color = reflectance * environment;
-    let diffuse_color = (1.0 - in.metallic) * (vec3<f32>(1.0) - reflectance) * in.surface_color.rgb * 0.03; //base diffuse ambient
+    let diffuse_color = (1.0 - in.metallic) * (vec3<f32>(1.0) - reflectance) * in.surface_color.rgb * ambient; //base diffuse ambient
 
     return diffuse_color * in.surface_color.a + specular_color;
 }
@@ -367,7 +367,6 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
         let ambient_occlusion = pbr.r;
         let roughness = pbr.g;
         let metallic = pbr.b;
-
 
         light = vec3<f32>(0.0);
 
@@ -389,10 +388,13 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
             let v_world = normalize((camera.inv_view * vec4<f32>(v, 0.0)).xyz);
             let r = reflect(-v_world, n_world);
 
-            let env = textureSample(environment_probes, environment_probe_sampler, r, in.indices[1]);
-            light += calculate_environment_pbr(light_input, env.rgb);
+            let max_mip = f32(textureNumLevels(environment_probes) - 1);
+
+            let env = textureSampleLevel(environment_probes, environment_probe_sampler, r, in.indices[1], roughness * max_mip);
+            let ambient = textureSampleLevel(environment_probes, environment_probe_sampler, n_world, in.indices[1], max_mip);
+            light += calculate_environment_pbr(light_input, env.rgb, ambient.rgb);
         } else {
-            light += calculate_environment_pbr(light_input, vec3<f32>(0.0));
+            light += calculate_environment_pbr(light_input, vec3<f32>(0.0), vec3<f32>(0.03));
         }
         light *= ambient_occlusion;
 

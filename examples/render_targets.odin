@@ -4,9 +4,8 @@ import "cookies:window"
 import "cookies:graphics"
 import "cookies:transform"
 
-tree: transform.Tree
-cube_trans: transform.Node
-cube_rtt_trans: transform.Node
+cube_trans: transform.Transform
+cube_rtt_trans: transform.Transform
 
 main_cam: graphics.Camera
 
@@ -25,9 +24,8 @@ Layers :: enum {
 init :: proc() {
     window.set_size(500, 500)
 
-    tree = transform.make_tree()
-    cube_trans = transform.create_node(&tree)
-    cube_rtt_trans = transform.create_node(&tree)
+    cube_trans = transform.make()
+    cube_rtt_trans = transform.make()
 
     main_cam = graphics.make_camera()
     graphics.look_at(&main_cam, {0, 0, 3}, {0, 0, 0})
@@ -47,24 +45,22 @@ init :: proc() {
 }
 
 tick :: proc() {
-    cube_trans := transform.write(&tree, cube_trans)
+    cube_trans := transform.write(cube_trans)
     transform.rotatex(cube_trans, 0.01)
-    cube_rtt_trans := transform.write(&tree, cube_rtt_trans)
+    cube_rtt_trans := transform.write(cube_rtt_trans)
     transform.rotatey(cube_rtt_trans, 0.01)
 }
 
 draw :: proc(alpha, delta: f64) {
     //draw one cube to the RTT buffer, use its output to draw a second cube to the screen
-    graphics.draw_mesh(graphics.cube_mesh, cube_mat, transform.get_world_smooth(&tree, cube_trans, alpha), layers=graphics.layers(Layers.RTT))
-    graphics.draw_mesh(graphics.cube_mesh, cube_rtt_mat, transform.get_world_smooth(&tree, cube_rtt_trans, alpha), layers=graphics.layers(Layers.Main))
+    graphics.draw_mesh(graphics.cube_mesh, cube_mat, transform.world(cube_trans, alpha), layers=graphics.layers(Layers.RTT))
+    graphics.draw_mesh(graphics.cube_mesh, cube_rtt_mat, transform.world(cube_rtt_trans, alpha), layers=graphics.layers(Layers.Main))
 
     graphics.draw_render_target(rtt_cam, rtt)
     graphics.draw_camera(main_cam)
 }
 
 quit :: proc() {
-    graphics.delete_camera(main_cam)
-    graphics.delete_camera(rtt_cam)
     graphics.delete_render_target(rtt)
 }
 

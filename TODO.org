@@ -33,3 +33,5 @@
   - more involved/stylized shaders like bloom/DoF/motion blur/vignetting/film grain/etc. would have to be written in by users and added as their own pipelines/passes. So build the pipes, but not the water.
 
 - audio settings (mainly just be able to set volume dynamically)
+
+- refactor spatial package to have Spatial structures actually own their colliders. Then just pass transforms to update, don't reshape - if you want a new shape you delete/make again
