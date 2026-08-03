@@ -70,6 +70,9 @@ configure_surface :: proc(size: [2]uint = 0) {
     if size != 0 {
         screen_resolution = size
     }
+    if screen_resolution.x == 0 || screen_resolution.y == 0 {
+        return
+    }
     log.debug("reconfiguring draw surface...")
     caps, status := wgpu.SurfaceGetCapabilities(ren.surface, ren.adapter)
     if status == .Error {
