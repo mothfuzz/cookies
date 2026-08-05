@@ -1136,7 +1136,6 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
         if prev_mesh == 0 || draw.mesh.hash != prev_mesh {
             bind_mesh(render_pass, draw.mesh)
         }
-        bind_skeletons(render_pass, 2)
         draw_mesh_instances(render_pass, draw.mesh, draw.instance_count, draw.instance_buffer_offset)
     }
 }
@@ -1255,6 +1254,7 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
             })
             wgpu.RenderPassEncoderSetPipeline(render_pass, ren.solid_pipeline)
             bind_camera(render_pass, 0, camera)
+            bind_skeletons(render_pass, 2)
             bind_lights(render_pass, 3, u32(i))
             execute_draw_calls(render_pass, solid_passes[i].draw_calls[:])
             wgpu.RenderPassEncoderEnd(render_pass)
@@ -1295,6 +1295,7 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
             })
             wgpu.RenderPassEncoderSetPipeline(render_pass, ren.trans_pipeline)
             bind_camera(render_pass, 0, camera)
+            bind_skeletons(render_pass, 2)
             bind_lights(render_pass, 3, u32(i))
             execute_draw_calls(render_pass, trans_passes[i].draw_calls[:])
             wgpu.RenderPassEncoderEnd(render_pass)
