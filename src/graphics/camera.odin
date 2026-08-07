@@ -90,6 +90,11 @@ set_fog_onset :: proc(cam: ^Camera, fog_onset: f32) {
 }
 
 @(export)
+set_draw_distance :: proc(cam: ^Camera, distance: f32) {
+    set_far_clip(cam, distance)
+}
+
+@(export)
 set_layer_mask :: proc(cam: ^Camera, layer_mask: Layer_Mask) {
     cam.layer_mask = layer_mask
 }

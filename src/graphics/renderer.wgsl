@@ -206,6 +206,7 @@ fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: v
 
 struct LightInput {
     position: vec4<f32>,
+    surface_normal: vec3<f32>,
     n: vec3<f32>,
     v: vec3<f32>,
     surface_color: vec4<f32>,
@@ -213,7 +214,8 @@ struct LightInput {
     metallic: f32,
 }
 
-fn apply_point_light(in: LightInput, p: PointLight) -> vec3<f32> {
+fn apply_point_light(in: LightInput, light_index: u32) -> vec3<f32> {
+    let p = point_lights[light_index];
     if(p.color.a == 0) {
         return vec3<f32>(0);
     }
@@ -263,7 +265,8 @@ fn apply_point_light(in: LightInput, p: PointLight) -> vec3<f32> {
     
 }
 
-fn apply_directional_light(in: LightInput, d: DirectionalLight) -> vec3<f32> {
+fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
+    let d = directional_lights[light_index];
     if(d.color.a == 0) {
         return vec3<f32>(0);
     }
@@ -275,22 +278,39 @@ fn apply_directional_light(in: LightInput, d: DirectionalLight) -> vec3<f32> {
             break;
         }
     }
+
     let l = normalize(-d.direction.xyz);
     var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
     let layer = d.shadow_index.r + cascade;
     if(layer != -1) {
+        //have to do this constant-indexing chicanery because dynamically indexing by-value arrays doesn't work on web for some reason
+        var view_to_shadow: mat4x4<f32>;
+        switch cascade {
+            case 0:  { view_to_shadow = directional_lights[light_index].view_to_shadow[0]; }
+            case 1:  { view_to_shadow = directional_lights[light_index].view_to_shadow[1]; }
+            case 2:  { view_to_shadow = directional_lights[light_index].view_to_shadow[2]; }
+            default: { view_to_shadow = directional_lights[light_index].view_to_shadow[3]; }
+        }
+        //get rough estimate of world-space texel density
+        let ndc_per_world = length(vec3(view_to_shadow[0][0], view_to_shadow[1][0], view_to_shadow[2][0]));
+        let texel_ndc = 2.0 / f32(textureDimensions(directional_light_shadow_depth).x);
+        let texel_world = texel_ndc / ndc_per_world;
+
+        //normal offset bias based on texel density
+        let normal_bias = 2.0 * texel_world;
+        let sample_position = vec4(in.position.xyz + in.surface_normal * normal_bias, 1.0);
+
         light_factor = vec3<f32>(0.0);
-        let frag_in_light = d.view_to_shadow[cascade] * in.position;
+        let frag_in_light = view_to_shadow * sample_position;
         let ndc = frag_in_light.xyz / frag_in_light.w;
         var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
         shadow_uv.y = 1.0 - shadow_uv.y;
         let depth_ref = ndc.z;
-        let bias = max(0.05 * (1.0 - dot(in.n, l)), 0.005);
         let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(directional_light_shadow_depth));
         for(var x = -1; x <= 1; x++) {
             for(var y = -1; y <= 1; y++) {
                 let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                let visibility = textureSampleCompare(directional_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref + bias);
+                let visibility = textureSampleCompare(directional_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref);
                 let transmittance = textureSample(directional_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
                 light_factor += visibility * transmittance;
             }
@@ -305,7 +325,8 @@ fn apply_directional_light(in: LightInput, d: DirectionalLight) -> vec3<f32> {
     return vec3<f32>(0);
 }
 
-fn apply_spot_light(in: LightInput, s: SpotLight) -> vec3<f32> {
+fn apply_spot_light(in: LightInput, light_index: u32) -> vec3<f32> {
+    let s = spot_lights[light_index];
     if(s.color.a == 0) {
         return vec3<f32>(0);
     }
@@ -323,18 +344,26 @@ fn apply_spot_light(in: LightInput, s: SpotLight) -> vec3<f32> {
     var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
     let layer = s.shadow_index;
     if(layer != -1) {
+        //get rough estimate of world-space texel density
+        let ndc_per_world = length(vec3(s.view_to_shadow[0][0], s.view_to_shadow[1][0], s.view_to_shadow[2][0]));
+        let texel_ndc = 2.0 / f32(textureDimensions(spot_light_shadow_depth).x);
+        let texel_world = texel_ndc / ndc_per_world;
+
+        //normal offset bias based on texel density
+        let normal_bias = 2.0 * texel_world;
+        let sample_position = vec4(in.position.xyz + in.surface_normal * normal_bias, 1.0);
+
         light_factor = vec3<f32>(0.0);
-        let frag_in_light = s.view_to_shadow * in.position;
+        let frag_in_light = s.view_to_shadow * sample_position;
         let ndc = frag_in_light.xyz / frag_in_light.w;
         var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
         shadow_uv.y = 1.0 - shadow_uv.y;
         let depth_ref = ndc.z;
-        let bias = max(0.05 * (1.0 - dot(in.n, l)), 0.005);
         let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(spot_light_shadow_depth));
         for(var x = -1; x <= 1; x++) {
             for(var y = -1; y <= 1; y++) {
                 let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                let visibility = textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref + bias);
+                let visibility = textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref);
                 let transmittance = textureSample(spot_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
                 light_factor += visibility * transmittance;
             }
@@ -404,7 +433,7 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
         }
         let v = normalize(-in.position.xyz); //already in view space
 
-        let light_input = LightInput(in.position, n, v, final_color, roughness, metallic);
+        let light_input = LightInput(in.position, in.normal, n, v, final_color, roughness, metallic);
 
         if(in.indices[1] != -1) {
             let p_world = (camera.inv_view * vec4<f32>(in.position.xyz, 1.0)).xyz;
@@ -425,13 +454,13 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
         light *= ambient_occlusion;
 
         for (var i: u32 = 0; i < light_count.point; i++) {
-            light += apply_point_light(light_input, point_lights[i]);
+            light += apply_point_light(light_input, i);
         }
         for (var i: u32 = 0; i < light_count.directional; i++) {
-            light += apply_directional_light(light_input, directional_lights[i]);
+            light += apply_directional_light(light_input, i);
         }
         for (var i: u32 = 0; i < light_count.spot; i++) {
-            light += apply_spot_light(light_input, spot_lights[i]);
+            light += apply_spot_light(light_input, i);
         }
     }
 

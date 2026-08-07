@@ -507,11 +507,13 @@ init :: proc(surface_proc: proc(wgpu.Instance)->wgpu.Surface, size: [2]uint) {
     }
     ren.surface = surface_proc(ren.instance)
     ctx = context
-    wgpu.SetLogLevel(.Warn)
-    wgpu.SetLogCallback(proc "c" (level: wgpu.LogLevel, message: wgpu.StringView, userdata: rawptr) {
-        context = ctx
-        log.warn(message)
-    }, nil)
+    when ODIN_OS != .JS {
+        wgpu.SetLogLevel(.Warn)
+        wgpu.SetLogCallback(proc "c" (level: wgpu.LogLevel, message: wgpu.StringView, userdata: rawptr) {
+            context = ctx
+            log.warn(message)
+        }, nil)
+    }
     wgpu.InstanceRequestAdapter(ren.instance, &{compatibleSurface = ren.surface}, {callback=request_adapter, userdata1=&ctx})
 }
 
