@@ -6,6 +6,9 @@ black_tex: Texture
 trans_tex: Texture
 normal_tex: Texture
 pbr_tex: Texture
+white_cubemap: Texture
+black_cubemap: Texture
+trans_cubemap: Texture
 quad_mesh: Mesh
 cube_mesh: Mesh
 
@@ -16,6 +19,9 @@ init_defaults :: proc() {
     normal_tex = make_texture_2D({0xffff8080}, {1, 1}, true)
     //pbr_tex = make_texture_2D({0xff00ffff}, {1, 1}, true)
     pbr_tex = make_texture_2D({0xffffffff}, {1, 1}, true)
+    white_cubemap = make_texture_array({{0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}}, 1, true)
+    black_cubemap = make_texture_array({{0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}}, 1, true)
+    trans_cubemap = make_texture_array({{0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}}, 1, true)
     quad_mesh = make_mesh([]Vertex{
         {position={-0.5, +0.5, 0.0}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
         {position={+0.5, +0.5, 0.0}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
@@ -71,6 +77,9 @@ delete_defaults :: proc() {
     delete_texture(trans_tex)
     delete_texture(normal_tex)
     delete_texture(pbr_tex)
+    delete_texture(white_cubemap)
+    delete_texture(black_cubemap)
+    delete_texture(trans_cubemap)
     delete_mesh(quad_mesh)
     delete_mesh(cube_mesh)
 }

@@ -222,6 +222,10 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         entryCount = len(camera_layout_entries),
         entries = raw_data(camera_layout_entries),
     })
+    camera_bg_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
+        entryCount = len(camera_bg_layout_entries),
+        entries = raw_data(camera_bg_layout_entries),
+    })
     material_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(material_layout_entries),
         entries = raw_data(material_layout_entries),
@@ -436,16 +440,10 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     })
 
     log.debug("creating camera fill pipeline...")
-    camera_fill_layout_entries := []wgpu.BindGroupLayoutEntry{
-        wgpu.BindGroupLayoutEntry{
-            binding = 0,
-            visibility = {.Fragment},
-            buffer = {type = .Uniform}
-        }
-    }
+    camera_fill_layouts := []wgpu.BindGroupLayout{camera_layout, camera_bg_layout}
     ren.camera_fill_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
-        bindGroupLayoutCount = 1,
-        bindGroupLayouts = &camera_layout,
+        bindGroupLayoutCount = len(camera_fill_layouts),
+        bindGroupLayouts = raw_data(camera_fill_layouts),
     })
     ren.camera_fill_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         label = "camera_fill",
@@ -1221,6 +1219,7 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
         camera := cameras[i]
         if !camera.fill do continue
         bind_camera(camera_fill_pass, 0, camera)
+        bind_camera_bg(camera_fill_pass, 1, camera)
         //wgpu.RenderPassEncoderSetBindGroup(camera_fill_pass, 0, camera.bind_group)
         //x, y, w, h := expand_values(camera.viewport)
         //wgpu.RenderPassEncoderSetViewport(camera_fill_pass, x, y, w, h, 0, 1)

@@ -2,6 +2,7 @@ struct Camera {
     view: mat4x4<f32>,
     inv_view: mat4x4<f32>,
     projection: mat4x4<f32>,
+    inv_viewproj: mat4x4<f32>,
     color: vec4<f32>, //rgb + exposure
     fog_distance: vec2<f32>, //fog onset + render distance
 }
@@ -441,12 +442,14 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
             let v_world = normalize((camera.inv_view * vec4<f32>(v, 0.0)).xyz);
             let r = reflect(-v_world, n_world);
             let box = environment_probe_boxes[in.indices[1]];
-            let r_env = box_project(r, p_world, box);
+            //need to flip Y because cubemaps were captured with negative-y-up
+            let r_env = box_project(r, p_world, box) * vec3<f32>(1.0, -1.0, 1.0);
+            let n_env = n_world * vec3<f32>(1.0, -1.0, 1.0);
 
             let max_mip = f32(textureNumLevels(environment_probes) - 1);
 
             let env = textureSampleLevel(environment_probes, environment_probe_sampler, r_env, in.indices[1], roughness * max_mip);
-            let ambient = textureSampleLevel(environment_probes, environment_probe_sampler, n_world, in.indices[1], max_mip);
+            let ambient = textureSampleLevel(environment_probes, environment_probe_sampler, n_env, in.indices[1], max_mip);
             light += calculate_environment_pbr(light_input, env.rgb, ambient.rgb);
         } else {
             light += calculate_environment_pbr(light_input, vec3<f32>(0.0), vec3<f32>(0.03));

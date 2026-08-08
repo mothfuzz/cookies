@@ -27,10 +27,22 @@ light_trans: transform.Transform
 
 env: graphics.Environment_Probe
 
+skybox: graphics.Texture
+
 init :: proc() {
     window.set_size(800, 800)
 
+    skybox = graphics.make_cubemap_from_images(
+        #load("../resources/skybox/px.jpg"),
+        #load("../resources/skybox/nx.jpg"),
+        #load("../resources/skybox/py.jpg"),
+        #load("../resources/skybox/ny.jpg"),
+        #load("../resources/skybox/pz.jpg"),
+        #load("../resources/skybox/nz.jpg"),
+    )
+
     cam = graphics.make_camera()
+    graphics.set_skybox(&cam, skybox)
     cam_trans = transform.make({translation={0, 0.5, 1}})
 
     quad = graphics.make_mesh([]graphics.Vertex{
@@ -73,7 +85,8 @@ init :: proc() {
     light = graphics.make_directional_light({0, -0.6, 0.4}, {0.4, 0.5, 1.0, 4})
     light_trans = transform.make()
 
-    env = graphics.make_environment_probe({0, 0.2, 0}, {1, 1, 1})
+    env = graphics.make_environment_probe({0, 0.2, 0}, 1)
+    graphics.set_skybox(&env.camera, skybox)
 }
 
 tick :: proc() {
@@ -124,6 +137,7 @@ quit :: proc() {
     graphics.delete_mesh(wall)
     graphics.delete_scene(teapot)
     graphics.delete_environment_probe(env)
+    graphics.delete_texture(skybox)
 }
 
 main :: proc() {

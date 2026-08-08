@@ -154,6 +154,51 @@ make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (t
     return
 }
 
+make_texture_array :: proc(input: [][]u32, size: [2]uint, cubemap: bool = false, generate_mips: bool = false) -> (tex: Texture) {
+    tex.image = wgpu.DeviceCreateTexture(ren.device, &{
+        usage = {.TextureBinding, .CopyDst},
+        dimension = ._2D,
+        size = {
+            width = u32(size.x),
+            height = u32(size.y),
+            depthOrArrayLayers = u32(len(input)),
+        },
+        format = .RGBA8UnormSrgb,
+        mipLevelCount = 1, //for now
+        sampleCount = 1,
+    })
+    for layer, i in input {
+        wgpu.QueueWriteTexture(ren.queue, &{texture = tex.image, mipLevel = 0, origin = {z = u32(i)}},
+                                raw_data(layer),
+                                len(layer)*size_of(u32),
+                                &{//layout
+                                    bytesPerRow = u32(size.x*size_of(u32)),
+                                    rowsPerImage = u32(size.y),
+                                },
+                                &{//writeSize
+                                    width = u32(size.x),
+                                    height = u32(size.y),
+                                    depthOrArrayLayers=1,
+                                },
+                            )
+        
+    }
+    dimension := wgpu.TextureViewDimension._2DArray
+    if cubemap == true {
+        if len(input) == 6 {
+            dimension = .Cube
+        } else {
+            dimension = .CubeArray
+        }
+    }
+    tex.view = wgpu.TextureCreateView(tex.image, &{
+        dimension = dimension,
+        arrayLayerCount = u32(len(input)),
+        mipLevelCount = 1, //for now
+    })
+    return
+}
+
 delete_texture :: proc(tex: Texture) {
     wgpu.TextureRelease(tex.image)
     wgpu.TextureViewRelease(tex.view)
@@ -194,6 +239,36 @@ make_texture_from_image :: proc(img: []byte, linear: bool = false) -> (tex: Text
     tex = make_texture_2D(img_u32, {x, y}, linear)
     delete(img_u32)
     return
+}
+
+make_texture_array_from_images :: proc(imgs: [][]byte, cubemap: bool = false, generate_mips: bool = false) -> (tex: Texture) {
+    images := make([][]u32, len(imgs))
+    defer {
+        for image in images {
+            delete(image)
+        }
+        delete(images)
+    }
+    res: [2]uint
+    for img, i in imgs {
+        img_u32, x, y := load_data_2d(img)
+        if res == 0 {
+            res.x = x
+            res.y = y
+        } else {
+            if res != {x, y} {
+                log.panicf("subsequent images not same resolution:", res, "vs", [2]uint{x, y})
+            }
+        }
+        images[i] = img_u32
+    }
+    tex = make_texture_array(images, res, cubemap, generate_mips)
+    return
+}
+
+make_cubemap_from_images :: proc(px, nx, py, ny, pz, nz: []byte, generate_mips: bool = false) -> (tex: Texture) {
+    imgs := [6][]byte{px, nx, py, ny, pz, nz}
+    return make_texture_array_from_images(imgs[:], true, generate_mips)
 }
 
 make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = nil, metallic: []byte = nil) -> (tex: Texture) {
@@ -262,15 +337,15 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
 }
 
 cubemap_directions :: proc() -> (directions: [6][2][3]f32) {
-    //+X, -X, +Y, -Y, +Z, -Z
-    //forward, up
+    // +X, -X, +Y, -Y, +Z, -Z - forward, up
+    //need to use -Y-up here due to cubemap face conventions
     return {
-        {{+1, 0, 0}, {0, +1, 0}},
-        {{-1, 0, 0}, {0, +1, 0}},
+        {{+1, 0, 0}, {0, -1, 0}},
+        {{-1, 0, 0}, {0, -1, 0}},
         {{0, +1, 0}, {0, 0, +1}},
         {{0, -1, 0}, {0, 0, -1}},
-        {{0, 0, +1}, {0, +1, 0}},
-        {{0, 0, -1}, {0, +1, 0}},
+        {{0, 0, +1}, {0, -1, 0}},
+        {{0, 0, -1}, {0, -1, 0}},
     }
 }
 

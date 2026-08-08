@@ -5,18 +5,38 @@ import "core:math/linalg"
 import "base:runtime"
 
 camera_layout_entries :: []wgpu.BindGroupLayoutEntry{
-    wgpu.BindGroupLayoutEntry{
+    {
         binding = 0,
         visibility = {.Vertex, .Fragment},
         buffer = {type = .Uniform, hasDynamicOffset = true}
     },
 }
 camera_layout: wgpu.BindGroupLayout
+camera_bg_layout_entries :: []wgpu.BindGroupLayoutEntry{
+    {
+        binding = 0,
+        visibility = {.Fragment},
+        sampler = {type = .Filtering},
+    },
+    {
+        binding = 1,
+        visibility = {.Fragment},
+        texture = {sampleType = .Float, viewDimension = .Cube},
+    },
+    {
+        binding = 2,
+        visibility = {.Fragment},
+        texture = {sampleType = .Float, viewDimension = ._2D},
+    },
+}
+camera_bg_layout: wgpu.BindGroupLayout
+bg_sampler: wgpu.Sampler
 
 Camera_Uniforms :: struct {
     view: matrix[4,4]f32,
     inv_view: matrix[4,4]f32,
     projection: matrix[4,4]f32,
+    inv_viewproj: matrix[4,4]f32,
     color: [4]f32,
     fog_distance: [2]f32,
 }
@@ -31,14 +51,16 @@ Camera_View :: struct {
 //everythang needed to render (to) a camera...
 Camera_Draw :: struct {
     using camera_view: Camera_View,
-    //bind_group: wgpu.BindGroup,
+    bg_bind_group: wgpu.BindGroup,
     viewport: [4]f32,
     fill: bool,
 }
 
 Camera :: struct {
     buffer: wgpu.Buffer,
-    bind_group: wgpu.BindGroup,
+    bg_bind_group: wgpu.BindGroup,
+    bg_image: wgpu.TextureView,
+    bg_skybox: wgpu.TextureView,
     translation: [3]f32,
     rotation: quaternion128,
     viewport: [4]f32, //xywh
@@ -99,6 +121,35 @@ set_layer_mask :: proc(cam: ^Camera, layer_mask: Layer_Mask) {
     cam.layer_mask = layer_mask
 }
 
+@(export)
+set_background_image :: proc(cam: ^Camera, tex: Texture) {
+    cam.bg_image = tex.view
+    rebind_bg(cam)
+}
+
+@(export)
+set_skybox :: proc(cam: ^Camera, tex: Texture) {
+    cam.bg_skybox = tex.view
+    rebind_bg(cam)
+}
+
+@(private)
+rebind_bg :: proc(cam: ^Camera) {
+    if cam.bg_bind_group != nil {
+        wgpu.BindGroupRelease(cam.bg_bind_group)
+    }
+    entries := []wgpu.BindGroupEntry{
+        {binding = 0, sampler = bg_sampler},
+        {binding = 1, textureView = cam.bg_skybox},
+        {binding = 2, textureView = cam.bg_image},
+    }
+    cam.bg_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+        layout = camera_bg_layout,
+        entries = raw_data(entries),
+        entryCount = len(entries),
+    }) 
+}
+
 /* TODO:
 when using absolute cameras with w/h != resolution, use upscaling/downscaling & letterboxing/pillarboxing
 render to HDR (i.e. floating point) target so you can do post-processing
@@ -112,6 +163,12 @@ make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = 0
     cam.fill = fill
     cam.color.a = 1.0
     cam.layer_mask = layers
+    if bg_sampler == nil {
+        bg_sampler = wgpu.DeviceCreateSampler(ren.device, &{minFilter = .Linear, magFilter = .Linear, mipmapFilter=.Nearest, maxAnisotropy=1})
+    }
+    cam.bg_skybox = trans_cubemap.view
+    cam.bg_image = trans_tex.view
+    rebind_bg(&cam)
     return
 }
 
@@ -168,6 +225,8 @@ calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Tar
     draw.fog_distance = {fog_onset, far}
     //wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &draw.uniforms, size_of(Camera_Uniforms))
     draw.viewproj = draw.projection * draw.view
+    draw.inv_viewproj = linalg.inverse(draw.viewproj)
+    draw.bg_bind_group = cam.bg_bind_group
     return
 }
 
@@ -195,6 +254,8 @@ realloc_camera_buffer :: proc() {
     if cam_buffer.bind_group != nil do wgpu.BindGroupRelease(cam_buffer.bind_group)
     bindings := []wgpu.BindGroupEntry{
         {binding = 0, buffer = cam_buffer.buffer, size = u64(cam_buffer.stride)},
+        //{binding = 1, textureView = skyboxes.view},
+        //{binding = 2, sampler = skyboxes_sampler},
     }
     cam_buffer.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
         layout = camera_layout,
@@ -238,6 +299,10 @@ bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera_
     wgpu.RenderPassEncoderSetViewport(render_pass, x, y, w, h, 0, 1)
     wgpu.RenderPassEncoderSetScissorRect(render_pass, u32(x), u32(y), u32(w), u32(h))
     bind_camera_uniforms(render_pass, slot, cam.buffer_index)
+}
+
+bind_camera_bg :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera_Draw) {
+    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, cam.bg_bind_group)
 }
 
 /*
