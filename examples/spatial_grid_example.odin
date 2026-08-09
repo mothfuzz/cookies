@@ -28,11 +28,11 @@ guy_mat: graphics.Material
 cam: graphics.Camera
 
 make_guy :: proc() -> (guy: TheGuy) {
-    guy.trans = transform.ORIGIN
+    guy.trans = transform.make()
+    trans := transform.write(guy.trans)
     //clustered around the middle of the screen
-    guy.trans.position.x = (rand.float32() - 0.5) * Screen_Width / 2
-    guy.trans.position.y = (rand.float32() - 0.5) * Screen_Height / 2
-    transform.reset(&guy.trans)
+    trans.translation.x = (rand.float32() - 0.5) * Screen_Width / 2
+    trans.translation.y = (rand.float32() - 0.5) * Screen_Height / 2
     guy.hitbox = {{-16, -16, -16}, {16, 16, 16}}
     return
 }
@@ -47,8 +47,7 @@ init :: proc() {
 
     cam = graphics.make_camera({0, 0, Screen_Width, Screen_Height})
     graphics.look_at(&cam, {0, 0, graphics.z_2d(cam)}, {0, 0, 0})
-
-    graphics.set_background_color({0, 0, 1})
+    graphics.set_background_color(&cam, {0, 0, 1})
 
     guy_tex = graphics.make_texture_from_image(#load("frasier-32.png"))
     guy_mat = graphics.make_material(base_color = guy_tex)
@@ -68,14 +67,14 @@ cleanup :: proc() {
     
     graphics.delete_material(guy_mat)
     graphics.delete_texture(guy_tex)
-    graphics.delete_camera(cam)
 }
 
 update_guys :: proc() {
     it := handle_map.iterator_make(&guys)
     for guy, handle in handle_map.iterate(&it) {
-        transform.rotatez(&guy.trans, 0.005 * math.TAU)
-        spatial.update(&guy_grid, handle, transform.compute(&guy.trans))
+        trans := transform.write(guy.trans)
+        transform.rotatez(trans, 0.005 * math.TAU)
+        spatial.update(&guy_grid, handle, transform.world(guy.trans))
         guy.colliding = false
     }
 
@@ -100,18 +99,16 @@ calculate_collisions :: proc() {
 }
 
 draw_guys :: proc(alpha, delta: f64) {
-    f := graphics.Frame{}
-    graphics.draw_camera(&f, &cam, alpha)
+    graphics.draw_camera(cam)
     it := handle_map.iterator_make(&guys)
     for guy, handle in handle_map.iterate(&it) {
-        trans := transform.smooth(&guy.trans, alpha)
+        trans := transform.world(guy.trans, alpha)
         hitbox := spatial.transform(guy.hitbox, trans)
         position := (hitbox.min + hitbox.max)/2
         scale := hitbox.max - hitbox.min
-        graphics.draw_sprite(&f, guy_mat, trans)
+        graphics.draw_sprite(guy_mat, trans)
         graphics.ui_draw_rect({position.x, position.y, scale.x, scale.y}, guy.colliding?{0,1,0,0.5}:{1,0,0,0.5})
     }
-    graphics.render_frame(f)
 }
 
 main :: proc() {

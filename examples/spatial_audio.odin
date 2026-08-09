@@ -9,10 +9,8 @@ import "core:math/linalg"
 import "cookies:audio"
 import "cookies:resources"
 
-tree: transform.Tree
-
 cam: graphics.Camera
-cam_trans: transform.Node
+cam_trans: transform.Transform
 cam_angle := f32(0)
 
 quad: graphics.Mesh
@@ -22,7 +20,6 @@ quad_mat: graphics.Material
 spot_light: graphics.Spot_Light
 
 maxwell: graphics.Scene
-maxwell_trans: transform.Node
 
 the_power_snd: audio.Sound
 the_power: audio.Playing_Sound
@@ -30,10 +27,8 @@ the_power: audio.Playing_Sound
 init :: proc() {
     window.set_size(800, 800)
 
-    tree = transform.make_tree()
-
     cam = graphics.make_camera()
-    cam_trans = transform.create_node(&tree, {translation={0, 0.25, 1}})
+    cam_trans = transform.make({translation={0, 0.25, 1}})
 
     quad = graphics.make_mesh([]graphics.Vertex{
         {position={-0.5, 0.0, -0.5}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
@@ -55,9 +50,8 @@ init :: proc() {
     resources.preload("textures/dingus_baseColor.jpeg", #load("../resources/maxwell/textures/dingus_baseColor.jpeg"))
     resources.preload("textures/whiskers_baseColor.png", #load("../resources/maxwell/textures/whiskers_baseColor.png"))
     resources.preload("scene.bin", #load("../resources/maxwell/scene.bin"))
-    maxwell = graphics.make_scene_from_file("scene.gltf", #load("../resources/maxwell/scene.gltf"), &tree)
-    maxwell_trans = transform.create_node(&tree, {scale=0.01})
-    graphics.link_scene_transform(&maxwell, maxwell_trans)
+    maxwell = graphics.make_scene_from_file("scene.gltf", #load("../resources/maxwell/scene.gltf"))
+    transform.scale(maxwell.root, 0.01)
 
     the_power_snd = audio.make_sound_from_file(#load("../resources/the_power.mp3"))
     the_power = audio.play_sound(the_power_snd, true)
@@ -68,7 +62,7 @@ tick :: proc() {
         window.close()
     }
 
-    cam_trans := transform.write(&tree, cam_trans)
+    cam_trans := transform.write(cam_trans)
     cam_pos := &cam_trans.translation
 
     s := linalg.sin(cam_angle)
@@ -104,7 +98,7 @@ tick :: proc() {
 
     @static counter: f32 = 0
     counter += 0.01
-    maxwell_trans := transform.write(&tree, maxwell_trans)
+    maxwell_trans := transform.write(maxwell.root)
     maxwell_trans.translation = {0, 0.1 + 0.05 * linalg.sin(counter), 0}
     transform.rotatey(maxwell_trans, 0.02)
     audio.set_sound_position(&the_power, maxwell_trans.translation)
@@ -112,7 +106,7 @@ tick :: proc() {
 
 draw :: proc(alpha, delta: f64) {
 
-    graphics.draw_camera(cam, transform.get_world_smooth(&tree, cam_trans, alpha))
+    graphics.draw_camera(cam, transform.world(cam_trans, alpha))
     graphics.draw_mesh(quad, quad_mat)
 
     graphics.draw_spot_light(spot_light)
@@ -121,16 +115,12 @@ draw :: proc(alpha, delta: f64) {
 }
 
 quit :: proc() {
-    graphics.delete_camera(cam)
     graphics.delete_material(quad_mat)
     graphics.delete_texture(quad_tex)
     graphics.delete_mesh(quad)
-    graphics.delete_spot_light(spot_light)
     graphics.delete_scene(maxwell)
 
     audio.delete_sound(the_power_snd)
-
-    transform.delete_tree(&tree)
 }
 
 main :: proc() {

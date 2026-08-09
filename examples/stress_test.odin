@@ -26,14 +26,13 @@ Width :: 1600
 Height :: 900
 
 cam: graphics.Camera
-tree: transform.Tree
 
 light: graphics.Directional_Light
 
 font: graphics.Font
 
 Cube :: struct {
-    trans: transform.Node,
+    trans: transform.Transform,
 }
 
 Cube_Draw :: struct {
@@ -54,12 +53,11 @@ cubes: [100000]Cube
 
 init :: proc() {
     window.set_size(Width, Height)
-    tree = transform.make_tree()
     for &cube in cubes {
         x := f32(rand.int_range(-Width/2, Width/2))
         y := f32(rand.int_range(-Height/2, Height/2))
         rot := rand_quat()
-        cube.trans = transform.create_node(&tree, {translation={x, y, 0}, rotation=rot, scale=3})
+        cube.trans = transform.make({translation={x, y, 0}, rotation=rot, scale=3})
     }
     resources.load_all(&cubes_draw)
 
@@ -75,7 +73,7 @@ init :: proc() {
 tick :: proc() {
     //transform cubes
     for &cube in cubes {
-        trans := transform.write(&tree, cube.trans)
+        trans := transform.write(cube.trans)
         transform.rotatex(trans, 0.01)
         transform.rotatey(trans, 0.01)
         transform.rotatez(trans, 0.01)
@@ -86,14 +84,13 @@ draw :: proc(alpha, delta: f64) {
     graphics.draw_camera(cam)
     graphics.draw_directional_light(light)
     for &cube in cubes {
-        graphics.draw_mesh(cubes_draw.mesh, cubes_draw.material, transform.get_world_smooth(&tree, cube.trans, alpha))
+        graphics.draw_mesh(cubes_draw.mesh, cubes_draw.material, transform.world(cube.trans, alpha))
     }
     fps := fmt.tprintf("fps: %f", 1.0/delta)
     graphics.ui_draw_text(fps, font, {-Width/2, +Height/2}, {1, 1, 1, 1})
 }
 
 quit :: proc() {
-    transform.delete_tree(&tree)
     resources.unload_all(&cubes_draw)
     graphics.delete_font(font)
 }

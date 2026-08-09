@@ -11,9 +11,8 @@ Sprites_Example :: struct {
     frasier_tex: graphics.Texture,
     frasier_mat: graphics.Material,
     camera: graphics.Camera,
-    tree: transform.Tree,
-    frasier_trans: transform.Node,
-    camera_trans: transform.Node,
+    frasier_trans: transform.Transform,
+    camera_trans: transform.Transform,
     frasier_velocity: f32,
 }
 
@@ -26,12 +25,11 @@ init :: proc(s: ^Sprites_Example) {
     s.camera = graphics.make_camera()
     graphics.set_background_color(&s.camera, {0.5, 0.2, 0.8})
 
-    s.tree = transform.make_tree()
-    s.frasier_trans = transform.create_node(&s.tree)
-    s.camera_trans = transform.create_node(&s.tree)
+    s.frasier_trans = transform.make()
+    s.camera_trans = transform.make()
 
     //2D camera looking straight down
-    camera_trans := transform.write(&s.tree, s.camera_trans)
+    camera_trans := transform.write(s.camera_trans)
     camera_trans.translation = {0, 0, graphics.z_2d(s.camera)}
     transform.look_at(camera_trans, {0, 0, 0})
 }
@@ -52,7 +50,7 @@ tick :: proc(s: ^Sprites_Example) {
         s.frasier_velocity = 0
     }
 
-    frasier_trans := transform.write(&s.tree, s.frasier_trans)
+    frasier_trans := transform.write(s.frasier_trans)
     transform.rotate(frasier_trans, {0, 0, s.frasier_velocity})
 
     if input.key_down(.Key_Up) {
@@ -60,7 +58,7 @@ tick :: proc(s: ^Sprites_Example) {
         frasier_trans.rotation = 1
     }
 
-    camera_pos := &transform.write(&s.tree, s.camera_trans).translation
+    camera_pos := &transform.write(s.camera_trans).translation
     if input.key_down(.Key_W) {
         camera_pos.y += 4
     }
@@ -76,14 +74,13 @@ tick :: proc(s: ^Sprites_Example) {
 }
 
 draw :: proc(s: ^Sprites_Example, alpha, delta: f64) {
-    graphics.draw_camera(s.camera, transform.get_world_smooth(&s.tree, s.camera_trans, alpha))
-    graphics.draw_sprite(s.frasier_mat, transform.get_world_smooth(&s.tree, s.frasier_trans, alpha)) //draw a single frasier in the center of the screen
+    graphics.draw_camera(s.camera, transform.world(s.camera_trans, alpha))
+    graphics.draw_sprite(s.frasier_mat, transform.world(s.frasier_trans, alpha)) //draw a single frasier in the center of the screen
 }
 
 quit :: proc(s: ^Sprites_Example) {
     graphics.delete_material(s.frasier_mat)
     graphics.delete_texture(s.frasier_tex)
-    graphics.delete_camera(s.camera)
 }
 
 main :: proc() {

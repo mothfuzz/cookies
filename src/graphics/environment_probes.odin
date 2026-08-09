@@ -85,6 +85,13 @@ delete_probe_capture :: proc() {
     delete(cubemaps_boxes)
     wgpu.BufferRelease(cubemaps_buffer)
     delete(cubemaps_free)
+    delete(capture_states)
+    for mip_group in cubemaps_mipmappers {
+        for mip in mip_group {
+            delete_mipmapper(mip)
+        }
+    }
+    delete(cubemaps_mipmappers)
 }
 
 make_cubemaps_mipmappers :: proc(new_size: int) {
