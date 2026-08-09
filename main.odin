@@ -7,13 +7,14 @@ package main
 import "cookies:engine"
 import "cookies:window"
 import "cookies:input"
-import "cookies:scene"
+import "cookies:actors"
 import "cookies:graphics"
 import "cookies:transform"
+import "cookies:resources/file_map"
 import "core:fmt"
 import "core:math"
 
-main_scene: scene.Scene = {name="Eve"}
+main_scene: actors.Stage = {name="Eve"}
 triangle: graphics.Mesh
 quad: graphics.Mesh
 tex: graphics.Texture
@@ -21,9 +22,9 @@ tex2: graphics.Texture
 mat: graphics.Material
 mat2: graphics.Material
 text_mat: graphics.Material
-triangle_trans := transform.ORIGIN
-quad_trans := transform.ORIGIN
-floor_trans := transform.ORIGIN
+triangle_trans: transform.Transform
+quad_trans: transform.Transform
+floor_trans: transform.Transform
 cam: graphics.Camera
 cam2: graphics.Camera
 unifont: graphics.Font
@@ -34,14 +35,11 @@ spot_light: graphics.Spot_Light
 
 emantaller: graphics.Scene
 cheese1: graphics.Scene
-cheese1_trans := transform.ORIGIN
 cheese2: graphics.Scene
-cheese2_trans := transform.ORIGIN
-cheese2_anim: graphics.Animation_State
+cheese2_anim: graphics.Animation_Player
 
 brainstem: graphics.Scene
-brainstem_trans := transform.ORIGIN
-brainstem_anim: graphics.Animation_State
+brainstem_anim: graphics.Animation_Player
 
 brick_color: graphics.Texture
 brick_norm: graphics.Texture
@@ -54,6 +52,10 @@ metal_pbr: graphics.Texture
 metal_mat: graphics.Material
 
 TestActor :: struct {
+    using actor: actors.Actor,
+    init: proc(^TestActor),
+    tick: proc(^TestActor),
+    kill: proc(^TestActor),
     i: i32,
     f: f32,
 }
@@ -62,29 +64,26 @@ MyEvent :: struct {
     f: f32,
 }
 
-my_event_handler :: proc(a: ^scene.Actor, e: ^scene.Event) {
-    self := (^TestActor)(a.data)
-    event := (^MyEvent)(e.data)
-    fmt.println("actor", a.id, "got a float:", event.f)
+my_event_handler :: proc(a: ^TestActor, e: ^MyEvent) {
+    fmt.println("actor", a.handle, "got a float:", e.f)
 }
 
-test_tick :: proc(a: ^scene.Actor) {
-    self := (^TestActor)(a.data)
+test_tick :: proc(a: ^TestActor) {
     if input.key_pressed(.Key_K) {
-        scene.kill(a.scene, a.id)
+        actors.kill(&main_scene, a)
         return
     }
     if input.key_pressed(.Key_E) {
-        scene.send(a.scene, 1, MyEvent{3.14})
+        actors.send(&main_scene, a, MyEvent{3.14})
     }
 }
 
-test_init :: proc(a: ^scene.Actor) {
-    fmt.println("hi! my name is", a.name, "and I belong to", a.scene.name)
-    scene.subscribe(a.scene, a.id, MyEvent, my_event_handler)
+test_init :: proc(a: ^TestActor) {
+    fmt.println("hi! my name is", a.name, "and I belong to", main_scene.name)
+    actors.subscribe(&main_scene, a, my_event_handler)
 }
 
-test_kill :: proc(a: ^scene.Actor) {
+test_kill :: proc(a: ^TestActor) {
     fmt.println("I was killed!!")
 }
 
@@ -93,12 +92,8 @@ screen_size: [2]f32 = {640, 400}
 init :: proc() {
     window.set_size(uint(screen_size.x), uint(screen_size.y))
 
-    graphics.set_background_color({0.8, 0.4, 0.6})
-    graphics.set_render_distance(2048.0+1024.0)
-    graphics.set_fog_distance(2048.0)
-
     for i := 0; i < 16; i += 1 {
-        a := scene.spawn(&main_scene, TestActor{i=3, f=4}, {init=test_init, tick=test_tick, kill=test_kill}, "Joe")
+        a := actors.spawn(&main_scene, TestActor{i=3, f=4, init=test_init, tick=test_tick, kill=test_kill}, "Joe")
         fmt.println(a)
     }
 
@@ -129,50 +124,56 @@ init :: proc() {
     tex2 = graphics.make_texture_from_image(#load("resources/frasier.png"))
     mat2 = graphics.make_material(base_color=tex2)
 
-    transform.set_scale(&triangle_trans, 200)
+    triangle_trans = transform.make({scale = 200})
 
-    transform.set_position(&quad_trans, {0, f32(100+128/2)/200, 0})
-    transform.set_scale(&quad_trans, 1.0/200)
+    quad_trans = transform.make({translation = {0, f32(100+128/2)/200, 0}, scale = 1.0/200})
 
-    transform.set_position(&floor_trans, {0, -320, -320})
-    transform.set_scale(&floor_trans, 640*4)
-    transform.rotatex(&floor_trans, -0.5 * math.PI)
+    floor_trans = transform.make({
+        translation = {0, -320, -320},
+        rotation = transform.rotation_from_angles({-0.5 * math.PI, 0, 0}),
+        scale = 640*4,
+    })
 
-    transform.link(&triangle_trans, &quad_trans)
+    transform.link(triangle_trans, quad_trans)
 
     cam = graphics.make_camera({0, 0, screen_size.x/2, screen_size.y})
     cam2 = graphics.make_camera({screen_size.x/2 - 1, 0, screen_size.x/2, screen_size.y})
     //cam = graphics.make_camera({0, 0, screen_size.x, screen_size.y})
     //cam2 = graphics.make_camera({0, 0, screen_size.x, screen_size.y})
-    graphics.look_at(&cam, {0, 0, 0}, {0, 0, -graphics.z_2d(cam)})
-    graphics.look_at(&cam2, {0, 0, 0}, {0, 0, -graphics.z_2d(cam2)})
+
+    graphics.set_background_color(&cam, {0.8, 0.4, 0.6})
+    graphics.set_draw_distance(&cam, 2048.0+1024.0)
+    graphics.set_fog_onset(&cam, 2048.0)
+    graphics.set_background_color(&cam2, {0.8, 0.4, 0.6})
+    graphics.set_draw_distance(&cam2, 2048.0+1024.0)
+    graphics.set_fog_onset(&cam2, 2048.0)
 
     //fmt.println("loading font...")
     unifont = graphics.make_font_from_file(#load("resources/unifont.otf"), 32)
 
     text_mat = graphics.make_material(unifont.texture, filtering=false)
 
-    graphics.preload("emantaller.png", #load("resources/emantaller.png"))
+    file_map.preload("emantaller.png", #load("resources/emantaller.png"))
     emantaller = graphics.make_scene_from_file("emantaller.gltf", #load("resources/emantaller.gltf"))
     cheese1 = graphics.copy_scene(&emantaller)
-    graphics.link_scene_transform(&cheese1, &cheese1_trans)
-    transform.set_scale(&cheese1_trans, 100)
-    transform.set_position(&cheese1_trans, {0, 0, -100})
+    cheese1_trans := transform.write(cheese1.root)
+    cheese1_trans.scale = 100
+    cheese1_trans.translation = {0, 0, -100}
     cheese2 = graphics.copy_scene(&emantaller)
-    graphics.link_scene_transform(&cheese2, &cheese2_trans)
-    transform.set_scale(&cheese2_trans, 500)
-    transform.set_position(&cheese2_trans, {0, 0, -500})
+    cheese2_trans := transform.write(cheese2.root)
+    cheese2_trans.scale = 500
+    cheese2_trans.translation = {0, 0, -500}
     cheese2_anim = graphics.animate(&cheese2)
     graphics.play(&cheese2_anim, 0, true)
 
-    brainstem = graphics.make_scene_from_file("BrainStem.gltf", #load("resources/BrainStem.gltf"))
-    graphics.link_scene_transform(&brainstem, &brainstem_trans)
-    transform.set_position(&brainstem_trans, {500, 0, 0})
-    transform.set_scale(&brainstem_trans, 500)
+    brainstem = graphics.make_scene_from_file("resources/BrainStem.gltf", #load("resources/BrainStem.gltf"))
+    brainstem_trans := transform.write(brainstem.root)
+    brainstem_trans.translation = {500, 0, 0}
+    brainstem_trans.scale = 500
     brainstem_anim = graphics.animate(&brainstem)
     graphics.play(&brainstem_anim, 0, true)
 
-    my_light = graphics.make_point_light({0, -160, -320}, 600, {1, 1, 0, 1})
+    my_light = graphics.make_point_light({0, -160, -320}, {1, 1, 0, 1}, 600)
     sun_light = graphics.make_directional_light({-0.75, -0.25, 0}, {1, 1, 1, 1})
     spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, math.to_radians_f32(45), math.to_radians_f32(60), {0, 0, 1, 1})
 
@@ -189,8 +190,13 @@ init :: proc() {
     metal_roughness := #load("resources/metal41b/roughness.jpg")
     metal_pbr = graphics.make_pbr_texture_from_images(metallic=metal_metallic, roughness=metal_roughness)
     metal_mat = graphics.make_material(metal_color, metal_norm, metal_pbr)
+
+    cam_trans = transform.make({translation = {0, 0, -graphics.z_2d(cam)}})
+    cam2_trans = transform.make({translation = {0, 0, -graphics.z_2d(cam2)}})
 }
 
+cam_trans: transform.Transform
+cam2_trans: transform.Transform
 camera_pos: [3]f32 = {0, 0, 0}
 camera_angle: f32 = 90*math.PI/180.0
 camera_pitch: f32 = 0
@@ -253,7 +259,7 @@ tick :: proc() {
     if input.mouse_down(.Left) {
         //fmt.println("click!!!", accumulator)
         fmt.println(input.mouse_position())
-        transform.set_position(&triangle_trans, {f32(input.mouse_position().x), f32(input.mouse_position().y), 0})
+        transform.write(triangle_trans).translation = {f32(input.mouse_position().x), f32(input.mouse_position().y), 0}
     }
     if input.mouse_pressed(.Right) {
         fmt.println("right click!!!", accumulator)
@@ -262,21 +268,25 @@ tick :: proc() {
         fmt.println("middle click!!!", accumulator)
     }
     if input.key_pressed(.Key_P) {
-        scene.publish(&main_scene, MyEvent{4.13})
+        actors.publish(&main_scene, MyEvent{4.13})
     }
-    scene.tick(&main_scene)
-    transform.rotatez(&triangle_trans, 0.01)
-    transform.rotatez(&quad_trans, -0.01)
+    actors.tick(&main_scene)
+    transform.rotatez(triangle_trans, 0.01)
+    transform.rotatez(quad_trans, -0.01)
 
     forward := [3]f32{camera_pos.x + math.cos(camera_angle)*graphics.z_2d(cam),
                       camera_pos.y + camera_pitch,
                       camera_pos.z - math.sin(camera_angle)*graphics.z_2d(cam)}
     offset_x := math.sin(camera_angle) * 50
     offset_z := math.cos(camera_angle) * 50
-    graphics.look_to(&cam, {camera_pos.x+offset_x, camera_pos.y, camera_pos.z+offset_z}, forward)
-    graphics.look_to(&cam2, {camera_pos.x-offset_x, camera_pos.y, camera_pos.z-offset_z}, forward)
+    cam_trans := transform.write(cam_trans)
+    cam_trans.translation = {camera_pos.x+offset_x, camera_pos.y, camera_pos.z+offset_z}
+    transform.look_at(cam_trans, forward)
+    cam2_trans := transform.write(cam2_trans)
+    cam2_trans.translation = {camera_pos.x-offset_x, camera_pos.y, camera_pos.z-offset_z}
+    transform.look_at(cam2_trans, forward)
 
-    transform.rotatey(&cheese1_trans, 0.01)
+    transform.rotatey(cheese1.root, 0.01)
 
     if input.key_pressed(.Key_C) {
         graphics.stop(&cheese2_anim, 0, true)
@@ -288,23 +298,21 @@ tick :: proc() {
 }
 
 draw :: proc(a: f64, dt: f64) {
-    f := graphics.Frame{}
-    
     screen_size.x = f32(window.get_size().x)
     screen_size.y = f32(window.get_size().y)
     graphics.set_viewport(&cam, {0, 0, screen_size.x/2, screen_size.y})
     graphics.set_viewport(&cam2, {screen_size.x/2 - 1, 0, screen_size.x/2, screen_size.y})
 
-    graphics.draw_camera(&f, &cam, a)
-    graphics.draw_camera(&f, &cam2, a)
+    graphics.draw_camera(cam, transform.world(cam_trans, a))
+    graphics.draw_camera(cam2, transform.world(cam2_trans, a))
 
-    scene.draw(&main_scene, a)
-    graphics.draw_mesh(&f, triangle, brick_mat, transform.smooth(&triangle_trans, a))
-    graphics.draw_sprite(&f, mat2, transform.smooth(&quad_trans, a), {64, 64, 128, 128}, {1, 0, 0, 0.2}) //frasier
-    graphics.draw_mesh(&f, quad, metal_mat, transform.compute(&floor_trans), base_color_tint={1,1,1,0.9})
-    plus_one := floor_trans
-    transform.translate(&plus_one, {0, 2, 0})
-    graphics.draw_mesh(&f, quad, text_mat, transform.compute(&plus_one), clip_rect=graphics.get_char(unifont, '@'), base_color_tint={1, 0, 1, 1})
+    actors.draw(&main_scene, a, dt)
+    graphics.draw_mesh(triangle, brick_mat, transform.world(triangle_trans, a))
+    graphics.draw_sprite(mat2, transform.world(quad_trans, a), {64, 64, 128, 128}, {1, 0, 0, 0.2}) //frasier
+    graphics.draw_mesh(quad, metal_mat, transform.world(floor_trans), base_color_tint={1,1,1,0.9})
+    plus_one := transform.read(floor_trans)
+    plus_one.translation += {0, 1, 0}
+    //graphics.draw_mesh(quad, text_mat, transform.compute(plus_one), clip_rect=graphics.get_char(unifont, '@'), base_color_tint={1, 0, 1, 1})
 
     offset: [2]f32
     offset.x = -screen_size.x/2
@@ -314,31 +322,29 @@ draw :: proc(a: f64, dt: f64) {
     graphics.ui_draw_text(str[0:text_counter], unifont, offset+{1, -1}, {1, 1, 1, 1})
 
     text_trans := transform.ORIGIN
-    transform.translate(&text_trans, {-16*3, 0, 1})
-    graphics.draw_text(&f, "Hello!!", unifont, transform.compute(&text_trans), {0, 1, 1, 1})
+    text_trans.translation = {-16*3, 0, 1}
+    graphics.draw_text("Hello!!", unifont, transform.compute(text_trans), {0, 1, 1, 1})
 
-    graphics.draw_scene(&f, cheese1, a, dt)
-    graphics.draw_scene(&f, cheese2, a, dt, &cheese2_anim)
+    graphics.draw_scene(cheese1, a)
+    graphics.progress(&cheese2_anim, dt)
+    graphics.draw_scene(cheese2, a)
 
-    graphics.draw_scene(&f, brainstem, a, dt, &brainstem_anim)
+    graphics.progress(&brainstem_anim, dt)
+    graphics.draw_scene(brainstem, a)
 
-    graphics.draw_point_light(&f, my_light)
-    graphics.draw_directional_light(&f, sun_light)
-    graphics.draw_spot_light(&f, spot_light)
-
-    graphics.render_frame(f)
+    graphics.draw_point_light(my_light)
+    graphics.draw_directional_light(sun_light)
+    graphics.draw_spot_light(spot_light)
 }
 
 kill :: proc() {
-    scene.destroy(&main_scene)
+    actors.delete_stage(&main_scene)
     graphics.delete_mesh(triangle)
     graphics.delete_mesh(quad)
     graphics.delete_material(mat)
     graphics.delete_material(mat2)
     graphics.delete_texture(tex)
     graphics.delete_texture(tex2)
-    graphics.delete_camera(cam)
-    graphics.delete_camera(cam2)
     graphics.delete_font(unifont)
 
     graphics.delete_material(brick_mat)
@@ -353,8 +359,6 @@ kill :: proc() {
 
     graphics.deanimate(brainstem_anim)
     graphics.delete_scene(brainstem)
-    
-    graphics.unload_files()
 }
 
 import "core:mem"
