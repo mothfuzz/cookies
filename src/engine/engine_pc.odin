@@ -52,8 +52,10 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
     audio.init()
     defer audio.quit()
 
-    graphics.init(window.get_wgpu_surface, window.get_size())
+    graphics.init(window.get_wgpu_surface, {window.get_size()})
     defer graphics.quit()
+
+    window.resize_hook = graphics.window_resized
 
     resources.register_loaders()
     defer resources.unregister_loaders()
@@ -75,8 +77,7 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
                 break main_loop
             }
             if e.type == .WINDOW_RESIZED {
-                graphics.configure_surface(window.get_size())
-                graphics.configure_render_targets()
+                window.resize_hook({uint(e.window.data1), uint(e.window.data2)})
             }
             if e.type == .KEY_DOWN {
                 input.keys_pressed[input.sdl2key(e)] = true
@@ -115,9 +116,9 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
                 }
             }
             if e.type == .MOUSE_MOTION {
-                rect := window.get_size()
-                input.current_mouse_position.x = i32(e.motion.x) - i32(rect.x)/2
-                input.current_mouse_position.y = i32(rect.y)/2 - i32(e.motion.y)
+                w, h := window.get_size()
+                input.current_mouse_position.x = i32(e.motion.x) - i32(w)/2
+                input.current_mouse_position.y = i32(h)/2 - i32(e.motion.y)
             }
         }
         now := sdl3.GetTicks()

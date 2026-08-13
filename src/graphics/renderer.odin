@@ -63,9 +63,14 @@ without_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
 }
 
 screen_resolution: [2]uint
+window_resized :: proc(size: [2]uint) {
+    configure_surface(size)
+    configure_render_targets()
+}
 
 tex_format: wgpu.TextureFormat
 view_format: wgpu.TextureFormat
+@(private)
 configure_surface :: proc(size: [2]uint = 0) {
     if size != 0 {
         screen_resolution = size
@@ -107,6 +112,7 @@ configure_surface :: proc(size: [2]uint = 0) {
     wgpu.SurfaceConfigure(ren.surface, &ren.config)
 }
 
+@(private)
 configure_render_targets :: proc() {
     log.debug("creating render targets:", ren.config.width, "x", ren.config.height)
     if ren.msaa_view != nil {

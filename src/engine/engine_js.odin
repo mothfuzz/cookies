@@ -35,8 +35,6 @@ step :: proc(delta_time: f64) -> bool {
         if user_init != nil {
             user_init()
         }
-        graphics.configure_surface(window.get_size())
-        graphics.configure_render_targets()
         initialized = true
         return true
     }
@@ -71,11 +69,15 @@ step :: proc(delta_time: f64) -> bool {
     return true
 }
 
-resize_event :: proc(e: js.Event) {
-    graphics.configure_surface(window.get_size())
-    graphics.configure_render_targets()
+fullscreen_event :: proc(e: js.Event) {
+    context.logger = logger
+    if window.get_fullscreen() {
+        rect := js.get_bounding_client_rect("canvas")
+        window.set_size(uint(rect.width), uint(rect.height))
+    } else {
+        window.set_size(window.previous_resolution.x, window.previous_resolution.y)
+    }
 }
-
 
 boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
 
@@ -87,8 +89,7 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
     user_draw = draw
     user_quit = quit
 
-    js.add_window_event_listener(.Resize, nil, resize_event)
-    //js.add_event_listener("canvas", .Resize, nil, resize_event)
+    js.add_document_event_listener(.Fullscreen_Change, nil, fullscreen_event)
     js.add_event_listener("canvas", .Key_Down, nil, proc(e: js.Event) {
         js.event_prevent_default()
         js.event_stop_propagation()
@@ -111,13 +112,14 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
     })
     js.add_event_listener("canvas", .Mouse_Move, nil, proc(e: js.Event) {
         pos := e.mouse.offset
-        rect := window.get_size()
-        input.current_mouse_position.x = i32(pos.x) - i32(rect.x/2)
-        input.current_mouse_position.y = i32(rect.y/2) - i32(pos.y)
+        w, h := window.get_size()
+        input.current_mouse_position.x = i32(pos.x) - i32(w/2)
+        input.current_mouse_position.y = i32(h/2) - i32(pos.y)
     })
 
     transform.tree_allocator = new(transform.Tree)
     transform.tree_allocator^ = transform.make_tree()
 
-    graphics.init(window.get_wgpu_surface, window.get_size())
+    graphics.init(window.get_wgpu_surface, {window.get_size()})
+    window.resize_hook = graphics.window_resized
 }

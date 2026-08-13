@@ -53,9 +53,25 @@
 
       //windowing helpers
       let window_imports = {
-          set_size: function(width, height) {
-              canvas.width = width;
-              canvas.height = height;
+          canvas_request_fullscreen: function() {
+              canvas.requestFullscreen();
+          },
+          document_exit_fullscreen: function() {
+              document.exitFullscreen();
+          },
+          canvas_is_fullscreen: function() {
+              return document.fullscreenElement === canvas;
+          },
+          canvas_request_pointer_lock: function() {
+              /*canvas.requestPointerLock({
+                  unadjustedMovement: true,
+              });*/
+          },
+          document_exit_pointer_lock: function() {
+              //document.exitPointerLock();             
+          },
+          canvas_is_pointer_lock: function() {
+              return document.pointerLockElement === canvas;
           },
       };
       let audio = new AudioInterface(memory);
@@ -69,7 +85,7 @@
       document.getElementById("run").addEventListener("click", async function() {
           canvas.focus();
           audio.reset();
-          odin.runWasm("spatial_audio.wasm", document.getElementById("console"), js_imports, memory);
+          odin.runWasm("sprites.wasm", document.getElementById("console"), js_imports, memory);
       });
       
     </script>
