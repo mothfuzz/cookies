@@ -62,6 +62,7 @@ smooth :: proc(a, b: TRS, alpha: f64) -> matrix[4,4]f32 {
     return compute(lerp(a, b, alpha))
 }
 
+@(private)
 Transform_Data :: struct {
     handle: Transform,
 
