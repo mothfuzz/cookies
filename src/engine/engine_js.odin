@@ -66,6 +66,7 @@ step :: proc(delta_time: f64) -> bool {
         user_draw(alpha, delta_time)
     }
     graphics.render_frame()
+    free_all(context.temp_allocator)
     return true
 }
 
