@@ -1,8 +1,17 @@
 #+title: Todo
 
 - more window toggles (fullscreen, logical resolution with letterboxing/pillarboxing, vsync options, show/hide cursor, etc)
+  - borderless fullscreen working, now needs separate logical resolution + framebuffer + output pass. Also do HDR/LDR + color grading here, at a later point
+  - cursor lock works on desktop, but needs to be deferred on web somehow
   
-- move collision data the hell out of glTF - expose a format-agnostic Mesh_Data struct returned by import procs that can be queried by the user to populate collision/AI/navmesh structures themselves
+- big collision rewrite (spatial2):
+  - move collision data the hell out of glTF - expose a format-agnostic Mesh_Data struct returned by import procs that can be queried by the user to populate collision/AI/navmesh structures themselves
+  - on that note, separate acceleration structure for Tri_Mesh, expose insert_geometry() or insert_tri_mesh() or something to delineate
+  - implement shape tests for each type in spatial2
+  - implement shape->triangle tests for arbitrary move() colliders
+  - raycasts!!! for each shape
+  - orientation for Boxes, transform into local space for shapes & do AABB test, SAT for OBB vs OBB
+  - implement Convex Hulls, use SAT you already wrote
 
 - clean up ui_draw_* functions to be more architecturally similar to the rest of the renderer (might have to rethink coordinate systems...)
 
@@ -13,18 +22,15 @@
 - gamepad support via SDL's gamepad facilities (possibly need another API for Web, or limit to desktop-only)
 - also on that note, IME input, mouse wheel, etc
 
-- raycasts, raycasts, raycasts.
-- also in general Tri_Mesh and regular colliders are two separate worlds, have a user be able to do spatial.move() using arbitrary colliders, not just sphere-trisoup. Have Tri_Mesh work with the collider procs as well (this is a prerequisite for proper spatial.move anyway).
-- refactor spatial package to have Spatial structures actually own their colliders. Then just pass transforms to update, don't reshape - if you want a new shape you delete/make again
-
 - more simple rendering primitives - lines, line lists, line strips, wireframes, fill-boxes, collider shapes, etc.
 
 - simple non-shadery postprocessing parameters (logical resolution as mentioned, LUTs, exposure/gamma settings)
 - maybe have all these in Screen_Uniforms and separate from Camera_Uniforms
+- this should be done AFTER logical resolution, as it should simply operate on the output buffer
 
 - audio settings (mainly just be able to set volume dynamically)
 
-- some kind of heuristic-based environment probe selection
+- some kind of heuristic-based environment probe selection so that multiple probes work & background probe fallback comes naturally
 - planar reflections using existing environment probe machinery
 
 post-1.0 features:
