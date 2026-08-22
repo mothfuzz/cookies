@@ -582,10 +582,8 @@ quit :: proc() {
 Frame :: struct {
     lights: [dynamic]Light_Draw,
     cameras: [dynamic]Camera_Draw,
-    action: map[Material_Hash]map[Mesh_Hash][dynamic]Mesh_Draw,
+    action: map[Batch_Hash]Mesh_Batch_Draw,
     //resources
-    meshes: map[Mesh_Hash]Mesh,
-    materials: map[Material_Hash]Material,
     render_targets: map[Render_Target_Hash]Render_Target_Draw,
     screen_target: Render_Target_Draw,
     //environment probe stuff
@@ -596,24 +594,26 @@ Frame :: struct {
     scene_extents: [2][3]f32,
 }
 
+Mesh_Batch_Draw :: struct {
+    mesh: Mesh,
+    material: Material,
+    instances: [dynamic]Mesh_Draw,
+}
+
+Batch_Hash :: distinct u64
+batch_hash :: proc(mesh: Mesh_Hash, material: Material_Hash) -> Batch_Hash {
+    //sort order is by highest bits, we want material-outer, mesh-inner
+    return Batch_Hash(u64(material) << 32 | u64(mesh))
+} 
+
 @(private)
 delete_frame :: proc() {
     delete(frame.lights)
     delete(frame.cameras)
-    for material, meshes in frame.action {
-        for mesh, instances in meshes {
-            for instance in instances {
-                if instance.bones != nil {
-                    delete(instance.bones)
-                }
-            }
-            delete(instances)
-        }
-        delete(meshes)
+    for hash, &batch in frame.action {
+        delete(batch.instances)
     }
     delete(frame.action)
-    delete(frame.meshes)
-    delete(frame.materials)
     for _, render_target in frame.render_targets {
         delete(render_target.cameras)
     }
@@ -632,8 +632,6 @@ clear_frame :: proc() {
     clear(&frame.lights)
     clear(&frame.cameras)
     clear_action(&frame)
-    clear(&frame.meshes)
-    clear(&frame.materials)
     for _, render_target in frame.render_targets {
         delete(render_target.cameras)
     }
@@ -739,52 +737,40 @@ draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
                   emissive_tint: [3]f32 = 1,
                   sprite: bool = false, billboard: bool = false,
                   bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
-    //make sure resources are set
-    if !(mesh.hash in frame.meshes) {
-        frame.meshes[mesh.hash] = mesh
-    }
-    if !(material.hash in frame.materials) {
-        frame.materials[material.hash] = material
-    }
 
     //get the batch
     if frame.action == nil {
-        frame.action = make(map[Material_Hash]map[Mesh_Hash][dynamic]Mesh_Draw)
+        frame.action = make(map[Batch_Hash]Mesh_Batch_Draw)
     }
-    if !(material.hash in frame.action) {
-        frame.action[material.hash] = make(map[Mesh_Hash][dynamic]Mesh_Draw)
-    }
-    meshes := &frame.action[material.hash]
-    if !(mesh.hash in meshes) {
-        meshes[mesh.hash] = make([dynamic]Mesh_Draw)
-    }
-    instances := &meshes[mesh.hash]
+    hash := batch_hash(mesh.hash, material.hash)
+    if _, batch, just_inserted, err := map_entry(&frame.action, hash); err == nil {
+        if just_inserted {
+            batch.mesh = mesh
+            batch.material = material
+            batch.instances = make([dynamic]Mesh_Draw)
+        }
 
-    pbr_tint := [4]f32{ambient_tint, roughness_tint, metallic_tint, 1}
-    emissive_tint := [4]f32{emissive_tint.r, emissive_tint.g, emissive_tint.b, 1}
-    dynamic_material := Dynamic_Material{clip_rect, base_color_tint, pbr_tint, emissive_tint}
+        pbr_tint := [4]f32{ambient_tint, roughness_tint, metallic_tint, 1}
+        emissive_tint := [4]f32{emissive_tint.r, emissive_tint.g, emissive_tint.b, 1}
+        dynamic_material := Dynamic_Material{clip_rect, base_color_tint, pbr_tint, emissive_tint}
 
-    bones := bones
-    if bones != nil {
-        //hate this but we gotta
-        owned_bones := make([]matrix[4,4]f32, len(bones))
-        copy(owned_bones, bones)
-        bones = owned_bones
-    }
-    draw := Mesh_Draw{{transform, dynamic_material, 0}, sprite, billboard, bones, {}, 0, 0, layers}
-    calculate_mesh_local(&draw, mesh, material)
-    mini := &frame.scene_extents[0]
-    maxi := &frame.scene_extents[1]
-    for p in draw.bounding_box {
-        if p.x < mini.x do mini.x = p.x
-        if p.y < mini.y do mini.y = p.y
-        if p.z < mini.z do mini.z = p.z
-        if p.x > maxi.x do maxi.x = p.x
-        if p.y > maxi.y do maxi.y = p.y
-        if p.z > maxi.z do maxi.z = p.z
-    }
+        draw := Mesh_Draw{{transform, dynamic_material, 0}, sprite, billboard, bones, {}, 0, 0, layers}
+        calculate_mesh_local(&draw, mesh, material)
+        mini := &frame.scene_extents[0]
+        maxi := &frame.scene_extents[1]
+        for p in draw.bounding_box {
+            if p.x < mini.x do mini.x = p.x
+            if p.y < mini.y do mini.y = p.y
+            if p.z < mini.z do mini.z = p.z
+            if p.x > maxi.x do maxi.x = p.x
+            if p.y > maxi.y do maxi.y = p.y
+            if p.z > maxi.z do maxi.z = p.z
+        }
 
-    append(instances, draw)
+        append(&batch.instances, draw)
+    } else {
+        log.panic("Could not create batch for Mesh/Material:", err)
+    }
 }
 
 //sprites are just special kinds of meshes
@@ -809,27 +795,16 @@ Mesh_Batch :: struct {
 @(private)
 flatten_action :: proc(f: Frame) -> []Mesh_Batch {
     batches := make([dynamic]Mesh_Batch)
-    for material_hash, meshes in f.action {
-        for mesh_hash, instances in meshes {
-            mesh := f.meshes[mesh_hash]
-            material := f.materials[material_hash]
-            append(&batches, Mesh_Batch{mesh, material, instances[:]})
-        }
+    for hash, batch in f.action {
+        append(&batches, Mesh_Batch{batch.mesh, batch.material, batch.instances[:]})
     }
     return batches[:]
 }
 @(private)
 clear_action :: proc(f: ^Frame) {
     if f.action == nil do return
-    for _, &meshes in f.action {
-        for _, &instances in meshes {
-            for instance in instances {
-                if instance.bones != nil {
-                    delete(instance.bones)
-                }
-            }
-            clear(&instances)
-        }
+    for hash, &batch in f.action {
+        clear(&batch.instances)
     }
 }
 
@@ -1138,9 +1113,11 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
     for draw in draws {
         if prev_material == 0 || draw.material.hash != prev_material {
             bind_material(render_pass, 1, draw.material)
+            prev_material = draw.material.hash
         }
         if prev_mesh == 0 || draw.mesh.hash != prev_mesh {
             bind_mesh(render_pass, draw.mesh)
+            prev_mesh = draw.mesh.hash
         }
         draw_mesh_instances(render_pass, draw.mesh, draw.instance_count, draw.instance_buffer_offset)
     }

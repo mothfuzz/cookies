@@ -4,7 +4,9 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "vendor:wgpu"
-import "base:runtime" //for hashing
+//for hashing
+import "core:slice"
+import "core:hash"
 
 Vertex :: struct {
     position: [3]f32,
@@ -21,7 +23,7 @@ Extents :: struct {
     maxi: [3]f32,
 }
 
-Mesh_Hash :: distinct uintptr
+Mesh_Hash :: distinct u32
 
 Mesh_Key :: struct {
     path: cstring,
@@ -124,7 +126,7 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mes
     x, y, z := **(mesh.bounding_box.maxi - mesh.bounding_box.mini)
     mesh.bounding_radius = max(x, y, z)
 
-    mesh.hash = Mesh_Hash(runtime.default_hasher(&mesh, 0, size_of(Mesh)))
+    mesh.hash = Mesh_Hash(hash.fnv32a(slice.bytes_from_ptr(&mesh, size_of(Mesh))))
     return
 }
 

@@ -1,7 +1,8 @@
 package graphics
 
 import "vendor:wgpu"
-import "base:runtime"
+import "core:hash"
+import "core:slice"
 
 material_layout_entries := []wgpu.BindGroupLayoutEntry{
     wgpu.BindGroupLayoutEntry{
@@ -78,7 +79,7 @@ rebuild_material :: proc(mat: ^Material) {
         entries = raw_data(bindings),
     })
     mat.hash = 0 //do not hash hashes
-    mat.hash = Material_Hash(runtime.default_hasher(mat, 0, size_of(Material)))
+    mat.hash = Material_Hash(hash.fnv32a(slice.bytes_from_ptr(mat, size_of(Material))))
 }
 
 make_material :: proc(base_color: Texture=white_tex, normal: Texture=normal_tex, pbr: Texture=pbr_tex, emissive: Texture=black_tex, filtering: bool = true, tiling: [2]bool = false) -> (mat: Material) {
