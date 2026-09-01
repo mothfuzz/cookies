@@ -7,11 +7,11 @@ set /a INITIAL_MEMORY_BYTES=%INITIAL_MEMORY_PAGES% * %PAGE_SIZE%
 set /a MAX_MEMORY_BYTES=%MAX_MEMORY_PAGES% * %PAGE_SIZE%
 
 echo compiling main...
-odin build . -out:bin\cookies.wasm -collection:cookies=src -target:js_wasm32 -extra-linker-flags:"--export-table --import-memory --initial-memory=%INITIAL_MEMORY_BYTES% --max-memory=%MAX_MEMORY_BYTES%"
+odin build . -out:bin\cookies.wasm -o:speed -collection:cookies=src -target:js_wasm32 -extra-linker-flags:"--export-table --import-memory --initial-memory=%INITIAL_MEMORY_BYTES% --max-memory=%MAX_MEMORY_BYTES%"
 
 for %%a in ("examples\*.odin") do (
     echo compiling example: %%a
-    odin build %%a -out:bin\%%~na.wasm -collection:cookies=src -file -target:js_wasm32 -extra-linker-flags:"--export-table --import-memory --initial-memory=%INITIAL_MEMORY_BYTES% --max-memory=%MAX_MEMORY_BYTES%" -o:speed
+    odin build %%a -out:bin\%%~na.wasm -o:speed -collection:cookies=src -file -target:js_wasm32 -extra-linker-flags:"--export-table --import-memory --initial-memory=%INITIAL_MEMORY_BYTES% --max-memory=%MAX_MEMORY_BYTES%" -o:speed
 )
 
 for /f "delims=" %%i in ('odin.exe root') do set "ODIN_ROOT=%%i"

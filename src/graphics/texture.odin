@@ -19,6 +19,7 @@ Texture :: struct {
     //resolve_view: wgpu.TextureView,
     is_trans: bool,
     is_solid: bool,
+    width, height: f32,
 }
 
 make_scaled_image_nearest :: proc(input: []u32, in_size, out_size: [2]uint) -> (output: []u32) {
@@ -151,6 +152,8 @@ make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (t
         mip_size /= 2
     }
     tex.view = wgpu.TextureCreateView(tex.image)
+    tex.width = f32(size.x)
+    tex.height = f32(size.y)
     return
 }
 
@@ -196,6 +199,8 @@ make_texture_array :: proc(input: [][]u32, size: [2]uint, cubemap: bool = false,
         arrayLayerCount = u32(len(input)),
         mipLevelCount = 1, //for now
     })
+    tex.width = f32(size.x)
+    tex.height = f32(size.y)
     return
 }
 
@@ -383,6 +388,8 @@ make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, lay
     })
     tex.is_solid = true //I guess
     tex.is_trans = false
+    tex.width = f32(size.x)
+    tex.height = f32(size.y)
     return
 }
 
@@ -404,5 +411,7 @@ make_render_texture :: proc(size: [2]uint, format: wgpu.TextureFormat, multisamp
     tex.render_view = wgpu.TextureCreateView(tex.image, &{arrayLayerCount=1, mipLevelCount=1})
     tex.is_solid = true //I guess
     tex.is_trans = false
+    tex.width = f32(size.x)
+    tex.height = f32(size.y)
     return
 }

@@ -758,14 +758,18 @@ draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
         calculate_mesh_local(&draw, mesh, material)
         mini := &frame.scene_extents[0]
         maxi := &frame.scene_extents[1]
-        for p in draw.bounding_box {
-            if p.x < mini.x do mini.x = p.x
-            if p.y < mini.y do mini.y = p.y
-            if p.z < mini.z do mini.z = p.z
-            if p.x > maxi.x do maxi.x = p.x
-            if p.y > maxi.y do maxi.y = p.y
-            if p.z > maxi.z do maxi.z = p.z
+        //Arvo's method - convert transformed bounding axes to AABB using absolute values
+        e: [3]f32
+        for a in draw.bounding_axes {
+            e += [3]f32{abs(a.x), abs(a.y), abs(a.z)}
         }
+        extents := [2][3]f32{draw.bounding_center + e, draw.bounding_center - e}
+        mini.x = min(extents[0].x, mini.x)
+        mini.y = min(extents[0].y, mini.y)
+        mini.z = min(extents[0].z, mini.z)
+        maxi.x = max(extents[1].x, maxi.x)
+        maxi.y = max(extents[1].y, maxi.y)
+        maxi.z = max(extents[1].z, maxi.z)
 
         append(&batch.instances, draw)
     } else {
@@ -946,8 +950,6 @@ Pass_Staging :: struct {
     draw_calls: [dynamic]Draw_Call,
 }
 
-
-
 @(private)
 compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pass_Staging) {
     for batch in batches {
@@ -964,7 +966,8 @@ compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, tra
             instance := instance
             is_solid, is_trans := instance_filter(batch.mesh, batch.material, instance)
             if !is_solid && !is_trans do continue
-            if !bounds_in_frustum(cam, instance.bounding_box) do continue
+            if !sphere_in_frustum(cam, instance.bounding_center, instance.bounding_radius) do continue
+            if !bounds_in_frustum(cam, instance.bounding_center, instance.bounding_axes) do continue
             calculate_mesh_world(&instance, cam)
             if is_solid && solid != nil {
                 append(&solid.instances, instance)

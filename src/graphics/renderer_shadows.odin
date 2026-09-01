@@ -201,7 +201,7 @@ calculate_shadow_camera_positional :: proc(position, direction, up: [3]f32, fov,
     cam.projection[2, 2] = t2
     cam.projection[3, 2] = -1
     cam.projection[2, 3] = far * t2
-    cam.viewproj = cam.projection * cam.view
+    calculate_frustum(&cam)
     return
 }
 
@@ -306,7 +306,7 @@ calculate_shadow_camera_directional :: proc(direction, up: [3]f32, near, far, sc
     cam.projection[2, 3] = -z_min/(z_max - z_min)
     cam.projection[3, 3] = 1
 
-    cam.viewproj = cam.projection * cam.view
+    calculate_frustum(&cam)
 
     cam.split_far = far
     return

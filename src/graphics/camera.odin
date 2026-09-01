@@ -45,6 +45,8 @@ Camera_View :: struct {
     using uniforms: Camera_Uniforms,
     buffer_index: u32,
     viewproj: matrix[4,4]f32, //optimization
+    frustum_planes: [6][4]f32, //left, right, bottom, top, near, far
+    planes_to_check: int, //for infinite far, don't check it
     layer_mask: Layer_Mask,
 }
 
@@ -198,6 +200,27 @@ inverse_view :: proc(trans: matrix[4,4]f32) -> (inv_view: matrix[4,4]f32) {
     return
 }
 
+calculate_frustum :: proc(cam: ^Camera_View) {
+    cam.viewproj = cam.projection * cam.view
+    cam.inv_viewproj = linalg.inverse(cam.viewproj)
+    //calculate frustum planes... Gribb-Hartmann
+    rows := linalg.transpose(cam.viewproj)
+    cam.frustum_planes[0] = rows[3] + rows[0]
+    cam.frustum_planes[1] = rows[3] - rows[0]
+    cam.frustum_planes[2] = rows[3] + rows[1]
+    cam.frustum_planes[3] = rows[3] - rows[1]
+    cam.frustum_planes[4] = rows[2]
+    cam.frustum_planes[5] = rows[3] - rows[2]
+    //normalize planes
+    cam.planes_to_check = 0
+    for p in cam.frustum_planes {
+        l := linalg.length(p.xyz)
+        if l < 1e-6 do continue //don't divide by zero
+        cam.frustum_planes[cam.planes_to_check] = p/l
+        cam.planes_to_check += 1
+    }
+}
+
 FOV :: 60.0
 calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Target = nil) -> (draw: Camera_Draw) {
     draw.inv_view = trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1)
@@ -218,14 +241,13 @@ calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Tar
     } else {
         draw.projection = linalg.matrix4_perspective(fov, width/height, near, far)
     }
+    calculate_frustum(&draw)
     fog_onset := cam.range[3] if cam.range[3] != 0 else (far - near)/2.0
     draw.color = cam.color
     draw.fill = cam.fill
     draw.layer_mask = cam.layer_mask
     draw.fog_distance = {fog_onset, far}
     //wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &draw.uniforms, size_of(Camera_Uniforms))
-    draw.viewproj = draw.projection * draw.view
-    draw.inv_viewproj = linalg.inverse(draw.viewproj)
     draw.bg_bind_group = cam.bg_bind_group
     return
 }
@@ -321,8 +343,8 @@ set_viewport :: proc(cam: ^Camera, viewport: [4]f32) {
 get_viewport_rect :: proc(cam: Camera, render_target: ^Render_Target = nil) -> [4]f32 {
     screen_resolution := screen_resolution
     if render_target != nil {
-        screen_resolution.x = uint(wgpu.TextureGetWidth(render_target.output.image))
-        screen_resolution.y = uint(wgpu.TextureGetHeight(render_target.output.image))
+        screen_resolution.x = uint(render_target.output.width)
+        screen_resolution.y = uint(render_target.output.height)
     }
     x, y := cam.viewport.x, cam.viewport.y
     width, height := get_viewport_size(cam, render_target)
@@ -335,8 +357,8 @@ get_viewport_rect :: proc(cam: Camera, render_target: ^Render_Target = nil) -> [
 get_viewport_size :: proc(cam: Camera, render_target: ^Render_Target = nil) -> (width, height: f32) {
     screen_resolution := screen_resolution
     if render_target != nil {
-        screen_resolution.x = uint(wgpu.TextureGetWidth(render_target.output.image))
-        screen_resolution.y = uint(wgpu.TextureGetHeight(render_target.output.image))
+        screen_resolution.x = uint(render_target.output.width)
+        screen_resolution.y = uint(render_target.output.height)
     }
     width = cam.viewport[2]
     height = cam.viewport[3]
@@ -397,31 +419,27 @@ z_layer :: proc(cam: Camera, layer: int, num_layers: int = MAX_Z_LAYERS) -> f32 
     return f32(layer) * z_min_step(cam, num_layers) 
 }
 
-bounds_in_frustum :: proc(cam: Camera_View, bounding_box: [8][4]f32) -> bool {
-    //need to check if all planes are passing (i.e. at least one point is inside)
-    passing: [6]bool = false
-    //OBB check for meshes
-    for point in bounding_box {
-        test_point := cam.viewproj * point
-        if test_point.x >= -test_point.w {
-            passing[0] = true
-        }
-        if test_point.x <= test_point.w {
-            passing[1] = true
-        }
-        if test_point.y >= -test_point.w {
-            passing[2] = true
-        }
-        if test_point.y <= test_point.w {
-            passing[3] = true
-        }
-        if test_point.z >= -test_point.w {
-            passing[4] = true
-        }
-        if test_point.z <= test_point.w {
-            passing[5] = true
+sphere_in_frustum :: proc(cam: Camera_View, bounding_center: [3]f32, bounding_radius: f32) -> bool {
+    for i in 0..<cam.planes_to_check {
+        p := cam.frustum_planes[i]
+        if linalg.dot(p.xyz, bounding_center) + p.w < -bounding_radius {
+            return false
         }
     }
-    //if inside_this_plane[n] == false, then all points were outside that plane.
-    return passing[0] && passing[1] && passing[2] && passing[3] && passing[4] && passing[5]
+    return true 
+}
+
+bounds_in_frustum :: proc(cam: Camera_View, bounding_center: [3]f32, bounding_axes: [3][3]f32) -> bool {
+    for i in 0..<cam.planes_to_check {
+        p := cam.frustum_planes[i]
+        n := p.xyz
+        //project OBB axes onto plane's normal, then it becomes roughly the same as sphere check
+        r := abs(linalg.dot(n, bounding_axes[0])) +
+            abs(linalg.dot(n, bounding_axes[1])) +
+            abs(linalg.dot(n, bounding_axes[2]))
+        if linalg.dot(n, bounding_center) + p.w < -r {
+            return false
+        }
+    }
+    return true
 }

@@ -1,6 +1,6 @@
 @echo off
 echo compiling main...
-odin build . -out:bin\cookies.exe -collection:cookies=src
+odin build . -out:bin\cookies.exe -o:speed -collection:cookies=src
 
 for %%a in ("examples\*.odin") do (
     echo compiling example: %%a

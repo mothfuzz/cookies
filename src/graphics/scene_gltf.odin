@@ -521,7 +521,7 @@ calculate_skeleton :: proc(scene: Scene, node: Node, alpha: f64) -> []matrix[4,4
         //look up the actual skeleton, and multiply with inv_bind
         //animation *should* be fully calculated at this point
         skeleton := &scene.skeletons[node.skin]
-        bones = make([dynamic]matrix[4,4]f32)
+        bones = make([dynamic]matrix[4,4]f32, context.temp_allocator)
         for &bone in skeleton.bones {
             inv_trans := linalg.inverse(transform.world(node, alpha))
             bone_trans := transform.world(scene.nodes[bone.node], alpha)
@@ -529,7 +529,7 @@ calculate_skeleton :: proc(scene: Scene, node: Node, alpha: f64) -> []matrix[4,4
         }
     } else {
         //just use identity
-        bones = make([dynamic]matrix[4,4]f32)
+        bones = make([dynamic]matrix[4,4]f32, context.temp_allocator)
         append(&bones, 1)
     }
     return bones[:]
@@ -543,7 +543,6 @@ draw_node :: proc(scene: Scene, node: Node, alpha: f64, layers: Layer_Mask) {
     case .Node:
     case .Model:
         bones := calculate_skeleton(scene, node, alpha)
-        defer delete(bones)
         draw_model(scene.models[node.data], transform.world(node, alpha), bones, layers)
     case .Camera:
         //...

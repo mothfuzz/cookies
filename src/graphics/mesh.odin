@@ -46,6 +46,7 @@ Mesh :: struct {
     bounding_box: Extents,
     bounding_center: [3]f32,
     bounding_radius: f32,
+    bounding_axes: [3][3]f32,
     is_trans: bool, //at least one vertex alpha 0 < a < 1
     is_solid: bool, //at least one vertex alpha a = 1
     //
@@ -124,7 +125,7 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mes
     }
     mesh.bounding_center = (mesh.bounding_box.mini + mesh.bounding_box.maxi)/2
     x, y, z := **(mesh.bounding_box.maxi - mesh.bounding_box.mini)
-    mesh.bounding_radius = max(x, y, z)
+    mesh.bounding_radius = max(x, y, z)/2
 
     mesh.hash = Mesh_Hash(hash.fnv32a(slice.bytes_from_ptr(&mesh, size_of(Mesh))))
     return
@@ -408,9 +409,9 @@ Mesh_Draw :: struct {
     is_sprite: bool,
     is_billboard: bool,
     bones: []matrix[4,4]f32,
-    bounding_box: [8][4]f32,
     bounding_center: [3]f32,
     bounding_radius: f32,
+    bounding_axes: [3][3]f32,
     layer_mask: Layer_Mask
 }
 Instance :: struct {
@@ -433,8 +434,8 @@ bind_mesh :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh) {
 //calculates local mesh data (i.e. not relative to camera)
 calculate_mesh_local :: proc(instance: ^Mesh_Draw, mesh: Mesh, material: Material) {
     //calculate clip_rect
-    w := f32(wgpu.TextureGetWidth(material.base_color_tex.image))
-    h := f32(wgpu.TextureGetHeight(material.base_color_tex.image))
+    w := material.base_color_tex.width
+    h := material.base_color_tex.height
     instance.clip_rect.x /= w
     instance.clip_rect.y /= h
     if instance.clip_rect[2] == 0 {
@@ -449,8 +450,6 @@ calculate_mesh_local :: proc(instance: ^Mesh_Draw, mesh: Mesh, material: Materia
     }
     //calculate model
     if instance.is_sprite {
-        temp_trans := instance.transform[3]
-        instance.transform[3] = {0, 0, 0, 1}
         scale_w := w*instance.clip_rect[2]
         scale_h := h*instance.clip_rect[3]
         scale_z := f32(1.0)
@@ -458,9 +457,9 @@ calculate_mesh_local :: proc(instance: ^Mesh_Draw, mesh: Mesh, material: Materia
             //since billboards face the camera, we want them to be thick from all angles
             scale_z = max(scale_w, scale_h)
         }
-        scale := linalg.matrix4_scale([3]f32{scale_w, scale_h, scale_z})
-        instance.transform *= scale
-        instance.transform[3] = temp_trans
+        instance.transform[0] *= scale_w
+        instance.transform[1] *= scale_h
+        instance.transform[2] *= scale_z
     }
     //calculate bounding box
     bb := mesh.bounding_box
@@ -468,16 +467,19 @@ calculate_mesh_local :: proc(instance: ^Mesh_Draw, mesh: Mesh, material: Materia
         bb.mini.z = min(bb.mini.x, bb.mini.y)
         bb.maxi.z = max(bb.maxi.x, bb.maxi.y)
     }
-    for i in 0..<8 {
-        for j in 0..<3 {
-            //convert extents to individual points (using 3-digit binary)
-            instance.bounding_box[i][j] = bb.maxi[j] if i % (1 << uint(j+1)) > (1 << uint(j) - 1) else bb.mini[j]
-        }
-        instance.bounding_box[i][3] = 1
-        instance.bounding_box[i] = instance.transform * instance.bounding_box[i]
+    center := (bb.mini + bb.maxi)/2
+    radi := (bb.maxi - bb.mini)/2
+    t := instance.transform
+    instance.bounding_center = (t * [4]f32{**center, 1}).xyz
+    instance.bounding_axes = {t[0].xyz + radi.x, t[1].xyz + radi.y, t[2].xyz + radi.z}
+    axes := instance.bounding_axes
+    distances := [4]f32{
+        linalg.length2(axes[0] + axes[1] + axes[2]),
+        linalg.length2(axes[0] + axes[1] - axes[2]),
+        linalg.length2(axes[0] - axes[1] + axes[2]),
+        linalg.length2(axes[0] - axes[1] - axes[2]),
     }
-    instance.bounding_radius = mesh.bounding_radius
-    instance.bounding_center = (instance.transform * [4]f32{**mesh.bounding_center, 1}).xyz
+    instance.bounding_radius = linalg.sqrt(linalg.max(distances))
 }
 
 //calculates world mesh data (aka the modelview)
