@@ -48,11 +48,27 @@ Node :: struct {
     skin: uint,
 }
 
+Combined_Material :: struct {
+    using base: Material,
+    using dyn: Dynamic_Material,
+}
+
+Primitive :: struct {
+    mesh: uint, //'primitive'
+    material: uint,
+    dyn: Dynamic_Material, //per-instance override, copied by default
+}
+
+Model :: struct {
+    primitives: []Primitive,
+}
+
 //a 'scene' is merely an arrangment of assets.
 Layout :: struct {
     name: string,
     roots: []uint,
 }
+
 
 Scene_Key :: struct {
     path: cstring,
@@ -104,10 +120,8 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     s.copied = true
     s.models = make([]Model, len(scene.models))
     for &model, i in s.models {
-        model.materials = make([]Combined_Material, len(scene.models[i].materials))
-        copy(model.materials, scene.models[i].materials)
-        model.meshes = make([]Mesh, len(scene.models[i].meshes))
-        copy(model.meshes, scene.models[i].meshes)
+        model.primitives = make([]Primitive, len(scene.models[i].primitives))
+        copy(model.primitives, scene.models[i].primitives)
     }
     s.cameras = make([]Camera, len(scene.cameras))
     copy(s.cameras, scene.cameras)
@@ -400,19 +414,20 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
     current_mesh := 0
     for mesh, i in data.meshes {
         model := &scene.models[i]
-        model.meshes = make([]Mesh, len(mesh.primitives))
-        model.materials = make([]Combined_Material, len(mesh.primitives))
+        model.primitives = make([]Primitive, len(mesh.primitives))
         for primitive, j in mesh.primitives {
+            p := &model.primitives[j]
 
             material_index := cgltf.material_index(data, primitive.material)
-            model.materials[j] = scene.materials[material_index]
+            p.material = material_index
+            p.dyn = scene.materials[material_index].dyn
 
             mesh, collider := load_mesh(primitive, make_tri_mesh)
             scene.meshes[current_mesh] = mesh
             if make_tri_mesh {
                 scene.colliders[current_mesh] = collider
             }
-            model.meshes[j] = scene.meshes[current_mesh]
+            p.mesh = uint(current_mesh)
             current_mesh += 1
         }
     }
@@ -535,6 +550,18 @@ calculate_skeleton :: proc(scene: Scene, node: Node, alpha: f64) -> []matrix[4,4
     return bones[:]
 }
 
+@(private)
+draw_model :: proc(scene: Scene, model: Model, trans: matrix[4,4]f32=1, bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
+    for primitive in model.primitives {
+        mesh := scene.meshes[primitive.mesh]
+        material := scene.materials[primitive.material]
+        dyn := primitive.dyn
+        draw_mesh(mesh, material, trans, dyn.clip_rect,
+                  dyn.base_color_tint, dyn.pbr_tint.r, dyn.pbr_tint.g, dyn.pbr_tint.b, dyn.emissive_tint.rgb,
+                  false, false, bones, layers)
+    }
+}
+
 
 @(private)
 draw_node :: proc(scene: Scene, node: Node, alpha: f64, layers: Layer_Mask) {
@@ -543,7 +570,7 @@ draw_node :: proc(scene: Scene, node: Node, alpha: f64, layers: Layer_Mask) {
     case .Node:
     case .Model:
         bones := calculate_skeleton(scene, node, alpha)
-        draw_model(scene.models[node.data], transform.world(node, alpha), bones, layers)
+        draw_model(scene, scene.models[node.data], transform.world(node, alpha), bones, layers)
     case .Camera:
         //...
     case .Light:
@@ -593,8 +620,7 @@ delete_scene :: proc(scene: Scene) {
     }
 
     for model in scene.models {
-        delete(model.meshes)
-        delete(model.materials)
+        delete(model.primitives)
     }
     delete(scene.models)
     /*for camera in scene.cameras {

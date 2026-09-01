@@ -78,8 +78,8 @@ init :: proc() {
     stained_glass_mat = graphics.make_material(base_color=stained_glass_tex)
 
     teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
-    fmt.println(teapot.models[0].materials)
-    teapot.models[0].materials[0].pbr_tint = {1, 0.2, 1, 1}
+    fmt.println(teapot.models[0].primitives)
+    teapot.models[0].primitives[0].dyn.pbr_tint = {1, 0.2, 1, 1}
     transform.init(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
 
     light = graphics.make_directional_light({0, -0.6, 0.4}, {0.4, 0.5, 1.0, 4})
