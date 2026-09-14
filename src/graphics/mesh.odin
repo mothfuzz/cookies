@@ -471,7 +471,7 @@ calculate_mesh_local :: proc(instance: ^Mesh_Draw, mesh: Mesh, material: Materia
     radi := (bb.maxi - bb.mini)/2
     t := instance.transform
     instance.bounding_center = (t * [4]f32{**center, 1}).xyz
-    instance.bounding_axes = {t[0].xyz + radi.x, t[1].xyz + radi.y, t[2].xyz + radi.z}
+    instance.bounding_axes = {t[0].xyz * radi.x, t[1].xyz * radi.y, t[2].xyz * radi.z}
     axes := instance.bounding_axes
     distances := [4]f32{
         linalg.length2(axes[0] + axes[1] + axes[2]),
