@@ -5,11 +5,11 @@ package engine
 //import "cookies:window"
 //import "cookies:input"
 //import "cookies:audio"
+import "cookies:clock"
 
-tick_rate : uint = 125
 @(export)
-set_tick_rate :: proc(new_tick_rate: uint) {
-    tick_rate = new_tick_rate
+set_tick_rate :: proc(tick_rate: uint) {
+    clock.default.tick_rate = tick_rate
 }
 
 Boot_State :: struct(T: typeid) {

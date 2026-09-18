@@ -11,6 +11,7 @@ import "cookies:input"
 import "cookies:audio"
 import "cookies:resources"
 import "cookies:transform"
+import "cookies:clock"
 
 @(private)
 set_exe_working_dir :: proc() -> os.Error {
@@ -69,7 +70,6 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
     }
 
     then := sdl3.GetTicks()
-    accumulator: f64 = 0
     main_loop: for {
         e: sdl3.Event
         for sdl3.PollEvent(&e) {
@@ -123,18 +123,18 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
         }
         now := sdl3.GetTicks()
         delta := f64(now - then)/1000.0
-        accumulator += delta
         then = now //when will then be now? soon.
-        time_step := 1.0/f64(tick_rate)
-        for ; accumulator >= time_step; accumulator -= time_step {
+
+        clock.wind(clock.default, delta)
+        for clock.tick(clock.default) {
             if tick != nil {
                 tick()
             }
             input.update()
         }
-        alpha := accumulator / time_step
+        
         if draw != nil {
-            draw(alpha, delta)
+            draw(clock.default.alpha, delta)
         }
 
         graphics.render_frame()

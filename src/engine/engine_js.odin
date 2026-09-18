@@ -18,12 +18,11 @@ user_quit: proc() = nil
 
 
 initialized: bool = false
-accumulator: f64 = 0
 
 logger: log.Logger
 
 @(export)
-step :: proc(delta_time: f64) -> bool {
+step :: proc(delta: f64) -> bool {
     context.logger = logger
 
     if !graphics.ren.ready {
@@ -53,18 +52,20 @@ step :: proc(delta_time: f64) -> bool {
         log.destroy_console_logger(logger)
         return false
     }
-    accumulator += delta_time
-    time_step := 1.0/f64(tick_rate)
-    for ; accumulator >= time_step; accumulator -= time_step {
+
+    
+    clock.wind(clock.default, delta)
+    for clock.tick(clock.default) {
         if user_tick != nil {
             user_tick()
         }
         input.update()
     }
-    alpha := accumulator / time_step
+
     if user_draw != nil {
-        user_draw(alpha, delta_time)
+        user_draw(clock.default.alpha, delta)
     }
+    
     graphics.render_frame()
     free_all(context.temp_allocator)
     return true
