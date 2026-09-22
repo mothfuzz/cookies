@@ -35,7 +35,7 @@ Node_Type :: enum {
 
 Node :: struct {
     name: string,
-    using trans: transform.Transform,
+    using node: transform.Node,
     original_trans: transform.TRS, //to be used when not-animated
     //for easier copying/traversal
     has_parent: bool,
@@ -95,16 +95,16 @@ Scene :: struct {
     layouts: []Layout, //'scenes'
     active_layout: uint,
 
-    root: transform.Transform, //easy parent transform for the whole thing
+    root: transform.Node, //easy parent transform for the whole thing
 }
 
 @(private)
 init_root :: proc(scene: ^Scene) {
     //inherently parent everything to one root for easier transforms
-    scene.root = transform.make()
+    scene.root = transform.insert_node()
     for layout in scene.layouts {
         for root in layout.roots {
-            transform.link(scene.root, scene.nodes[root])
+            transform.link_node(scene.root, scene.nodes[root])
         }
     }
 }
@@ -136,9 +136,9 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     copy(s.nodes, scene.nodes)
     //have to do this in 2 passes to preserve relationships
     for &node, i in s.nodes {
-        node.trans = transform.make()
-        trans := transform.write(node)
-        orig_trans := transform.read(scene.nodes[i])
+        node.node = transform.insert_node()
+        trans := transform.local_node(node)
+        orig_trans := transform.local_node(scene.nodes[i])
         trans.translation = orig_trans.translation
         trans.rotation = orig_trans.rotation
         trans.scale = orig_trans.scale
@@ -150,7 +150,7 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     }
     for &node in s.nodes {
         if node.has_parent {
-            transform.link(s.nodes[node.parent_node].trans, node.trans)
+            transform.link_node(s.nodes[node.parent_node], node)
         }
     }
     s.layouts = make([]Layout, len(scene.layouts))
@@ -435,14 +435,14 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
     //load scene
     scene.nodes = make([]Node, len(data.nodes))
     for &node in scene.nodes {
-        node.trans = transform.make()
+        node.node = transform.insert_node()
     }
     for node, i in data.nodes {
         if node.parent != nil {
             p := cgltf.node_index(data, node.parent)
             scene.nodes[i].has_parent = true
             scene.nodes[i].parent_node = p //otherwise 0
-            transform.link(scene.nodes[p].trans, scene.nodes[i].trans)
+            transform.link_node(scene.nodes[p], scene.nodes[i])
         }
         if node.children != nil && len(node.children) > 0 {
             scene.nodes[i].children = make([]uint, len(node.children))
@@ -450,7 +450,7 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
                 scene.nodes[i].children[c] = cgltf.node_index(data, child)
             }
         }
-        trans := transform.write(scene.nodes[i].trans)
+        trans := transform.local_node(scene.nodes[i])
         if node.has_matrix {
             //extract TRS from matrix
             mat := transmute(matrix[4,4]f32)(node.matrix_)
@@ -530,7 +530,7 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
 }
 
 @(private)
-calculate_skeleton :: proc(scene: Scene, node: Node, alpha: f64) -> []matrix[4,4]f32 {
+calculate_skeleton :: proc(scene: Scene, node: Node) -> []matrix[4,4]f32 {
     bones: [dynamic]matrix[4,4]f32
     if node.animated {
         //look up the actual skeleton, and multiply with inv_bind
@@ -538,8 +538,8 @@ calculate_skeleton :: proc(scene: Scene, node: Node, alpha: f64) -> []matrix[4,4
         skeleton := &scene.skeletons[node.skin]
         bones = make([dynamic]matrix[4,4]f32, context.temp_allocator)
         for &bone in skeleton.bones {
-            inv_trans := linalg.inverse(transform.world(node, alpha))
-            bone_trans := transform.world(scene.nodes[bone.node], alpha)
+            inv_trans := linalg.inverse(transform.world(node))
+            bone_trans := transform.world(scene.nodes[bone.node])
             append(&bones, inv_trans * bone_trans * bone.inv_bind)
         }
     } else {
@@ -564,13 +564,13 @@ draw_model :: proc(scene: Scene, model: Model, trans: matrix[4,4]f32=1, bones: [
 
 
 @(private)
-draw_node :: proc(scene: Scene, node: Node, alpha: f64, layers: Layer_Mask) {
+draw_node :: proc(scene: Scene, node: Node, layers: Layer_Mask) {
     //draw self
     switch node.type {
     case .Node:
     case .Model:
-        bones := calculate_skeleton(scene, node, alpha)
-        draw_model(scene, scene.models[node.data], transform.world(node, alpha), bones, layers)
+        bones := calculate_skeleton(scene, node)
+        draw_model(scene, scene.models[node.data], transform.world(node), bones, layers)
     case .Camera:
         //...
     case .Light:
@@ -578,17 +578,25 @@ draw_node :: proc(scene: Scene, node: Node, alpha: f64, layers: Layer_Mask) {
     }
     //draw children (will trigger subsequent draws)
     for child in node.children {
-        draw_node(scene, scene.nodes[child], alpha, layers)
+        draw_node(scene, scene.nodes[child], layers)
     }
 }
-draw_scene :: proc(scene: Scene, alpha: f64, layers: Layer_Mask = All_Layers) {
+draw_scene :: proc(scene: Scene, layers: Layer_Mask = All_Layers) {
     for i in scene.layouts[scene.active_layout].roots {
-        draw_node(scene, scene.nodes[i], alpha, layers)
+        draw_node(scene, scene.nodes[i], layers)
     }
 }
 
-link_scene_transform :: proc(scene: ^Scene, parent: transform.Transform) {
+link_scene_to_node :: proc(scene: ^Scene, parent: transform.Node) {
+    transform.link_node(parent, scene.root)
 }
+
+link_scene_to_transform :: proc(scene: ^Scene, parent: ^transform.Transform) {
+    parent_node := transform.promote(parent, scene.root.tree)
+    transform.link_node(parent_node, scene.root)
+}
+
+link_scene_transform :: proc{link_scene_to_node, link_scene_to_transform}
 
 delete_scene :: proc(scene: Scene) {
     if !scene.copied {
@@ -635,7 +643,7 @@ delete_scene :: proc(scene: Scene) {
     delete(scene.layouts)
 
     for node in scene.nodes {
-        transform.delete(node)
+        transform.remove_node(node)
         if node.children != nil {
             delete(node.children)
         }

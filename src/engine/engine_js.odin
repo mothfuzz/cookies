@@ -44,8 +44,8 @@ step :: proc(delta: f64) -> bool {
         }
         graphics.wait_idle()
         graphics.quit()
-        transform.delete_tree(transform.tree_allocator)
-        free(transform.tree_allocator)
+        transform.delete_tree(transform.default_tree)
+        free(transform.default_tree)
         audio.quit()
         resources.unregister_loaders()
         resources.unload_files()
@@ -119,8 +119,8 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
         input.current_mouse_position.y = i32(h/2) - i32(pos.y)
     })
 
-    transform.tree_allocator = new(transform.Tree)
-    transform.tree_allocator^ = transform.make_tree()
+    transform.default_tree = new(transform.Tree)
+    transform.default_tree^ = transform.make_tree()
 
     graphics.init(window.get_wgpu_surface, {window.get_size()})
     window.resize_hook = graphics.window_resized

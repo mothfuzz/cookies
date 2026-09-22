@@ -17,7 +17,6 @@ delete_skeleton :: proc(sk: Skeleton) {
     delete(sk.bones)
 }
 
-
 //all instances in a batch will have the same number of bones.
 //waha
 
@@ -74,7 +73,6 @@ delete_skeletons_buffer :: proc() {
         wgpu.BufferRelease(skeletons_buffer)
     }
 }
-
 
 bind_skeletons :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32) {
     wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, skeletons_bind_group)

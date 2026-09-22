@@ -43,11 +43,11 @@ boot :: proc(init: proc(), tick: proc(), draw: proc(f64, f64), quit: proc()) {
     sdl3.SetWindowIcon(window.window, icon)
     sdl3.DestroySurface(icon)
 
-    transform.tree_allocator = new(transform.Tree)
-    transform.tree_allocator^ = transform.make_tree()
+    transform.default_tree = new(transform.Tree)
+    transform.default_tree^ = transform.make_tree()
     defer {
-        transform.delete_tree(transform.tree_allocator)
-        free(transform.tree_allocator)
+        transform.delete_tree(transform.default_tree)
+        free(transform.default_tree)
     }
 
     audio.init()

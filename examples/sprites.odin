@@ -29,7 +29,7 @@ init :: proc(s: ^Sprites_Example) {
     s.camera_trans = transform.make()
 
     //2D camera looking straight down
-    camera_trans := transform.write(s.camera_trans)
+    camera_trans := transform.local(&s.camera_trans)
     camera_trans.translation = {0, 0, graphics.z_2d(s.camera)}
     transform.look_at(camera_trans, {0, 0, 0})
 }
@@ -37,6 +37,10 @@ init :: proc(s: ^Sprites_Example) {
 tick :: proc(s: ^Sprites_Example) {
     if input.key_pressed(.Key_Escape) {
         window.close()
+    }
+    if input.key_pressed(.Key_F11) {
+        window.set_fullscreen(!window.get_fullscreen())
+        window.set_pointer_lock(!window.get_pointer_lock())
     }
     if input.key_down(.Key_Left) {
         s.frasier_velocity += 0.02
@@ -50,7 +54,7 @@ tick :: proc(s: ^Sprites_Example) {
         s.frasier_velocity = 0
     }
 
-    frasier_trans := transform.write(s.frasier_trans)
+    frasier_trans := transform.local(&s.frasier_trans)
     transform.rotate(frasier_trans, {0, 0, s.frasier_velocity})
 
     if input.key_down(.Key_Up) {
@@ -58,7 +62,7 @@ tick :: proc(s: ^Sprites_Example) {
         frasier_trans.rotation = 1
     }
 
-    camera_pos := &transform.write(s.camera_trans).translation
+    camera_pos := &transform.local(&s.camera_trans).translation
     if input.key_down(.Key_W) {
         camera_pos.y += 4
     }
@@ -74,8 +78,8 @@ tick :: proc(s: ^Sprites_Example) {
 }
 
 draw :: proc(s: ^Sprites_Example, alpha, delta: f64) {
-    graphics.draw_camera(s.camera, transform.world(s.camera_trans, alpha))
-    graphics.draw_sprite(s.frasier_mat, transform.world(s.frasier_trans, alpha)) //draw a single frasier in the center of the screen
+    graphics.draw_camera(s.camera, transform.world(s.camera_trans))
+    graphics.draw_sprite(s.frasier_mat, transform.world(s.frasier_trans)) //draw a single frasier in the center of the screen
 }
 
 quit :: proc(s: ^Sprites_Example) {

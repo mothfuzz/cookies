@@ -2,18 +2,293 @@ package transform
 
 import "core:math/linalg"
 import hm "core:container/handle_map"
-
-Transform :: struct {
-    idx: u32,
-    gen: u32,
-}
+import "cookies:clock"
 
 TRS :: struct {
     translation: [3]f32,
     rotation: quaternion128,
     scale: [3]f32,
 }
-ORIGIN :: TRS{0, 0, 1}
+ORIGIN_TRS :: TRS{0, 1, 1}
+
+TRS_Smoothed :: clock.Smoothed(TRS)
+ORIGIN :: TRS_Smoothed{ORIGIN_TRS, ORIGIN_TRS, 0}
+
+TRS_Angles :: struct {
+    translation: [3]f32,
+    rotation: [3]f32,
+    scale: [3]f32,
+}
+
+Handle :: struct {
+    idx: u32,
+    gen: u32,
+}
+
+Node :: struct {
+    handle: Handle,
+    tree: ^Tree,
+}
+
+@(private)
+Transform_Data :: struct {
+    handle: Handle,
+
+    local: TRS_Smoothed,
+    world: matrix[4,4]f32,
+    world_serial: u64, //replacement for dirty-flag
+
+    parent: Handle,
+    first_child: Handle,
+    next_sibling: Handle,
+}
+
+Tree :: struct {
+    transforms: hm.Dynamic_Handle_Map(Transform_Data, Handle),
+    clk: ^clock.Clock,
+    serial: u64,
+    last_alpha: f64,
+    last_tick: u64,
+}
+
+default_tree: ^Tree //allocator-style default for when not using an explicit Tree
+
+make_tree :: proc(clk: ^clock.Clock = clock.default) -> (tt: Tree) {
+    hm.dynamic_init(&tt.transforms, context.allocator)
+    tt.clk = clk
+    return
+}
+
+delete_tree :: proc(tt: ^Tree) {
+    hm.dynamic_destroy(&tt.transforms)
+}
+
+sync_tree :: proc(tt: ^Tree) {
+    if tt.clk.alpha != tt.last_alpha || tt.clk.current_tick != tt.last_tick {
+        tt.last_alpha = tt.clk.alpha
+        tt.last_tick = tt.clk.current_tick
+        tt.serial += 1
+    }
+}
+
+insert_node :: proc(trs: TRS = ORIGIN_TRS, parent: Node = {}, tt: ^Tree = default_tree) -> (trans: Node) {
+    trs := trs
+    if trs.scale == 0 {
+        trs.scale = 1
+    }
+    if trs.rotation == 0 {
+        trs.rotation = 1
+    }
+    return insert_node_smoothed({trs, trs, tt.clk.current_tick}, parent, tt)
+}
+
+insert_node_smoothed :: proc(trs: TRS_Smoothed, parent: Node = {}, tt: ^Tree = default_tree) -> (trans: Node) {
+    trans.handle = hm.add(&tt.transforms, Transform_Data{local = trs})
+    trans.tree = tt
+    if parent != {} {
+        link_node(parent, trans)
+    }
+    return
+}
+
+remove_node :: proc(trans: Node, delete_children: bool = false) {
+    if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
+        unlink_node(trans) //removes from parent, adjusts siblings
+        if delete_children && t.first_child != {} {
+            remove_node({t.first_child, trans.tree}, true)
+        }
+        hm.remove(&trans.tree.transforms, trans.handle)
+    }
+}
+
+init_node :: proc(trans: Node, trs: TRS) {
+    trs := trs
+    if trs.rotation == 0 {
+        trs.rotation = 1
+    }
+    if trs.scale == 0 {
+        trs.scale = 1
+    }
+    trans := local(trans)
+    trans^ = trs
+}
+
+link_node :: proc(parent: Node, child: Node) {
+    assert(parent.tree == child.tree, "Parent and child must belong to the same tree.")
+    tree := &parent.tree.transforms
+    unlink_node(child)
+    parent_trans := hm.get(tree, parent.handle)
+    child_trans := hm.get(tree, child.handle)
+    child_trans.parent = parent.handle
+    if parent_trans.first_child != {} {
+        child_trans.next_sibling = parent_trans.first_child
+    }
+    parent_trans.first_child = child.handle
+}
+
+unlink_node :: proc(trans: Node) {
+    tree := &trans.tree.transforms
+    t := hm.get(&trans.tree.transforms, trans.handle)
+    if t.parent != {} {
+        if parent, ok := hm.get(tree, t.parent); ok {
+            if parent.first_child == trans.handle {
+                parent.first_child = t.next_sibling
+            } else {
+                //not the first child, so there must be a predecessor
+                prev_sibling := hm.get(tree, parent.first_child)
+                for ; prev_sibling.next_sibling != t.handle; prev_sibling = hm.get(tree, prev_sibling.next_sibling) {}
+                prev_sibling.next_sibling = t.next_sibling
+            }
+        }
+        t.parent = {}
+        t.next_sibling = {}
+    }
+}
+
+//live, interpolated, user-transforms
+Transform :: union {
+    //TRS_Angles, //need to think about JSON/promotion semantics
+    //TRS?? //maybe not supported in the public API
+    TRS_Smoothed,
+    Node,
+}
+
+tree_of :: proc(t: ^Transform) -> ^Tree {
+    if t, ok := t.(Node); ok {
+        return t.tree
+    }
+    return nil
+}
+
+promote :: proc(t: ^Transform, tt: ^Tree) -> Node {
+    switch t in t {
+    case Node:
+        return t
+    case TRS_Smoothed:
+        return insert_node_smoothed(t, tt=tt)
+    case nil: //promote nil to ORIGIN
+        return insert_node(tt=tt)
+    }
+    return {}
+}
+
+link :: proc(parent, child: ^Transform, tree: ^Tree = nil) {
+    parent_tree := tree_of(parent)
+    child_tree := tree_of(child)
+    tt := parent_tree
+    if child_tree != nil {
+        assert(parent_tree == nil || parent_tree == child_tree, "parent and child belong to different trees")
+        tt = child_tree
+    }
+    if tt == nil {
+        tt = default_tree if tree == nil else tree
+    }
+    assert(tree == nil || tt == tree, "explicitly passed tree conflicts with parent/child's own tree")
+    p := promote(parent, tt)
+    c := promote(child, tt)
+    link_node(p, c)
+    parent^ = p
+    child^ = c
+}
+
+unlink :: proc(t: ^Transform) {
+    if t, ok := t.(Node); ok {
+        unlink_node(t)
+    }
+}
+
+make :: proc(trs: TRS = ORIGIN_TRS, parent: ^Transform = nil, tree: ^Tree = nil) -> (t: Transform) {
+    trs := trs
+    if trs.rotation == 0 {
+        trs.rotation = 1
+    }
+    if trs.scale == 0 {
+        trs.scale = 1
+    }
+    t = TRS_Smoothed{prev = trs, next = trs} 
+    if parent != nil {
+        link(parent, &t)
+    }
+    return t
+}
+
+
+local_node :: proc(n: Node) -> ^TRS {
+    if t, ok := hm.get(&n.tree.transforms, n.handle); ok {
+        n.tree.serial += 1
+        return clock.write(&t.local, n.tree.clk)
+    }
+    return nil
+}
+
+local_trs :: proc(trs: ^TRS) -> ^TRS {
+    return trs
+}
+
+local_trs_smoothed :: proc(trs: ^TRS_Smoothed, c: ^clock.Clock = clock.default) -> ^TRS {
+    return clock.write(trs, c) 
+}
+
+local_transform :: proc(t: ^Transform) -> ^TRS {
+    switch &t in t {
+    case Node:
+        return local_node(t)
+    case TRS_Smoothed:
+        return local_trs_smoothed(&t)
+    }
+    return nil
+}
+
+local :: proc{local_node, local_trs, local_trs_smoothed, local_transform}
+
+compute_trs :: proc(trs: TRS) -> matrix[4,4]f32 {
+    return linalg.matrix4_from_trs_f32(**trs)
+}
+
+lerp_trs :: proc(a, b: TRS, alpha: f64) -> TRS {
+    alpha := f32(alpha)
+    return {
+        translation = linalg.lerp(a.translation, b.translation, alpha),
+        rotation = linalg.quaternion_slerp(a.rotation, b.rotation, alpha),
+        scale = linalg.lerp(a.scale, b.scale, alpha),
+    }
+}
+
+compute_trs_smoothed :: proc(trs: TRS_Smoothed) -> matrix[4,4]f32 {
+    return compute_trs(lerp_trs(clock.sample(trs)))
+}
+
+compute_node :: proc(n: Node) -> matrix[4,4]f32 {
+    sync_tree(n.tree)
+    if t, ok := hm.get(&n.tree.transforms, n.handle); ok {
+        if t.world_serial != n.tree.serial {
+            local := compute_trs(lerp_trs(clock.sample(t.local, n.tree.clk)))
+            if t.parent != {} {
+                parent_world := compute_node(Node{t.parent, n.tree})
+                t.world = parent_world * local
+            } else {
+                t.world = local
+            }
+            t.world_serial = n.tree.serial
+        }
+        return t.world
+    }
+    return 1
+}
+
+compute_transform :: proc(t: Transform) -> matrix[4,4]f32 {
+    switch t in t {
+    case nil:
+        return 1
+    case TRS_Smoothed:
+        return compute_trs_smoothed(t)
+    case Node:
+        return compute_node(t)
+    }
+    return 1
+}
+
+world :: proc{compute_trs, compute_trs_smoothed, compute_node, compute_transform}
 
 //helper procs
 translate_trs :: proc(t: ^TRS, translation: [3]f32) {
@@ -45,220 +320,6 @@ look_at_trs :: proc(viewer: ^TRS, target: [3]f32, up: [3]f32 = {0, 1, 0}) {
     viewer.rotation = linalg.quaternion_from_forward_and_up(forward, up)
 }
 
-compute :: proc(trs: TRS) -> matrix[4,4]f32 {
-    return linalg.matrix4_from_trs(expand_values(trs))
-}
-
-lerp :: proc(a, b: TRS, alpha: f64) -> TRS {
-    alpha := f32(alpha)
-    return {
-        translation = linalg.lerp(a.translation, b.translation, alpha),
-        rotation = linalg.quaternion_slerp(a.rotation, b.rotation, alpha),
-        scale = linalg.lerp(a.scale, b.scale, alpha),
-    }
-}
-
-smooth :: proc(a, b: TRS, alpha: f64) -> matrix[4,4]f32 {
-    return compute(lerp(a, b, alpha))
-}
-
-@(private)
-Transform_Data :: struct {
-    handle: Transform,
-
-    prev_trans: TRS,
-    next_trans: TRS,
-    world: matrix[4,4]f32,
-    dirty: bool,
-    alpha: f64,
-
-    parent: Transform,
-    first_child: Transform,
-    last_child: Transform,
-    prev_sibling: Transform,
-    next_sibling: Transform,
-}
-
-Tree :: struct {
-    transforms: hm.Dynamic_Handle_Map(Transform_Data, Transform),
-    //roots: map[Transform]struct{},
-}
-
-tree_allocator: ^Tree //allocator-style default for when not using an explicit Tree
-
-make_tree :: proc() -> (tt: Tree) {
-    hm.dynamic_init(&tt.transforms, context.allocator)
-    return
-}
-
-delete_tree :: proc(tt: ^Tree) {
-    hm.dynamic_destroy(&tt.transforms)
-}
-
-make :: proc(trs: TRS = ORIGIN, parent: Transform = {0, 0}, tt: ^Tree = tree_allocator) -> (trans: Transform) {
-    trs := trs
-    if trs.scale == 0 {
-        trs.scale = 1
-    }
-    if trs.rotation == 0 {
-        trs.rotation = 1
-    }
-    trans = hm.add(&tt.transforms, Transform_Data{prev_trans = trs, next_trans = trs, dirty = true})
-    if parent == {0, 0} {
-        //tt.roots[trans] = {}
-    } else {
-        link(parent, trans, tt)
-    }
-    return
-}
-
-delete :: proc(trans: Transform, delete_children: bool = false, tt: ^Tree = tree_allocator) {
-    //delete_key(&tt.roots, trans)
-    if t, ok := hm.get(&tt.transforms, trans); ok {
-        unlink(trans, tt) //removes from parent, adjusts siblings
-        if delete_children && t.first_child != {0,0} {
-            delete(t.first_child, true, tt)
-        }
-        hm.remove(&tt.transforms, trans)
-    }
-}
-
-init :: proc(trans: Transform, trs: TRS, tt: ^Tree = tree_allocator) {
-    trs := trs
-    if trs.rotation == 0 {
-        trs.rotation = 1
-    }
-    if trs.scale == 0 {
-        trs.scale = 1
-    }
-    trans := write(trans, tt)
-    trans^ = trs
-}
-
-link :: proc(parent: Transform, child: Transform, tt: ^Tree = tree_allocator) {
-    //delete_key(&s.roots, child)
-    unlink(child, tt)
-    parent_trans := hm.get(&tt.transforms, parent)
-    child_trans := hm.get(&tt.transforms, child)
-    child_trans.parent = parent
-    if parent_trans.first_child == {0,0} {
-        parent_trans.first_child = child
-    } else {
-        last_child_trans := hm.get(&tt.transforms, parent_trans.last_child)
-        last_child_trans.next_sibling = child
-        child_trans.prev_sibling = parent_trans.last_child
-    }
-    parent_trans.last_child = child
-}
-
-unlink :: proc(trans: Transform, tt: ^Tree = tree_allocator) {
-    t := hm.get(&tt.transforms, trans)
-    if t.parent != {0,0} {
-        if parent, ok := hm.get(&tt.transforms, t.parent); ok {
-            if parent.first_child == trans {
-                parent.first_child = {0,0}
-            }
-            if parent.last_child == trans {
-                parent.last_child = {0,0}
-            }
-        }
-        t.parent = {0,0}
-    }
-    if t.prev_sibling != {0,0} {
-        if prev_sibling, ok := hm.get(&tt.transforms, t.prev_sibling); ok {
-            prev_sibling.next_sibling = {0,0}
-        }
-        t.prev_sibling = {0,0}
-    }
-    if t.next_sibling != {0,0} {
-        if next_sibling, ok := hm.get(&tt.transforms, t.next_sibling); ok {
-            next_sibling.prev_sibling = {0,0}
-        }
-        t.next_sibling = {0,0}
-    }
-    //tt.roots[trans] = {}
-}
-
-read :: proc(n: Transform, tt: ^Tree = tree_allocator) -> TRS {
-    if t, ok := hm.get(&tt.transforms, n); ok {
-        return t.next_trans
-    }
-    return ORIGIN
-}
-
-write :: proc(n: Transform, tt: ^Tree = tree_allocator) -> ^TRS {
-    if t, ok := hm.get(&tt.transforms, n); ok {
-        if !t.dirty {
-            t.dirty = true
-            t.prev_trans = t.next_trans
-        }
-        t.alpha = 0
-        return &t.next_trans
-    }
-    return nil
-}
-
-find_root :: proc(n: Transform, tt: ^Tree = tree_allocator) -> Transform {
-    if t, ok := hm.get(&tt.transforms, n); ok {
-        if t.parent != {0,0} {
-            return find_root(t.parent, tt)
-        }
-        return n
-    }
-    return {0, 0}
-}
-
-@(private)
-update_root :: proc(n: Transform, tt: ^Tree = tree_allocator, dirty: bool = false, parent_world: matrix[4,4]f32 = 1) {
-    if t, ok := hm.get(&tt.transforms, n); ok {
-        dirty := t.dirty || dirty
-        t.world = parent_world * compute(t.next_trans)
-        t.dirty = false
-        update_root(t.next_sibling, tt, dirty, parent_world)
-        update_root(t.first_child, tt, dirty, t.world)
-    }
-}
-
-get_world :: proc(n: Transform, tt: ^Tree = tree_allocator) -> matrix[4,4]f32 {
-    if t, ok := hm.get(&tt.transforms, n); ok {
-        if t.dirty {
-            root := find_root(n, tt)
-            update_root(root, tt)
-        }
-        return t.world
-    }
-    return 1
-}
-
-@(private)
-update_root_smooth :: proc(n: Transform, alpha: f64, tt: ^Tree = tree_allocator, dirty: bool = false, parent_world: matrix[4,4]f32 = 1) {
-    if t, ok := hm.get(&tt.transforms, n); ok {
-        dirty := t.dirty || dirty
-        if alpha < t.alpha {
-            //avoid looping/jittering
-            t.prev_trans = t.next_trans
-        }
-        t.world = parent_world * smooth(t.prev_trans, t.next_trans, alpha)
-        t.dirty = false
-        t.alpha = alpha
-        update_root_smooth(t.next_sibling, alpha, tt, dirty, parent_world)
-        update_root_smooth(t.first_child, alpha, tt, dirty, t.world)
-    }
-}
-
-get_world_smooth :: proc(n: Transform, alpha: f64, tt: ^Tree = tree_allocator) -> matrix[4,4]f32 {
-    if t, ok := hm.get(&tt.transforms, n); ok {
-        if t.dirty || t.alpha != alpha {
-            root := find_root(n, tt)
-            update_root_smooth(root, alpha, tt)
-        }
-        return t.world
-    }
-    return 1
-}
-
-world :: proc{get_world, get_world_smooth}
-
 get_world_translation :: proc(world: matrix[4,4]f32) -> [3]f32 {
     return world[3].xyz
 }
@@ -289,59 +350,47 @@ get_world_trs :: proc(world: matrix[4,4]f32) -> (translation: [3]f32, rotation: 
     return
 }
 
-get_parent :: proc(tree: ^Tree, trans: Transform) -> Transform {
-    if t, ok := hm.get(&tree.transforms, trans); ok {
-        return t.parent
+get_parent :: proc(trans: Node) -> Node {
+    if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
+        return {t.parent, trans.tree}
     }
-    return {0, 0}
+    return {}
 }
-get_first_child :: proc(tree: ^Tree, trans: Transform) -> Transform {
-    if t, ok := hm.get(&tree.transforms, trans); ok {
-        return t.first_child
+get_first_child :: proc(trans: Node) -> Node {
+    if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
+        return {t.first_child, trans.tree}
     }
-    return {0, 0}
+    return {}
 }
-get_last_child :: proc(tree: ^Tree, trans: Transform) -> Transform {
-    if t, ok := hm.get(&tree.transforms, trans); ok {
-        return t.last_child
+get_next_sibling :: proc(trans: Node) -> Node {
+    if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
+        return {t.next_sibling, trans.tree}
     }
-    return {0, 0}
-}
-get_next_sibling :: proc(tree: ^Tree, trans: Transform) -> Transform {
-    if t, ok := hm.get(&tree.transforms, trans); ok {
-        return t.next_sibling
-    }
-    return {0, 0}
-}
-get_prev_sibling :: proc(tree: ^Tree, trans: Transform) -> Transform {
-    if t, ok := hm.get(&tree.transforms, trans); ok {
-        return t.prev_sibling
-    }
-    return {0, 0}
+    return {}
 }
 
 //helper procs for Transform itself
-translate_t :: proc(t: Transform, translation: [3]f32) {
-    translate_trs(write(t), translation)
+translate_t :: proc(t: Node, translation: [3]f32) {
+    translate_trs(local(t), translation)
 }
-rotate_t :: proc(t: Transform, rotation: [3]f32) {
-    rotate_trs(write(t), rotation)
+rotate_t :: proc(t: Node, rotation: [3]f32) {
+    rotate_trs(local(t), rotation)
 }
-rotatex_t :: proc(t: Transform, rotation: f32) {
-    rotatex_trs(write(t), rotation)
+rotatex_t :: proc(t: Node, rotation: f32) {
+    rotatex_trs(local(t), rotation)
 }
-rotatey_t :: proc(t: Transform, rotation: f32) {
-    rotatey_trs(write(t), rotation)
+rotatey_t :: proc(t: Node, rotation: f32) {
+    rotatey_trs(local(t), rotation)
 }
-rotatez_t :: proc(t: Transform, rotation: f32) {
-    rotatez_trs(write(t), rotation)
+rotatez_t :: proc(t: Node, rotation: f32) {
+    rotatez_trs(local(t), rotation)
 }
-scale_t :: proc(t: Transform, scale: [3]f32) {
-    scale_trs(write(t), scale)
+scale_t :: proc(t: Node, scale: [3]f32) {
+    scale_trs(local(t), scale)
 }
 
-look_at_t :: proc(viewer: Transform, target: [3]f32, up: [3]f32 = {0, 1, 0}) {
-    look_at_trs(write(viewer), target, up)
+look_at_t :: proc(viewer: Node, target: [3]f32, up: [3]f32 = {0, 1, 0}) {
+    look_at_trs(local(viewer), target, up)
 }
 
 translate :: proc{translate_trs, translate_t}

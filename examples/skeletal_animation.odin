@@ -31,13 +31,14 @@ init :: proc() {
     light = graphics.make_directional_light({0.6, 0.4, 0}, {1, 0, 0, 10})
     
     brainstem = graphics.make_scene_from_file("BrainStem.gltf", #load("../resources/BrainStem.gltf"))
-    transform.init(brainstem.root, {translation={0, -1, 5}})
+    //brainstem = graphics.make_scene_from_file("../resources/lovechan.gltf", #load("../resources/lovechan.gltf"))
+    transform.init_node(brainstem.root, {translation={0, -1, 5}})
     brainstem_anim = graphics.animate(&brainstem)
     graphics.play(&brainstem_anim, 0, true, 0.5, weight=0.6)
     fmt.printfln("%#v", brainstem.nodes[0])
 
     brainstem2 = graphics.copy_scene(&brainstem)
-    transform.init(brainstem2.root, {translation={2, -1, 2}, scale=0.5})
+    transform.init_node(brainstem2.root, {translation={2, -1, 2}, scale=0.5})
     brainstem2_anim = graphics.animate(&brainstem2)
     graphics.play(&brainstem2_anim, 0, true)
     fmt.printfln("%#v", brainstem2.nodes[0])
@@ -48,7 +49,7 @@ tick :: proc() {
     if input.key_pressed(.Key_Escape) {
         window.close()
     }
-    brainstem_trans := transform.write(brainstem.root)
+    brainstem_trans := transform.local(brainstem.root)
     //transform.rotatex(brainstem_trans, math.to_radians(f32(-5)))
     if input.key_down(.Key_Up) {
         brainstem_trans.translation -= {0, 0, 0.25}
@@ -79,8 +80,8 @@ draw :: proc(a: f64, dt: f64) {
     graphics.draw_camera(cam)
     graphics.progress(&brainstem_anim, dt)
     graphics.progress(&brainstem2_anim, dt)
-    graphics.draw_scene(brainstem, a)
-    graphics.draw_scene(brainstem2, a)
+    graphics.draw_scene(brainstem)
+    graphics.draw_scene(brainstem2)
     graphics.draw_light(light)
 }
 

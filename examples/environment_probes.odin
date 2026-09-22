@@ -80,7 +80,7 @@ init :: proc() {
     teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
     fmt.println(teapot.models[0].primitives)
     teapot.models[0].primitives[0].dyn.pbr_tint = {1, 0.2, 1, 1}
-    transform.init(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
+    transform.init_node(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
 
     light = graphics.make_directional_light({0, -0.6, 0.4}, {0.4, 0.5, 1.0, 4})
     light_trans = transform.make()
@@ -94,7 +94,7 @@ tick :: proc() {
         window.close()
     }
 
-    cam_trans := transform.write(cam_trans)
+    cam_trans := transform.local(&cam_trans)
     if input.key_down(.Key_W) {
         cam_trans.translation.z -= 0.01
     }
@@ -114,17 +114,17 @@ tick :: proc() {
     counter += 0.01
     light_angle_range: f32 = 10
     sin := linalg.sin(counter)*linalg.to_radians(light_angle_range)
-    trans := transform.write(light_trans)
+    trans := transform.local(&light_trans)
     trans.rotation = transform.rotation_from_angles({0, 0, sin})
 
 }
 
 draw :: proc(alpha, delta: f64) {
-    graphics.draw_camera(cam, transform.world(cam_trans, alpha))
+    graphics.draw_camera(cam, transform.world(cam_trans))
     graphics.draw_mesh(quad, quad_mat, metallic_tint=0, roughness_tint = 0.2)
     graphics.draw_mesh(wall, stained_glass_mat, metallic_tint=0)
-    graphics.draw_scene(teapot, alpha)
-    graphics.draw_directional_light(light, transform.world(light_trans, alpha))
+    graphics.draw_scene(teapot)
+    graphics.draw_directional_light(light, transform.world(light_trans))
     graphics.draw_environment_probe(env)
 }
 

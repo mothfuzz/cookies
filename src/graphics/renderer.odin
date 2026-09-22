@@ -763,7 +763,7 @@ draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
         for a in draw.bounding_axes {
             e += [3]f32{abs(a.x), abs(a.y), abs(a.z)}
         }
-        extents := [2][3]f32{draw.bounding_center + e, draw.bounding_center - e}
+        extents := [2][3]f32{draw.bounding_center - e, draw.bounding_center + e}
         mini.x = min(extents[0].x, mini.x)
         mini.y = min(extents[0].y, mini.y)
         mini.z = min(extents[0].z, mini.z)
