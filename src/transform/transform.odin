@@ -151,6 +151,7 @@ Transform :: union {
     //TRS?? //maybe not supported in the public API
     TRS_Smoothed,
     Node,
+    matrix[4,4]f32, //terminal type, largely for passthrough
 }
 
 tree_of :: proc(t: ^Transform) -> ^Tree {
@@ -166,6 +167,9 @@ promote :: proc(t: ^Transform, tt: ^Tree) -> Node {
         return t
     case TRS_Smoothed:
         return insert_node_smoothed(t, tt=tt)
+    case matrix[4,4]f32:
+        tx, rx, sx := get_world_trs(t)
+        return insert_node({tx, rx, sx}, tt=tt)
     case nil: //promote nil to ORIGIN
         return insert_node(tt=tt)
     }
@@ -212,6 +216,13 @@ make :: proc(trs: TRS = ORIGIN_TRS, parent: ^Transform = nil, tree: ^Tree = nil)
     return t
 }
 
+delete :: proc(t: Transform) {
+    #partial switch t in t {
+        case Node:
+        remove_node(t)
+    }
+}
+
 
 local_node :: proc(n: Node) -> ^TRS {
     if t, ok := hm.get(&n.tree.transforms, n.handle); ok {
@@ -230,11 +241,17 @@ local_trs_smoothed :: proc(trs: ^TRS_Smoothed, c: ^clock.Clock = clock.default) 
 }
 
 local_transform :: proc(t: ^Transform) -> ^TRS {
-    switch &t in t {
+    switch &val in t {
     case Node:
-        return local_node(t)
+        return local_node(val)
     case TRS_Smoothed:
-        return local_trs_smoothed(&t)
+        return local_trs_smoothed(&val)
+    case matrix[4,4]f32:
+        //if you're trying to get a local TRS out of a computed matrix, you probably want extraction...
+        //shear would be lost, though.
+        trs := TRS{get_world_trs(val)}
+        t^ = TRS_Smoothed{trs, trs, clock.default.current_tick}
+        return local_trs_smoothed(&t.(TRS_Smoothed), clock.default)
     }
     return nil
 }
@@ -284,6 +301,8 @@ compute_transform :: proc(t: Transform) -> matrix[4,4]f32 {
         return compute_trs_smoothed(t)
     case Node:
         return compute_node(t)
+    case matrix[4,4]f32:
+        return t
     }
     return 1
 }

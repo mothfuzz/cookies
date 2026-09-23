@@ -551,7 +551,7 @@ calculate_skeleton :: proc(scene: Scene, node: Node) -> []matrix[4,4]f32 {
 }
 
 @(private)
-draw_model :: proc(scene: Scene, model: Model, trans: matrix[4,4]f32=1, bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
+draw_model :: proc(scene: Scene, model: Model, trans: transform.Transform, bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
     for primitive in model.primitives {
         mesh := scene.meshes[primitive.mesh]
         material := scene.materials[primitive.material]
@@ -570,7 +570,7 @@ draw_node :: proc(scene: Scene, node: Node, layers: Layer_Mask) {
     case .Node:
     case .Model:
         bones := calculate_skeleton(scene, node)
-        draw_model(scene, scene.models[node.data], transform.world(node), bones, layers)
+        draw_model(scene, scene.models[node.data], node, bones, layers)
     case .Camera:
         //...
     case .Light:

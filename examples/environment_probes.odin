@@ -120,11 +120,11 @@ tick :: proc() {
 }
 
 draw :: proc(alpha, delta: f64) {
-    graphics.draw_camera(cam, transform.world(cam_trans))
+    graphics.draw_camera(cam, cam_trans)
     graphics.draw_mesh(quad, quad_mat, metallic_tint=0, roughness_tint = 0.2)
     graphics.draw_mesh(wall, stained_glass_mat, metallic_tint=0)
     graphics.draw_scene(teapot)
-    graphics.draw_directional_light(light, transform.world(light_trans))
+    graphics.draw_directional_light(light, light_trans)
     graphics.draw_environment_probe(env)
 }
 

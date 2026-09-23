@@ -6,6 +6,9 @@ import "base:runtime"
 import "vendor:wgpu"
 import "core:math"
 
+//whoa we did it we imported another cookies package in a cookies package
+import "cookies:transform"
+
 Renderer :: struct {
     ctx: runtime.Context,
     instance: wgpu.Instance,
@@ -665,33 +668,33 @@ set_screen_target :: proc(frame: ^Frame, screen: wgpu.TextureView) {
 frame: Frame
 
 @(export)
-draw_point_light :: proc(light: Point_Light, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
-    append(&frame.lights, Light_Draw{light, trans, layers})
+draw_point_light :: proc(light: Point_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
+    append(&frame.lights, Light_Draw{light, transform.world(trans), layers})
 }
 @(export)
-draw_directional_light :: proc(light: Directional_Light, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
-    append(&frame.lights, Light_Draw{light, trans, layers})
+draw_directional_light :: proc(light: Directional_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
+    append(&frame.lights, Light_Draw{light, transform.world(trans), layers})
 }
 @(export)
-draw_spot_light :: proc(light: Spot_Light, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
-    append(&frame.lights, Light_Draw{light, trans, layers})
+draw_spot_light :: proc(light: Spot_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
+    append(&frame.lights, Light_Draw{light, transform.world(trans), layers})
 }
 draw_light :: proc{draw_point_light, draw_directional_light, draw_spot_light}
 
 @(export)
-draw_camera :: proc(camera: Camera, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
+draw_camera :: proc(camera: Camera, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
     camera := camera
     if layers != All_Layers {
         camera.layer_mask = layers
     }
     append(&frame.screen_target.cameras, len(frame.cameras))
-    append(&frame.cameras, calculate_camera(camera, trans)) //compute once, don't defer
+    append(&frame.cameras, calculate_camera(camera, transform.world(trans))) //compute once, don't defer
 }
 
 @(export)
-draw_render_target :: proc(camera: Camera, target: Render_Target, trans: matrix[4,4]f32 = 1, layers: Layer_Mask = All_Layers) {
+draw_render_target :: proc(camera: Camera, target: Render_Target, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
     target := target
-    camera := calculate_camera(camera, trans, &target)
+    camera := calculate_camera(camera, transform.world(trans), &target)
     if layers != All_Layers {
         camera.layer_mask = layers
     }
@@ -729,14 +732,10 @@ draw_environment_probe :: proc(probe: Environment_Probe, layers: Layer_Mask = Al
 }
 
 
-@(export)
-draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
-                  clip_rect: [4]f32 = 0,
-                  base_color_tint: [4]f32 = 1,
-                  ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
-                  emissive_tint: [3]f32 = 1,
-                  sprite: bool = false, billboard: bool = false,
-                  bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
+@(private)
+draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32,
+                           dynamic_material: Dynamic_Material, sprite, billboard: bool,
+                           bones: []matrix[4,4]f32, layers: Layer_Mask) {
 
     //get the batch
     if frame.action == nil {
@@ -750,11 +749,7 @@ draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
             batch.instances = make([dynamic]Mesh_Draw)
         }
 
-        pbr_tint := [4]f32{ambient_tint, roughness_tint, metallic_tint, 1}
-        emissive_tint := [4]f32{emissive_tint.r, emissive_tint.g, emissive_tint.b, 1}
-        dynamic_material := Dynamic_Material{clip_rect, base_color_tint, pbr_tint, emissive_tint}
-
-        draw := Mesh_Draw{{transform, dynamic_material, 0}, sprite, billboard, bones, {}, 0, 0, layers}
+        draw := Mesh_Draw{{trans, dynamic_material, 0}, sprite, billboard, bones, {}, 0, 0, layers}
         calculate_mesh_local(&draw, mesh, material)
         mini := &frame.scene_extents[0]
         maxi := &frame.scene_extents[1]
@@ -777,15 +772,30 @@ draw_mesh :: proc(mesh: Mesh, material: Material, transform: matrix[4,4]f32 = 1,
     }
 }
 
+@(export)
+draw_mesh :: proc(mesh: Mesh, material: Material, trans: transform.Transform = nil,
+                  clip_rect: [4]f32 = 0,
+                  base_color_tint: [4]f32 = 1,
+                  ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
+                  emissive_tint: [3]f32 = 1,
+                  sprite: bool = false, billboard: bool = false,
+                  bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
+    trans := transform.world(trans)
+    pbr_tint := [4]f32{ambient_tint, roughness_tint, metallic_tint, 1}
+    emissive_tint := [4]f32{emissive_tint.r, emissive_tint.g, emissive_tint.b, 1}
+    dynamic_material := Dynamic_Material{clip_rect, base_color_tint, pbr_tint, emissive_tint}
+    draw_mesh_internal(mesh, material, trans, dynamic_material, sprite, billboard, bones, layers)
+}
+
 //sprites are just special kinds of meshes
 @(export)
-draw_sprite :: proc(material: Material, transform: matrix[4, 4]f32 = 1,
+draw_sprite :: proc(material: Material, trans: transform.Transform = nil,
                     clip_rect: [4]f32 = 0,
                     base_color_tint: [4]f32 = 1,
                     ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
                     emissive_tint: [3]f32 = 1,
                     billboard: bool = true, layers: Layer_Mask = All_Layers) {
-    draw_mesh(quad_mesh, material, transform, clip_rect,
+    draw_mesh(quad_mesh, material, trans, clip_rect,
               base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint,
               true, billboard, nil, layers)
 }

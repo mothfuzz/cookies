@@ -1,5 +1,6 @@
 package graphics
 import stbtt "vendor:stb/truetype"
+import "cookies:transform" //for 3d text
 
 /*
 we're gonna do this how stb_truetype wants us to do it.
@@ -85,7 +86,9 @@ ui_draw_text :: proc(text: string, font: Font, pos: [2]f32 = 0, color: [4]f32 = 
 }
 
 /*lord*/ char_quad: Mesh
-draw_text :: proc(text: string, font: Font, model: matrix[4,4]f32 = 1, color: [4]f32 = 1, sprite: bool=true, billboard: bool=false) {
+draw_text :: proc(text: string, font: Font, trans: transform.Transform = nil, color: [4]f32 = 1, sprite: bool=true, billboard: bool=false, layers: Layer_Mask = All_Layers) {
+
+    trans := transform.world(trans)
 
     if char_quad.size == 0 {
         char_quad = make_mesh([]Vertex{
@@ -103,9 +106,9 @@ draw_text :: proc(text: string, font: Font, model: matrix[4,4]f32 = 1, color: [4
         stbtt.GetBakedQuad(raw_data(font.baked_chars), FONT_RES, FONT_RES, i32(c), &x, &y, &quad, true)
         w := quad.x1 - quad.x0
         h := quad.y1 - quad.y0
-        trans: matrix[4,4]f32 = {
-            1, 0, 0, x,
-            0, 1, 0, h/2-y,
+        offset: matrix[4,4]f32 = {
+            1, 0, 0, quad.x0 + w/2,
+            0, 1, 0, -(quad.y0 + h/2),
             0, 0, 1, 0,
             0, 0, 0, 1,
         }
@@ -115,7 +118,8 @@ draw_text :: proc(text: string, font: Font, model: matrix[4,4]f32 = 1, color: [4
             (quad.s1 - quad.s0)*FONT_RES,
             (quad.t1 - quad.t0)*FONT_RES,
         }
-        draw_mesh(char_quad, font.material, transform=model * trans, base_color_tint=color, clip_rect=clip_rect, sprite=sprite, billboard=billboard)
+        dynamic_material := Dynamic_Material{base_color_tint = color, pbr_tint=1, emissive_tint=1, clip_rect=clip_rect}
+        draw_mesh_internal(char_quad, font.material, trans * offset, dynamic_material, sprite, billboard, nil, layers)
     }
 
 }
