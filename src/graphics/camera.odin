@@ -184,8 +184,7 @@ make_camera_relative :: proc(viewport: [4]f32, near: f32 = 0, far: f32 = 0, fov:
 look_at :: proc(cam: ^Camera, eye, center: [3]f32, up: [3]f32 = {0, 1, 0}) {
     cam.translation = eye
     eye := eye
-    //dunno why it requires an inverse... handedness issues or z-flip maybe?
-    cam.rotation = linalg.quaternion_inverse(linalg.quaternion_look_at(eye, center, up))
+    cam.rotation = linalg.quaternion_from_forward_and_up(center - eye, up)
 }
 
 inverse_view :: proc(trans: matrix[4,4]f32) -> (inv_view: matrix[4,4]f32) {

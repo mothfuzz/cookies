@@ -153,7 +153,7 @@ Light_Count :: struct {
 light_count_buffer: wgpu.Buffer
 light_count_buffer_init: bool
 
-make_point_light :: proc(position: [3]f32, color: [4]f32 = 1, range: f32 = 0, render_shadows: bool = true) -> (pl: Point_Light) {
+make_point_light :: proc(position: [3]f32 = 0, color: [4]f32 = 1, range: f32 = 0, render_shadows: bool = true) -> (pl: Point_Light) {
     pl.position = position
     pl.color = color
     if range == 0 {
@@ -165,14 +165,14 @@ make_point_light :: proc(position: [3]f32, color: [4]f32 = 1, range: f32 = 0, re
     return
 }
 
-make_directional_light :: proc(direction: [3]f32, color: [4]f32 = 1, render_shadows: bool = true) -> (dl: Directional_Light) {
+make_directional_light :: proc(direction: [3]f32 = {0, 0, -1}, color: [4]f32 = 1, render_shadows: bool = true) -> (dl: Directional_Light) {
     dl.direction = direction
     dl.color = color
     dl.render_shadows = render_shadows
     return
 }
 
-make_spot_light :: proc(position: [3]f32, direction: [3]f32, inner_angle: f32, outer_angle: f32 = 0, color: [4]f32 = 1, range: f32 = 0, render_shadows: bool = true) -> (sl: Spot_Light) {
+make_spot_light :: proc(position: [3]f32 = 0, direction: [3]f32 = {0, 0, -1}, inner_angle: f32, outer_angle: f32 = 0, color: [4]f32 = 1, range: f32 = 0, render_shadows: bool = true) -> (sl: Spot_Light) {
     sl.position = position
     sl.direction = direction
     sl.inner_angle = inner_angle
