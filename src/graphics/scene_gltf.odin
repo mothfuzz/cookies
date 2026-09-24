@@ -200,7 +200,7 @@ load_material :: proc(gltf_path: cstring, opts: cgltf.options, material: cgltf.m
     base_color_tex: Texture = white_tex
     base_color_tint: [4]f32 = 1
     pbr_tint: [4]f32 = 1
-    emissive_tint: [4]f32 = 1
+    emissive_tint: [4]f32 = {0, 0, 0, 1}
     if material.pbr_metallic_roughness.base_color_texture.texture != nil {
         base_color_tex = load_image(gltf_path, opts, material.pbr_metallic_roughness.base_color_texture.texture.image_)
 
@@ -209,14 +209,11 @@ load_material :: proc(gltf_path: cstring, opts: cgltf.options, material: cgltf.m
         tiling[0] = sampler.wrap_s != .clamp_to_edge
         tiling[1] = sampler.wrap_t != .clamp_to_edge
     }
-    if material.pbr_metallic_roughness.base_color_factor != 0 {
-        base_color_tint = material.pbr_metallic_roughness.base_color_factor
-    }
+    base_color_tint = material.pbr_metallic_roughness.base_color_factor
 
     normal_tex: Texture = normal_tex
     if material.normal_texture.texture != nil {
         normal_tex = load_image(gltf_path, opts, material.normal_texture.texture.image_, true)
-
     }
 
     pbr_tex: Texture = pbr_tex
@@ -224,19 +221,17 @@ load_material :: proc(gltf_path: cstring, opts: cgltf.options, material: cgltf.m
         pbr_tex = load_image(gltf_path, opts, material.pbr_metallic_roughness.metallic_roughness_texture.texture.image_, true)
     }
     //no such occlusion_factor, so no pbr_tint.r
-    if material.pbr_metallic_roughness.roughness_factor != 0 {
-        pbr_tint.g = material.pbr_metallic_roughness.roughness_factor
-    }
-    if material.pbr_metallic_roughness.metallic_factor != 0 {
-        pbr_tint.b = material.pbr_metallic_roughness.metallic_factor
-    }
+    pbr_tint.g = material.pbr_metallic_roughness.roughness_factor
+    pbr_tint.b = material.pbr_metallic_roughness.metallic_factor
 
-    emissive_tex: Texture = black_tex
+    emissive_tex: Texture = white_tex
     if material.emissive_texture.texture != nil {
         emissive_tex = load_image(gltf_path, opts, material.emissive_texture.texture.image_)
     }
-    if material.emissive_factor != 0 {
-        emissive_tint.rgb = material.emissive_factor
+    emissive_tint.rgb = material.emissive_factor
+
+    if material.has_emissive_strength {
+        emissive_tint.rgb *= material.emissive_strength.emissive_strength
     }
 
     ret_material := make_material(base_color_tex, normal_tex, pbr_tex, emissive_tex, filtering, tiling)
@@ -256,9 +251,11 @@ load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: Mes
     default_colors := true
     for attribute in primitive.attributes {
         size := cgltf.accessor_unpack_floats(attribute.data, nil, 0)
+        num_components := cgltf.num_components(attribute.data.type)
         if vertices == nil {
-            vertices = make(#soa[]Vertex, size)
+            vertices = make(#soa[]Vertex, size/num_components)
         }
+        if attribute.index != 0 do continue
         switch attribute.type {
         case .position:
             if cgltf.accessor_unpack_floats(attribute.data, raw_data(vertices.position), size) < size {
@@ -609,7 +606,7 @@ delete_scene :: proc(scene: Scene) {
             if material.base.base_color_tex.image != white_tex.image do delete_texture(material.base.base_color_tex)
             if material.base.normal_tex.image != normal_tex.image do delete_texture(material.base.normal_tex)
             if material.base.pbr_tex.image != pbr_tex.image do delete_texture(material.base.pbr_tex)
-            if material.base.emissive_tex.image != black_tex.image do delete_texture(material.base.emissive_tex)
+            if material.base.emissive_tex.image != white_tex.image do delete_texture(material.base.emissive_tex)
             delete_material(material.base)
         }
         delete(scene.materials)

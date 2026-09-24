@@ -63,8 +63,8 @@ make_scaled_image_bilinear :: proc(input: []u32, in_size, out_size: [2]uint) -> 
     for i in 0..<out_size.y {
         for j in 0..<out_size.x {
             //bilinear
-            x := clamp(f32(j)/scale.x-0.5, 0, f32(in_size.x-1))
-            y := clamp(f32(i)/scale.y-0.5, 0, f32(in_size.y-1))
+            x := clamp((f32(j)+0.5)/scale.x-0.5, 0, f32(in_size.x-1))
+            y := clamp((f32(i)+0.0)/scale.y-0.5, 0, f32(in_size.y-1))
             xi := uint(x)
             yi := uint(y)
             dx := x - f32(xi)
