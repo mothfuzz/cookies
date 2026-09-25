@@ -73,7 +73,7 @@ init :: proc() {
 tick :: proc() {
     //transform cubes
     for &cube in cubes {
-        trans := transform.write(cube.trans)
+        trans := transform.local(&cube.trans)
         transform.rotatex(trans, 0.01)
         transform.rotatey(trans, 0.01)
         transform.rotatez(trans, 0.01)
@@ -84,7 +84,7 @@ draw :: proc(alpha, delta: f64) {
     graphics.draw_camera(cam)
     graphics.draw_directional_light(light)
     for &cube in cubes {
-        graphics.draw_mesh(cubes_draw.mesh, cubes_draw.material, transform.world(cube.trans, alpha))
+        graphics.draw_mesh(cubes_draw.mesh, cubes_draw.material, cube.trans)
     }
     fps := fmt.tprintf("fps: %f", 1.0/delta)
     graphics.ui_draw_text(fps, font, {-Width/2, +Height/2}, {1, 1, 1, 1})
