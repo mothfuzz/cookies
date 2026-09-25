@@ -410,7 +410,7 @@ fn box_project(r: vec3<f32>, position: vec3<f32>, box: EnvironmentProbeBox) -> v
     return hit - box.center.xyz;
 }
 
-fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
+fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -> vec4<f32> {
     var final_color = in_color;
     var light = final_color.rgb;
 
@@ -432,6 +432,7 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>) -> vec4<f32> {
             //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
             n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
         }
+        n = select(-n, n, front_facing);
         let v = normalize(-in.position.xyz); //already in view space
 
         let light_input = LightInput(in.position, in.normal, n, v, final_color, roughness, metallic);
@@ -489,13 +490,13 @@ fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
 }
 
 @fragment
-fn solid_main(in: VSOut) -> @location(0) vec4<f32> {
+fn solid_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint;
     var final_color = base_color;
     if final_color.a < 0.9 {
         discard;
     }
-    final_color = apply_light_environment(in, final_color);
+    final_color = apply_light_environment(in, final_color, front_facing);
     let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
     final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
     final_color = apply_fog(in.position, final_color);
@@ -509,14 +510,14 @@ struct TransOut {
 }
 
 @fragment
-fn trans_main(in: VSOut) -> TransOut {
+fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut {
     var out: TransOut;
     let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint * in.color;
     if !(base_color.a > 0 && base_color.a < 1) {
         discard;
     }
     var final_color = base_color;
-    final_color = apply_light_environment(in, final_color);
+    final_color = apply_light_environment(in, final_color, front_facing);
     let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
     final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
     final_color = apply_fog(in.position, final_color);

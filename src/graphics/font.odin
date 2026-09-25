@@ -86,7 +86,7 @@ ui_draw_text :: proc(text: string, font: Font, pos: [2]f32 = 0, color: [4]f32 = 
 }
 
 /*lord*/ char_quad: Mesh
-draw_text :: proc(text: string, font: Font, trans: transform.Transform = nil, color: [4]f32 = 1, sprite: bool=true, billboard: bool=false, layers: Layer_Mask = All_Layers) {
+draw_text :: proc(text: string, font: Font, trans: transform.Transform = nil, color: [4]f32 = 1, sprite: bool=true, billboard: bool=false, double_sided: bool=false, layers: Layer_Mask = All_Layers) {
 
     trans := transform.world(trans)
 
@@ -119,7 +119,7 @@ draw_text :: proc(text: string, font: Font, trans: transform.Transform = nil, co
             (quad.t1 - quad.t0)*FONT_RES,
         }
         dynamic_material := Dynamic_Material{base_color_tint = color, pbr_tint=1, emissive_tint=1, clip_rect=clip_rect}
-        draw_mesh_internal(char_quad, font.material, trans * offset, dynamic_material, sprite, billboard, nil, layers)
+        draw_mesh_internal(char_quad, font.material, trans * offset, dynamic_material, sprite, billboard, double_sided, nil, layers)
     }
 
 }

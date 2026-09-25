@@ -7,8 +7,8 @@ import "core:math"
 Shadow_Renderer :: struct {
     //shadow map data
     shadow_layout: wgpu.PipelineLayout,
-    solid_shadow_pipeline: wgpu.RenderPipeline,
-    trans_shadow_pipeline: wgpu.RenderPipeline,
+    solid_shadow_pipelines: [Cull_Mode]wgpu.RenderPipeline,
+    trans_shadow_pipelines: [Cull_Mode]wgpu.RenderPipeline,
     shadow_depth_sampler: wgpu.Sampler,
     shadow_color_sampler: wgpu.Sampler,
     point_light_shadow_depth: Texture,
@@ -28,14 +28,8 @@ DIRECTIONAL_CASCADE_SPLIT_WEIGHT :: 0.5
 SPOT_LIGHT_SHADOW_MAP_RES :: 1024
 
 
-init_shadows :: proc() {
-    bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, skeletons_layout}
-    ren.shadow_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
-        bindGroupLayoutCount = len(bind_group_layouts),
-        bindGroupLayouts = raw_data(bind_group_layouts),
-    })
-
-    ren.solid_shadow_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+create_shadow_pipeline :: proc(cull_mode: Cull_Mode) {
+    ren.solid_shadow_pipelines[cull_mode] = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         label = "solid shadows",
         layout = ren.shadow_layout,
         vertex = {
@@ -67,8 +61,8 @@ init_shadows :: proc() {
         },
         primitive = {
             topology = .TriangleList,
-            cullMode = .None, //.Front?
-            frontFace = .CCW,
+            cullMode = wgpu_cull_mode[cull_mode],
+            frontFace = .CCW, //.CW for more accuracy?
         },
         depthStencil = &{
             format = .Depth32Float,
@@ -84,7 +78,7 @@ init_shadows :: proc() {
             mask = 0xffffffff,
         },
     })
-    ren.trans_shadow_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+    ren.trans_shadow_pipelines[cull_mode] = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         label = "trans shadows",
         layout = ren.shadow_layout,
         vertex = {
@@ -116,7 +110,7 @@ init_shadows :: proc() {
         },
         primitive = {
             topology = .TriangleList,
-            cullMode = .None,
+            cullMode = wgpu_cull_mode[cull_mode],
             frontFace = .CCW,
         },
         depthStencil = &{
@@ -129,6 +123,20 @@ init_shadows :: proc() {
             mask = 0xffffffff,
         },
     })
+    
+}
+
+
+init_shadows :: proc() {
+    bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, skeletons_layout}
+    ren.shadow_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
+        bindGroupLayoutCount = len(bind_group_layouts),
+        bindGroupLayouts = raw_data(bind_group_layouts),
+    })
+
+    for cull_mode in Cull_Mode {
+        create_shadow_pipeline(cull_mode)
+    }
 
     size: [2]uint = POINT_LIGHT_SHADOW_MAP_RES
     ren.point_light_shadow_depth = make_render_texture_array(size, .Depth32Float, 1, true)
@@ -164,8 +172,10 @@ init_shadows :: proc() {
 }
 
 delete_shadows :: proc() {
-    wgpu.RenderPipelineRelease(ren.solid_shadow_pipeline)
-    wgpu.RenderPipelineRelease(ren.trans_shadow_pipeline)
+    for cull_mode in Cull_Mode {
+        wgpu.RenderPipelineRelease(ren.solid_shadow_pipelines[cull_mode])
+        wgpu.RenderPipelineRelease(ren.trans_shadow_pipelines[cull_mode])
+    }
     wgpu.PipelineLayoutRelease(ren.shadow_layout)
     wgpu.SamplerRelease(ren.shadow_depth_sampler)
     wgpu.SamplerRelease(ren.shadow_color_sampler)
@@ -368,11 +378,10 @@ render_shadow_maps :: proc(command_encoder: wgpu.CommandEncoder, passes: Passes,
                 depthClearValue = 0.0,
             },
         })
-        wgpu.RenderPassEncoderSetPipeline(solid_shadow_pass, ren.solid_shadow_pipeline)
 
         bind_shadow_camera(solid_shadow_pass, 0, shadow_cam)
         bind_skeletons(solid_shadow_pass, 2)
-        execute_draw_calls(solid_shadow_pass, passes.solid_shadows[i].draw_calls[:])
+        execute_draw_calls(solid_shadow_pass, passes.solid_shadows[i].draw_calls[:], ren.solid_shadow_pipelines)
 
         wgpu.RenderPassEncoderEnd(solid_shadow_pass)
         wgpu.RenderPassEncoderRelease(solid_shadow_pass)
@@ -392,11 +401,10 @@ render_shadow_maps :: proc(command_encoder: wgpu.CommandEncoder, passes: Passes,
                 depthStoreOp = .Store,
             },
         })
-        wgpu.RenderPassEncoderSetPipeline(trans_shadow_pass, ren.trans_shadow_pipeline)
 
         bind_shadow_camera(trans_shadow_pass, 0, shadow_cam)
         bind_skeletons(trans_shadow_pass, 2)
-        execute_draw_calls(trans_shadow_pass, passes.trans_shadows[i].draw_calls[:])
+        execute_draw_calls(trans_shadow_pass, passes.trans_shadows[i].draw_calls[:], ren.trans_shadow_pipelines)
 
         wgpu.RenderPassEncoderEnd(trans_shadow_pass)
         wgpu.RenderPassEncoderRelease(trans_shadow_pass)

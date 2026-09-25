@@ -404,10 +404,17 @@ vertex_buffer_layouts := []wgpu.VertexBufferLayout{
     instance_data_attribute,
 }
 
+Cull_Mode :: enum {
+    Back_CCW, //normal
+    Front_CCW, //inverted
+    None, //double-sided
+}
+
 Mesh_Draw :: struct {
     using instance: Instance,
     is_sprite: bool,
     is_billboard: bool,
+    cull_mode: Cull_Mode,
     bones: []matrix[4,4]f32,
     bounding_center: [3]f32,
     bounding_radius: f32,

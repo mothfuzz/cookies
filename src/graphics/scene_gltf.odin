@@ -51,6 +51,7 @@ Node :: struct {
 Combined_Material :: struct {
     using base: Material,
     using dyn: Dynamic_Material,
+    double_sided: bool,
 }
 
 Primitive :: struct {
@@ -235,7 +236,7 @@ load_material :: proc(gltf_path: cstring, opts: cgltf.options, material: cgltf.m
     }
 
     ret_material := make_material(base_color_tex, normal_tex, pbr_tex, emissive_tex, filtering, tiling)
-    return {ret_material, {base_color_tint=base_color_tint, pbr_tint=pbr_tint, emissive_tint=emissive_tint}}
+    return {ret_material, {base_color_tint=base_color_tint, pbr_tint=pbr_tint, emissive_tint=emissive_tint}, bool(material.double_sided)}
 }
 
 @(private)
@@ -553,9 +554,10 @@ draw_model :: proc(scene: Scene, model: Model, trans: transform.Transform, bones
         mesh := scene.meshes[primitive.mesh]
         material := scene.materials[primitive.material]
         dyn := primitive.dyn
+        double_sided := material.double_sided
         draw_mesh(mesh, material, trans, dyn.clip_rect,
                   dyn.base_color_tint, dyn.pbr_tint.r, dyn.pbr_tint.g, dyn.pbr_tint.b, dyn.emissive_tint.rgb,
-                  false, false, bones, layers)
+                  false, false, double_sided, bones, layers)
     }
 }
 

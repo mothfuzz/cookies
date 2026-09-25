@@ -5,6 +5,7 @@ import "base:runtime"
 
 import "vendor:wgpu"
 import "core:math"
+import "core:math/linalg"
 
 //whoa we did it we imported another cookies package in a cookies package
 import "cookies:transform"
@@ -28,8 +29,8 @@ Renderer :: struct {
     oit_composite_shader: wgpu.ShaderModule,
     camera_fill_shader: wgpu.ShaderModule,
     layout: wgpu.PipelineLayout,
-    solid_pipeline: wgpu.RenderPipeline,
-    trans_pipeline: wgpu.RenderPipeline,
+    solid_pipelines: [Cull_Mode]wgpu.RenderPipeline,
+    trans_pipelines: [Cull_Mode]wgpu.RenderPipeline,
     oit_composite_layout: wgpu.PipelineLayout,
     oit_composite_pipeline: wgpu.RenderPipeline,
     oit_composite_bind_group_layout: wgpu.BindGroupLayout,
@@ -63,6 +64,12 @@ without_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
     case:
         return format
     }
+}
+
+wgpu_cull_mode := [Cull_Mode]wgpu.CullMode {
+        .Back_CCW = .Back,
+        .Front_CCW = .Front,
+        .None = .None,
 }
 
 screen_resolution: [2]uint
@@ -179,6 +186,109 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
 uniform_alignment: int
 storage_alignment: int
 
+create_pipeline :: proc(cull_mode: Cull_Mode) {
+    ren.solid_pipelines[cull_mode] = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+        label = "solid",
+        layout = ren.layout,
+        vertex = {
+            module = ren.shader,
+            entryPoint = "vs_main",
+            bufferCount = len(vertex_buffer_layouts),
+            buffers = raw_data(vertex_buffer_layouts),
+        },
+        fragment = &{
+            module = ren.shader,
+            entryPoint = "solid_main",
+            targetCount = 1,
+            targets = &wgpu.ColorTargetState{
+                format = with_srgb(ren.config.format),
+                writeMask = wgpu.ColorWriteMaskFlags_All,
+            },
+        },
+        primitive = {
+            topology = .TriangleList,
+            cullMode = wgpu_cull_mode[cull_mode],
+            frontFace = .CCW,
+        },
+        depthStencil = &{
+            format = .Depth24PlusStencil8,
+            depthWriteEnabled = .True,
+            depthCompare = .LessEqual,
+        },
+        multisample = {
+            count = 4,
+            mask = 0xffffffff,
+        },
+    })
+
+    trans_targets := []wgpu.ColorTargetState{
+        //accum
+        {
+            format = .RGBA16Float,
+            writeMask = wgpu.ColorWriteMaskFlags_All,
+            blend = &{
+                color = wgpu.BlendComponent{
+                    operation = .Add,
+                    srcFactor = .One,
+                    dstFactor = .One,
+                },
+                alpha = wgpu.BlendComponent{
+                    operation = .Add,
+                    srcFactor = .One,
+                    dstFactor = .One,
+                },
+            },
+        },
+        //revealage
+        {
+            format = .R8Unorm,
+            writeMask = wgpu.ColorWriteMaskFlags_All,
+            blend = &{
+                color = wgpu.BlendComponent{
+                    operation = .Add,
+                    srcFactor = .Zero,
+                    dstFactor = .OneMinusSrc,
+                },
+                alpha = wgpu.BlendComponent{
+                    operation = .Add,
+                    srcFactor = .Zero,
+                    dstFactor = .OneMinusSrc,
+                },
+            },
+        },
+    }
+    ren.trans_pipelines[cull_mode] = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+        label = "trans",
+        layout = ren.layout,
+        vertex = {
+            module = ren.shader,
+            entryPoint = "vs_main",
+            bufferCount = len(vertex_buffer_layouts),
+            buffers = raw_data(vertex_buffer_layouts),
+        },
+        fragment = &{
+            module = ren.shader,
+            entryPoint = "trans_main",
+            targetCount = len(trans_targets),
+            targets = raw_data(trans_targets),
+        },
+        primitive = {
+            topology = .TriangleList,
+            cullMode = wgpu_cull_mode[cull_mode],
+            frontFace = .CCW,
+        },
+        depthStencil = &{
+            format = .Depth24PlusStencil8,
+            depthWriteEnabled = .False, //false for transparent materials
+            depthCompare = .LessEqual,
+        },
+        multisample = {
+            count = 4,
+            mask = 0xffffffff,
+        },
+    })
+}
+
 @(private)
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
     context = (^runtime.Context)(userdata1)^
@@ -256,116 +366,10 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         bindGroupLayouts = raw_data(bind_group_layouts),
     })
 
-    //vertex data
-    vertex_buffers := []wgpu.VertexBufferLayout{
-        position_attribute,
-        texcoord_attribute,
-        color_attribute,
-        instance_data_attribute,
+    log.debug("creating main pipelines...")
+    for cull_mode in Cull_Mode {
+        create_pipeline(cull_mode)
     }
-
-    log.debug("creating solid pipeline...")
-    ren.solid_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
-        label = "solid",
-        layout = ren.layout,
-        vertex = {
-            module = ren.shader,
-            entryPoint = "vs_main",
-            bufferCount = len(vertex_buffer_layouts),
-            buffers = raw_data(vertex_buffer_layouts),
-        },
-        fragment = &{
-            module = ren.shader,
-            entryPoint = "solid_main",
-            targetCount = 1,
-            targets = &wgpu.ColorTargetState{
-                format = with_srgb(ren.config.format),
-                writeMask = wgpu.ColorWriteMaskFlags_All,
-            },
-        },
-        primitive = {
-            topology = .TriangleList,
-            cullMode = .Back,
-            frontFace = .CCW,
-        },
-        depthStencil = &{
-            format = .Depth24PlusStencil8,
-            depthWriteEnabled = .True,
-            depthCompare = .LessEqual,
-        },
-        multisample = {
-            count = 4,
-            mask = 0xffffffff,
-        },
-    })
-
-    log.debug("creating trans pipeline...")
-    trans_targets := []wgpu.ColorTargetState{
-        //accum
-        {
-            format = .RGBA16Float,
-            writeMask = wgpu.ColorWriteMaskFlags_All,
-            blend = &{
-                color = wgpu.BlendComponent{
-                    operation = .Add,
-                    srcFactor = .One,
-                    dstFactor = .One,
-                },
-                alpha = wgpu.BlendComponent{
-                    operation = .Add,
-                    srcFactor = .One,
-                    dstFactor = .One,
-                },
-            },
-        },
-        //revealage
-        {
-            format = .R8Unorm,
-            writeMask = wgpu.ColorWriteMaskFlags_All,
-            blend = &{
-                color = wgpu.BlendComponent{
-                    operation = .Add,
-                    srcFactor = .Zero,
-                    dstFactor = .OneMinusSrc,
-                },
-                alpha = wgpu.BlendComponent{
-                    operation = .Add,
-                    srcFactor = .Zero,
-                    dstFactor = .OneMinusSrc,
-                },
-            },
-        },
-    }
-    ren.trans_pipeline = wgpu.DeviceCreateRenderPipeline(ren.device, &{
-        label = "trans",
-        layout = ren.layout,
-        vertex = {
-            module = ren.shader,
-            entryPoint = "vs_main",
-            bufferCount = len(vertex_buffer_layouts),
-            buffers = raw_data(vertex_buffer_layouts),
-        },
-        fragment = &{
-            module = ren.shader,
-            entryPoint = "trans_main",
-            targetCount = len(trans_targets),
-            targets = raw_data(trans_targets),
-        },
-        primitive = {
-            topology = .TriangleList,
-            cullMode = .Back,
-            frontFace = .CCW,
-        },
-        depthStencil = &{
-            format = .Depth24PlusStencil8,
-            depthWriteEnabled = .False, //false for transparent materials
-            depthCompare = .LessEqual,
-        },
-        multisample = {
-            count = 4,
-            mask = 0xffffffff,
-        },
-    })
 
     log.debug("creating compositor...")
     oit_composite_layout_entries := []wgpu.BindGroupLayoutEntry{
@@ -544,8 +548,10 @@ quit :: proc() {
     delete_skeletons_buffer()
     delete_probe_capture()
     delete_instance_buffer()
-    wgpu.RenderPipelineRelease(ren.solid_pipeline)
-    wgpu.RenderPipelineRelease(ren.trans_pipeline)
+    for cull_mode in Cull_Mode {
+        wgpu.RenderPipelineRelease(ren.solid_pipelines[cull_mode])
+        wgpu.RenderPipelineRelease(ren.trans_pipelines[cull_mode])
+    }
     wgpu.PipelineLayoutRelease(ren.layout)
     wgpu.RenderPipelineRelease(ren.oit_composite_pipeline)
     wgpu.PipelineLayoutRelease(ren.oit_composite_layout)
@@ -600,7 +606,7 @@ Frame :: struct {
 Mesh_Batch_Draw :: struct {
     mesh: Mesh,
     material: Material,
-    instances: [dynamic]Mesh_Draw,
+    instances: [Cull_Mode][dynamic]Mesh_Draw,
 }
 
 Batch_Hash :: distinct u64
@@ -614,7 +620,9 @@ delete_frame :: proc() {
     delete(frame.lights)
     delete(frame.cameras)
     for hash, &batch in frame.action {
-        delete(batch.instances)
+        for mode in Cull_Mode {
+            delete(batch.instances[mode])
+        }
     }
     delete(frame.action)
     for _, render_target in frame.render_targets {
@@ -734,7 +742,7 @@ draw_environment_probe :: proc(probe: Environment_Probe, layers: Layer_Mask = Al
 
 @(private)
 draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32,
-                           dynamic_material: Dynamic_Material, sprite, billboard: bool,
+                           dynamic_material: Dynamic_Material, sprite, billboard, double_sided: bool,
                            bones: []matrix[4,4]f32, layers: Layer_Mask) {
 
     //get the batch
@@ -746,11 +754,20 @@ draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32
         if just_inserted {
             batch.mesh = mesh
             batch.material = material
-            batch.instances = make([dynamic]Mesh_Draw)
+            for mode in Cull_Mode {
+                batch.instances[mode] = make([dynamic]Mesh_Draw)
+            }
         }
 
-        draw := Mesh_Draw{{trans, dynamic_material, 0}, sprite, billboard, bones, {}, 0, 0, layers}
+        draw := Mesh_Draw{{trans, dynamic_material, 0}, sprite, billboard, .Back_CCW, bones, {}, 0, 0, layers}
         calculate_mesh_local(&draw, mesh, material)
+        if double_sided {
+            draw.cull_mode = .None
+        } else {
+            if linalg.determinant(cast(matrix[3,3]f32)(trans)) < 0 {
+                draw.cull_mode = .Front_CCW
+            }
+        }
         mini := &frame.scene_extents[0]
         maxi := &frame.scene_extents[1]
         //Arvo's method - convert transformed bounding axes to AABB using absolute values
@@ -766,7 +783,7 @@ draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32
         maxi.y = max(extents[1].y, maxi.y)
         maxi.z = max(extents[1].z, maxi.z)
 
-        append(&batch.instances, draw)
+        append(&batch.instances[draw.cull_mode], draw)
     } else {
         log.panic("Could not create batch for Mesh/Material:", err)
     }
@@ -778,13 +795,13 @@ draw_mesh :: proc(mesh: Mesh, material: Material, trans: transform.Transform = n
                   base_color_tint: [4]f32 = 1,
                   ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
                   emissive_tint: [3]f32 = 1,
-                  sprite: bool = false, billboard: bool = false,
+                  sprite: bool = false, billboard: bool = false, double_sided: bool = false,
                   bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
     trans := transform.world(trans)
     pbr_tint := [4]f32{ambient_tint, roughness_tint, metallic_tint, 1}
     emissive_tint := [4]f32{emissive_tint.r, emissive_tint.g, emissive_tint.b, 1}
     dynamic_material := Dynamic_Material{clip_rect, base_color_tint, pbr_tint, emissive_tint}
-    draw_mesh_internal(mesh, material, trans, dynamic_material, sprite, billboard, bones, layers)
+    draw_mesh_internal(mesh, material, trans, dynamic_material, sprite, billboard, double_sided, bones, layers)
 }
 
 //sprites are just special kinds of meshes
@@ -794,23 +811,27 @@ draw_sprite :: proc(material: Material, trans: transform.Transform = nil,
                     base_color_tint: [4]f32 = 1,
                     ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
                     emissive_tint: [3]f32 = 1,
-                    billboard: bool = true, layers: Layer_Mask = All_Layers) {
+                    billboard: bool = true, double_sided: bool = false, layers: Layer_Mask = All_Layers) {
     draw_mesh(quad_mesh, material, trans, clip_rect,
               base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint,
-              true, billboard, nil, layers)
+              true, billboard, double_sided, nil, layers)
 }
 
 @(private)
 Mesh_Batch :: struct {
     mesh: Mesh,
     material: Material,
-    instances: []Mesh_Draw,
+    instances: [Cull_Mode][]Mesh_Draw,
 }
 @(private)
 flatten_action :: proc(f: Frame) -> []Mesh_Batch {
     batches := make([dynamic]Mesh_Batch)
-    for hash, batch in f.action {
-        append(&batches, Mesh_Batch{batch.mesh, batch.material, batch.instances[:]})
+    for hash, batch_draw in f.action {
+        batch := Mesh_Batch{mesh=batch_draw.mesh, material=batch_draw.material}
+        for mode in Cull_Mode {
+            batch.instances[mode] = batch_draw.instances[mode][:]
+        }
+        append(&batches, batch)
     }
     return batches[:]
 }
@@ -818,7 +839,9 @@ flatten_action :: proc(f: Frame) -> []Mesh_Batch {
 clear_action :: proc(f: ^Frame) {
     if f.action == nil do return
     for hash, &batch in f.action {
-        clear(&batch.instances)
+        for mode in Cull_Mode {
+            clear(&batch.instances[mode])
+        }
     }
 }
 
@@ -826,19 +849,23 @@ write_skeletons :: proc(batches: []Mesh_Batch) {
     //all the skeletons at once.
     running_offset := 0
     for &batch in batches {
-        for &draw in batch.instances {
-            if draw.bones == nil do continue
-            draw.indices[0] = i32(running_offset)
-            running_offset += len(draw.bones)
+        for mode in Cull_Mode {
+            for &draw in batch.instances[mode] {
+                if draw.bones == nil do continue
+                draw.indices[0] = i32(running_offset)
+                running_offset += len(draw.bones)
+            }
         }
     }
     realloc_skeletons_buffer(running_offset)
     for batch in batches {
-        for draw in batch.instances {
-            if draw.bones == nil do continue
-            offset := draw.indices[0] * size_of(matrix[4,4]f32)
-            size := len(draw.bones) * size_of(matrix[4,4]f32)
-            wgpu.QueueWriteBuffer(ren.queue, skeletons_buffer, u64(offset), raw_data(draw.bones), uint(size))
+        for mode in Cull_Mode {
+            for draw in batch.instances[mode] {
+                if draw.bones == nil do continue
+                offset := draw.indices[0] * size_of(matrix[4,4]f32)
+                size := len(draw.bones) * size_of(matrix[4,4]f32)
+                wgpu.QueueWriteBuffer(ren.queue, skeletons_buffer, u64(offset), raw_data(draw.bones), uint(size))
+            }
         }
     }
 }
@@ -903,19 +930,21 @@ calculate_environment_probes :: proc(probes: []Environment_Probe) {
 
 assign_cubemaps :: proc(batches: []Mesh_Batch) {
     for &batch in batches {
-        for &draw in batch.instances {
-            draw.indices[1] = -1
-            for probe in frame.environment_probes {
-                mini := probe.position + probe.extents[0]
-                maxi := probe.position + probe.extents[1]
-                if draw.bounding_center.x > mini.x &&
-                    draw.bounding_center.x < maxi.x &&
-                    draw.bounding_center.y > mini.y &&
-                    draw.bounding_center.y < maxi.y &&
-                    draw.bounding_center.z > mini.z &&
-                    draw.bounding_center.z < maxi.z {
-                        draw.indices[1] = i32(probe.cubemap_slot)
-                    }
+        for mode in Cull_Mode {
+            for &draw in batch.instances[mode] {
+                draw.indices[1] = -1
+                for probe in frame.environment_probes {
+                    mini := probe.position + probe.extents[0]
+                    maxi := probe.position + probe.extents[1]
+                    if draw.bounding_center.x > mini.x &&
+                        draw.bounding_center.x < maxi.x &&
+                        draw.bounding_center.y > mini.y &&
+                        draw.bounding_center.y < maxi.y &&
+                        draw.bounding_center.z > mini.z &&
+                        draw.bounding_center.z < maxi.z {
+                            draw.indices[1] = i32(probe.cubemap_slot)
+                        }
+                }
             }
         }
     }
@@ -925,6 +954,7 @@ assign_cubemaps :: proc(batches: []Mesh_Batch) {
 Draw_Call :: struct {
     mesh: Mesh,
     material: Material,
+    cull_mode: Cull_Mode,
     //offset insto pass's staging buffer
     first_instance: u32,
     instance_count: u32,
@@ -962,52 +992,62 @@ Pass_Staging :: struct {
 
 @(private)
 compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pass_Staging) {
-    for batch in batches {
-        solid_start, trans_start: u32
-        if solid != nil {
-            solid_start = u32(len(solid.instances))
-        }
-        if trans != nil {
-            trans_start = u32(len(trans.instances))
-        }
-
-        for instance in batch.instances {
-            if (cam.layer_mask & instance.layer_mask) == 0 do continue
-            instance := instance
-            is_solid, is_trans := instance_filter(batch.mesh, batch.material, instance)
-            if !is_solid && !is_trans do continue
-            if !sphere_in_frustum(cam, instance.bounding_center, instance.bounding_radius) do continue
-            if !bounds_in_frustum(cam, instance.bounding_center, instance.bounding_axes) do continue
-            calculate_mesh_world(&instance, cam)
-            if is_solid && solid != nil {
-                append(&solid.instances, instance)
+    cam_flip := linalg.determinant(cast(matrix[3,3]f32)(cam.view)) < 0
+    remap := [Cull_Mode]Cull_Mode{
+            .Back_CCW = cam_flip ? .Front_CCW : .Back_CCW,
+            .Front_CCW = cam_flip ? .Back_CCW : .Front_CCW,
+            .None = .None,
+    }
+    for mode in Cull_Mode {
+        for batch in batches {
+            solid_start, trans_start: u32
+            if solid != nil {
+                solid_start = u32(len(solid.instances))
             }
-            if is_trans && trans != nil {
-                append(&trans.instances, instance)
+            if trans != nil {
+                trans_start = u32(len(trans.instances))
             }
-        }
 
-        solid_count, trans_count: u32
-        if solid != nil {
-            solid_count = u32(len(solid.instances)) - solid_start
-        }
-        if trans != nil {
-            trans_count = u32(len(trans.instances)) - trans_start
-        }
+            for instance in batch.instances[mode] {
+                if (cam.layer_mask & instance.layer_mask) == 0 do continue
+                instance := instance
+                is_solid, is_trans := instance_filter(batch.mesh, batch.material, instance)
+                if !is_solid && !is_trans do continue
+                if !sphere_in_frustum(cam, instance.bounding_center, instance.bounding_radius) do continue
+                if !bounds_in_frustum(cam, instance.bounding_center, instance.bounding_axes) do continue
+                calculate_mesh_world(&instance, cam)
+                if is_solid && solid != nil {
+                    append(&solid.instances, instance)
+                }
+                if is_trans && trans != nil {
+                    append(&trans.instances, instance)
+                }
+            }
 
-        if solid_count > 0 {
-            append(&solid.draw_calls, Draw_Call{
-                mesh = batch.mesh, material = batch.material,
-                first_instance = solid_start,
-                instance_count = solid_count,
-            })
-        }
-        if trans_count > 0 {
-            append(&trans.draw_calls, Draw_Call{
-                mesh = batch.mesh, material = batch.material,
-                first_instance = trans_start,
-                instance_count = trans_count,
-            })
+            solid_count, trans_count: u32
+            if solid != nil {
+                solid_count = u32(len(solid.instances)) - solid_start
+            }
+            if trans != nil {
+                trans_count = u32(len(trans.instances)) - trans_start
+            }
+
+            if solid_count > 0 {
+                append(&solid.draw_calls, Draw_Call{
+                    mesh = batch.mesh, material = batch.material,
+                    cull_mode = remap[mode],
+                    first_instance = solid_start,
+                    instance_count = solid_count,
+                })
+            }
+            if trans_count > 0 {
+                append(&trans.draw_calls, Draw_Call{
+                    mesh = batch.mesh, material = batch.material,
+                    cull_mode = remap[mode],
+                    first_instance = trans_start,
+                    instance_count = trans_count,
+                })
+            }
         }
     }
 }
@@ -1119,10 +1159,11 @@ delete_passes :: proc(passes: Passes) {
 }
 
 @(private)
-execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Call) {
+execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Call, pipelines: [Cull_Mode]wgpu.RenderPipeline) {
     //lights and cameras are already bound at this point.
     prev_material: Material_Hash
     prev_mesh: Mesh_Hash
+    prev_cull_mode: Cull_Mode
     for draw in draws {
         if prev_material == 0 || draw.material.hash != prev_material {
             bind_material(render_pass, 1, draw.material)
@@ -1131,6 +1172,10 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
         if prev_mesh == 0 || draw.mesh.hash != prev_mesh {
             bind_mesh(render_pass, draw.mesh)
             prev_mesh = draw.mesh.hash
+        }
+        if prev_cull_mode == nil || draw.cull_mode != prev_cull_mode {
+            wgpu.RenderPassEncoderSetPipeline(render_pass, pipelines[draw.cull_mode])
+            prev_cull_mode = draw.cull_mode
         }
         draw_mesh_instances(render_pass, draw.mesh, draw.instance_count, draw.instance_buffer_offset)
     }
@@ -1249,11 +1294,10 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
                     stencilStoreOp = .Store,
                 },
             })
-            wgpu.RenderPassEncoderSetPipeline(render_pass, ren.solid_pipeline)
             bind_camera(render_pass, 0, camera)
             bind_skeletons(render_pass, 2)
             bind_lights(render_pass, 3, u32(i))
-            execute_draw_calls(render_pass, solid_passes[i].draw_calls[:])
+            execute_draw_calls(render_pass, solid_passes[i].draw_calls[:], ren.solid_pipelines)
             wgpu.RenderPassEncoderEnd(render_pass)
             wgpu.RenderPassEncoderRelease(render_pass)
         }
@@ -1290,11 +1334,10 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
                     stencilStoreOp = .Store,
                 },
             })
-            wgpu.RenderPassEncoderSetPipeline(render_pass, ren.trans_pipeline)
             bind_camera(render_pass, 0, camera)
             bind_skeletons(render_pass, 2)
             bind_lights(render_pass, 3, u32(i))
-            execute_draw_calls(render_pass, trans_passes[i].draw_calls[:])
+            execute_draw_calls(render_pass, trans_passes[i].draw_calls[:], ren.trans_pipelines)
             wgpu.RenderPassEncoderEnd(render_pass)
             wgpu.RenderPassEncoderRelease(render_pass)
         }
