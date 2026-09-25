@@ -1164,6 +1164,7 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
     prev_material: Material_Hash
     prev_mesh: Mesh_Hash
     prev_cull_mode: Cull_Mode
+    cull_mode_set: bool = false
     for draw in draws {
         if prev_material == 0 || draw.material.hash != prev_material {
             bind_material(render_pass, 1, draw.material)
@@ -1173,9 +1174,10 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
             bind_mesh(render_pass, draw.mesh)
             prev_mesh = draw.mesh.hash
         }
-        if prev_cull_mode == nil || draw.cull_mode != prev_cull_mode {
+        if cull_mode_set == false || draw.cull_mode != prev_cull_mode {
             wgpu.RenderPassEncoderSetPipeline(render_pass, pipelines[draw.cull_mode])
             prev_cull_mode = draw.cull_mode
+            cull_mode_set = true
         }
         draw_mesh_instances(render_pass, draw.mesh, draw.instance_count, draw.instance_buffer_offset)
     }
