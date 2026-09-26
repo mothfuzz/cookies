@@ -137,7 +137,7 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     copy(s.nodes, scene.nodes)
     //have to do this in 2 passes to preserve relationships
     for &node, i in s.nodes {
-        node.node = transform.insert_node()
+        node.node = transform.insert_node(tt=scene.nodes[i].tree)
         transform.copy_node(node.node, scene.nodes[i])
         orig_children := scene.nodes[i].children
         if orig_children != nil {
