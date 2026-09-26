@@ -90,6 +90,12 @@ deanimate :: proc(anim: Animation_Player) {
     delete(anim.instances)
 }
 
+//only valid for animated nodes
+@(private)
+get_original_trans :: proc(node: Node) -> transform.TRS {
+    return node.original_trans.(transform.TRS_Smoothed).next
+}
+
 progress :: proc(anim: ^Animation_Player, dt: f64) {
     //for weighted quaternion sum per-node
     rot_accum := make([]quaternion128, len(anim.scene.nodes), context.temp_allocator) 
@@ -101,7 +107,7 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
         for &channel, c in a.channels {
             node := anim.scene.nodes[source_channels[c].target_node]
             trans := transform.local_node(node)
-            trans^ = node.original_trans
+            trans^ = get_original_trans(node)
         }
     }
     //pass 2: accumulate transforms
@@ -168,17 +174,18 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
 
                 node := anim.scene.nodes[source_channel.target_node]
                 trans := transform.local_node(node)
+                original_trans := get_original_trans(node)
                 switch o in source_channel.output {
                 case Keyframes_Translation:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     translation := linalg.lerp(prev_frame, next_frame, t)
-                    trans.translation += a.weight * (translation - node.original_trans.translation)
+                    trans.translation += a.weight * (translation - original_trans.translation)
                 case Keyframes_Rotation:
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     rotation := linalg.quaternion_slerp(prev_frame, next_frame, t)
-                    delta := rotation * linalg.quaternion_inverse(node.original_trans.rotation)
+                    delta := rotation * linalg.quaternion_inverse(original_trans.rotation)
                     new_rot := quaternion(x=a.weight*delta.x, y=a.weight*delta.y, z=a.weight*delta.z, w=a.weight*delta.w)
                     if linalg.dot(rot_accum[source_channel.target_node], new_rot) < 0 {
                         //make sure weights are all in the same hemisphere
@@ -190,7 +197,7 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
                     prev_frame := o[channel.prev_frame]
                     next_frame := o[channel.next_frame]
                     scale := linalg.lerp(prev_frame, next_frame, t)
-                    trans.scale += a.weight * (scale - node.original_trans.scale)
+                    trans.scale += a.weight * (scale - original_trans.scale)
                 }
             }
         } else {
@@ -201,13 +208,14 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
                 source_channel := &source_channels[c]
                 node := anim.scene.nodes[source_channel.target_node]
                 trans := transform.local_node(node)
+                original_trans := get_original_trans(node)
                 switch o in source_channel.output {
                 case Keyframes_Translation:
                     translation := o[channel.next_frame]
-                    trans.translation += a.weight * (translation - node.original_trans.translation)
+                    trans.translation += a.weight * (translation - original_trans.translation)
                 case Keyframes_Rotation:
                     rotation := o[channel.next_frame]
-                    delta := rotation * linalg.quaternion_inverse(node.original_trans.rotation)
+                    delta := rotation * linalg.quaternion_inverse(original_trans.rotation)
                     new_rot := quaternion(x=a.weight*delta.x, y=a.weight*delta.y, z=a.weight*delta.z, w=a.weight*delta.w)
                     if linalg.dot(rot_accum[source_channel.target_node], new_rot) < 0 {
                         new_rot = -new_rot
@@ -216,7 +224,7 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
                     //trans.rotation = rotation
                 case Keyframes_Scale:
                     scale := o[channel.next_frame]
-                    trans.scale += a.weight * (scale - node.original_trans.scale)
+                    trans.scale += a.weight * (scale - original_trans.scale)
                 }
             }
         }
@@ -226,7 +234,8 @@ progress :: proc(anim: ^Animation_Player, dt: f64) {
         accum := rot_accum[i]
         if accum == 0 do continue
         trans := transform.local_node(node)
-        trans.rotation = linalg.normalize(accum) * node.original_trans.rotation
+        original_trans := get_original_trans(node)
+        trans.rotation = linalg.normalize(accum) * original_trans.rotation
     }
 }
 
@@ -259,7 +268,7 @@ stop :: proc(anim: ^Animation_Player, id: int, return_to_rest: bool = false) {
             source_channel := &anim.scene.animations[id].channels[i]
             node := &anim.scene.nodes[source_channel.target_node]
             trans := transform.local_node(node)
-            trans^ = node.original_trans
+            trans^ = get_original_trans(node^)
         }
     }
 }

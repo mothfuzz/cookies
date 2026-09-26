@@ -36,7 +36,7 @@ Node_Type :: enum {
 Node :: struct {
     name: string,
     using node: transform.Node,
-    original_trans: transform.TRS, //to be used when not-animated
+    original_trans: transform.Node_Local, //to be used when not-animated
     //for easier copying/traversal
     has_parent: bool,
     parent_node: uint,
@@ -138,11 +138,7 @@ copy_scene :: proc(scene: ^Scene, new_name: string = "") -> (s: Scene) {
     //have to do this in 2 passes to preserve relationships
     for &node, i in s.nodes {
         node.node = transform.insert_node()
-        trans := transform.local_node(node)
-        orig_trans := transform.local_node(scene.nodes[i])
-        trans.translation = orig_trans.translation
-        trans.rotation = orig_trans.rotation
-        trans.scale = orig_trans.scale
+        transform.copy_node(node.node, scene.nodes[i])
         orig_children := scene.nodes[i].children
         if orig_children != nil {
             node.children = make([]uint, len(orig_children))
@@ -370,7 +366,7 @@ load_skeleton :: proc(data: ^cgltf.data, scene: ^Scene, skin: cgltf.skin) -> (sk
     return
 }
 
-make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: bool = false) -> (scene: Scene) {
+make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: bool = false, tree: ^transform.Tree = transform.default_tree) -> (scene: Scene) {
 
     ctx := context
     opts := cgltf.options{
@@ -432,74 +428,65 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
 
     //load scene
     scene.nodes = make([]Node, len(data.nodes))
-    for &node in scene.nodes {
-        node.node = transform.insert_node()
+    for &node, i in scene.nodes {
+        src := data.nodes[i]
+
+        if src.children != nil && len(src.children) > 0 {
+            node.children = make([]uint, len(src.children))
+            for child, c in src.children {
+                node.children[c] = cgltf.node_index(data, child)
+            }
+        }
+
+        if src.has_matrix {
+            //copy matrix in as-is
+            mat := transmute(matrix[4,4]f32)(src.matrix_)
+            node.node = transform.insert_node_matrix(mat, tt=tree)
+            node.original_trans = mat
+        } else {
+            //load TRS directly
+            trs := transform.ORIGIN_TRS
+            if src.has_translation {
+                trs.translation = src.translation
+            }
+            if src.has_rotation {
+                rot := transmute(quaternion128)(src.rotation) //both are xyzw
+                trs.rotation = rot
+            }
+            if src.has_scale {
+                trs.scale = src.scale
+            }
+            node.node = transform.insert_node(trs, tt=tree)
+            node.original_trans = transform.TRS_Smoothed{trs, trs, tree.clk.current_tick}
+        }
+        node.type = .Node //by default
+        if src.mesh != nil {
+            index := cgltf.mesh_index(data, src.mesh)
+            node.type = .Model
+            node.data = index
+            if src.skin != nil {
+                node.animated = true
+                node.skin = cgltf.skin_index(data, src.skin)
+            }
+        }
+        if src.camera != nil {
+            index := cgltf.camera_index(data, src.camera)
+            node.type = .Camera
+            node.data = index
+        }
+        if src.light != nil {
+            index := cgltf.light_index(data, src.light)
+            node.type = .Light
+            node.data = index
+        }
     }
+    //link parents in second pass since they require the nodes to exist already
     for node, i in data.nodes {
         if node.parent != nil {
             p := cgltf.node_index(data, node.parent)
             scene.nodes[i].has_parent = true
             scene.nodes[i].parent_node = p //otherwise 0
             transform.link_node(scene.nodes[p], scene.nodes[i])
-        }
-        if node.children != nil && len(node.children) > 0 {
-            scene.nodes[i].children = make([]uint, len(node.children))
-            for child, c in node.children {
-                scene.nodes[i].children[c] = cgltf.node_index(data, child)
-            }
-        }
-        trans := transform.local_node(scene.nodes[i])
-        if node.has_matrix {
-            //extract TRS from matrix
-            mat := transmute(matrix[4,4]f32)(node.matrix_)
-            translation, rotation, scale := transform.get_world_trs(mat)
-            trans.translation = translation
-            trans.rotation = rotation
-            trans.scale = scale
-            scene.nodes[i].original_trans.translation = translation
-            scene.nodes[i].original_trans.rotation = rotation
-            scene.nodes[i].original_trans.scale = scale
-        } else {
-            //load TRS directly
-            if node.has_translation {
-                trans.translation = node.translation
-                scene.nodes[i].original_trans.translation = node.translation
-            } else {
-                scene.nodes[i].original_trans.translation = 0
-            }
-            if node.has_rotation {
-                rot := transmute(quaternion128)(node.rotation) //both are xyzw
-                trans.rotation = rot
-                scene.nodes[i].original_trans.rotation = rot
-            } else {
-                scene.nodes[i].original_trans.rotation = 1
-            }
-            if node.has_scale {
-                trans.scale = node.scale
-                scene.nodes[i].original_trans.scale = node.scale
-            } else {
-                scene.nodes[i].original_trans.scale = 1
-            }
-        }
-        scene.nodes[i].type = .Node //by default
-        if node.mesh != nil {
-            index := cgltf.mesh_index(data, node.mesh)
-            scene.nodes[i].type = .Model
-            scene.nodes[i].data = index
-            if node.skin != nil {
-                scene.nodes[i].animated = true
-                scene.nodes[i].skin = cgltf.skin_index(data, node.skin)
-            }
-        }
-        if node.camera != nil {
-            index := cgltf.camera_index(data, node.camera)
-            scene.nodes[i].type = .Camera
-            scene.nodes[i].data = index
-        }
-        if node.light != nil {
-            index := cgltf.light_index(data, node.light)
-            scene.nodes[i].type = .Light
-            scene.nodes[i].data = index
         }
     }
     scene.layouts = make([]Layout, len(data.scenes))

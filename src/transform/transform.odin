@@ -25,6 +25,11 @@ Handle :: struct {
     gen: u32,
 }
 
+Node_Local :: union #no_nil {
+    TRS_Smoothed,
+    matrix[4,4]f32,
+}
+
 Node :: struct {
     handle: Handle,
     tree: ^Tree,
@@ -34,7 +39,7 @@ Node :: struct {
 Transform_Data :: struct {
     handle: Handle,
 
-    local: TRS_Smoothed,
+    local: Node_Local,
     world: matrix[4,4]f32,
     world_serial: u64, //replacement for dirty-flag
 
@@ -91,6 +96,15 @@ insert_node_smoothed :: proc(trs: TRS_Smoothed, parent: Node = {}, tt: ^Tree = d
     return
 }
 
+insert_node_matrix :: proc(m: matrix[4,4]f32, parent: Node = {}, tt: ^Tree = default_tree) -> (trans: Node) {
+    trans.handle = hm.add(&tt.transforms, Transform_Data{local = m})
+    trans.tree = tt
+    if parent != {} {
+        link_node(parent, trans)
+    }
+    return
+}
+
 remove_node :: proc(trans: Node, delete_children: bool = false) {
     if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
         unlink_node(trans) //removes from parent, adjusts siblings
@@ -109,8 +123,18 @@ init_node :: proc(trans: Node, trs: TRS) {
     if trs.scale == 0 {
         trs.scale = 1
     }
-    trans := local(trans)
+    trans := local_node(trans)
     trans^ = trs
+}
+
+copy_node :: proc(dst, src: Node) {
+    dst.tree.serial += 1
+    dst, dst_ok := hm.get(&dst.tree.transforms, dst.handle)
+    src, src_ok := hm.get(&src.tree.transforms, src.handle)
+    if !(dst_ok && src_ok) {
+        return
+    }
+    dst.local = src.local
 }
 
 link_node :: proc(parent: Node, child: Node) {
@@ -223,11 +247,17 @@ delete :: proc(t: Transform) {
     }
 }
 
-
 local_node :: proc(n: Node) -> ^TRS {
     if t, ok := hm.get(&n.tree.transforms, n.handle); ok {
         n.tree.serial += 1
-        return clock.write(&t.local, n.tree.clk)
+        switch &val in t.local {
+        case TRS_Smoothed:
+            return clock.write(&val, n.tree.clk)
+        case matrix[4,4]f32:
+            trs := TRS{get_world_trs(val)}
+            t.local = TRS_Smoothed{trs, trs, n.tree.clk.current_tick}
+            return clock.write(&t.local.(TRS_Smoothed), n.tree.clk)
+        }
     }
     return nil
 }
@@ -279,7 +309,13 @@ compute_node :: proc(n: Node) -> matrix[4,4]f32 {
     sync_tree(n.tree)
     if t, ok := hm.get(&n.tree.transforms, n.handle); ok {
         if t.world_serial != n.tree.serial {
-            local := compute_trs(lerp_trs(clock.sample(t.local, n.tree.clk)))
+            local: matrix[4,4]f32
+            switch val in t.local {
+            case TRS_Smoothed:
+                local = compute_trs(lerp_trs(clock.sample(val, n.tree.clk)))
+            case matrix[4,4]f32:
+                local = val
+            }
             if t.parent != {} {
                 parent_world := compute_node(Node{t.parent, n.tree})
                 t.world = parent_world * local
