@@ -74,7 +74,7 @@ struct Vertex {
     @location(2) tangent: vec4<f32>,
     @location(3) texcoord: vec2<f32>,
     @location(4) color: vec4<f32>,
-    @location(5) bones: vec4<f32>,
+    @location(5) bones: vec4<u32>,
     @location(6) weights: vec4<f32>,
     @location(7) modelview_0: vec4<f32>,
     @location(8) modelview_1: vec4<f32>,
@@ -112,14 +112,14 @@ fn ident() -> mat4x4<f32> {
 @group(2) @binding(0) var<storage, read> skeletons: array<mat4x4<f32>>;
 //@group(2) @binding(1) var<uniform> skeleton_len: u32;
 fn calculate_bones(vertex: Vertex, instance_index: u32) -> mat4x4<f32> {
-    if(all(vertex.weights == vec4<f32>(0.0))) {
+    if(vertex.indices.x < 0) {
         return ident();
     }
     let skeleton_offset = u32(vertex.indices.x);
-    let bone1 = skeletons[skeleton_offset + u32(vertex.bones.x)] * vertex.weights.x;
-    let bone2 = skeletons[skeleton_offset + u32(vertex.bones.y)] * vertex.weights.y;
-    let bone3 = skeletons[skeleton_offset + u32(vertex.bones.z)] * vertex.weights.z;
-    let bone4 = skeletons[skeleton_offset + u32(vertex.bones.w)] * vertex.weights.w;
+    let bone1 = skeletons[skeleton_offset + vertex.bones.x] * vertex.weights.x;
+    let bone2 = skeletons[skeleton_offset + vertex.bones.y] * vertex.weights.y;
+    let bone3 = skeletons[skeleton_offset + vertex.bones.z] * vertex.weights.z;
+    let bone4 = skeletons[skeleton_offset + vertex.bones.w] * vertex.weights.w;
     return bone1 + bone2 + bone3 + bone4;
 }
 
@@ -491,7 +491,7 @@ fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
 
 @fragment
 fn solid_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
-    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint;
+    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint * in.color;
     var final_color = base_color;
     if final_color.a < 0.9 {
         discard;
@@ -537,7 +537,7 @@ fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut 
 
 @fragment
 fn solid_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
-    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint;
+    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint * in.color;
     if base_color.a < 0.9 {
         discard;
     }
@@ -546,7 +546,7 @@ fn solid_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn trans_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
-    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint;
+    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint * in.color;
     if !(base_color.a > 0 && base_color.a < 1) {
         discard;
     }

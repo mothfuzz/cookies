@@ -760,6 +760,9 @@ draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32
         }
 
         draw := Mesh_Draw{{trans, dynamic_material, 0}, sprite, billboard, .Back_CCW, bones, {}, 0, 0, layers}
+        if bones == nil {
+            draw.indices[0] = -1
+        }
         calculate_mesh_local(&draw, mesh, material)
         if double_sided {
             draw.cull_mode = .None

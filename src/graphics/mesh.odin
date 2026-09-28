@@ -14,8 +14,8 @@ Vertex :: struct {
     tangent: [4]f32,
     texcoord: [2]f32,
     color: [4]f32,
-    bones: [4]f32,
-    weights: [4]f32,
+    bones: [4]u16,
+    weights: [4]u16,
 }
 
 Extents :: struct {
@@ -364,15 +364,15 @@ color_attribute := wgpu.VertexBufferLayout{
 }
 bones_attribute := wgpu.VertexBufferLayout{
     stepMode = .Vertex,
-    arrayStride = size_of([4]f32),
+    arrayStride = size_of([4]u16),
     attributeCount = 1,
-    attributes = &wgpu.VertexAttribute{format = .Float32x4, shaderLocation = 5},
+    attributes = &wgpu.VertexAttribute{format = .Uint16x4, shaderLocation = 5},
 }
 weights_attribute := wgpu.VertexBufferLayout{
     stepMode = .Vertex,
-    arrayStride = size_of([4]f32),
+    arrayStride = size_of([4]u16),
     attributeCount = 1,
-    attributes = &wgpu.VertexAttribute{format = .Float32x4, shaderLocation = 6},
+    attributes = &wgpu.VertexAttribute{format = .Unorm16x4, shaderLocation = 6},
 }
 
 instance_data_location: u32 = 7

@@ -245,6 +245,10 @@ load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: Mes
     }
     vertices: #soa[]Vertex = nil
     defer delete(vertices)
+    bones_f32: []f32 = nil
+    defer delete(bones_f32)
+    weights_f32: []f32 = nil
+    defer delete(weights_f32)
     default_colors := true
     for attribute in primitive.attributes {
         size := cgltf.accessor_unpack_floats(attribute.data, nil, 0)
@@ -276,11 +280,13 @@ load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: Mes
                 log.error("failed to load all colors!")
             }
         case .joints:
-            if cgltf.accessor_unpack_floats(attribute.data, raw_data(vertices.bones), size) < size {
+            bones_f32 = make([]f32, size)
+            if cgltf.accessor_unpack_floats(attribute.data, raw_data(bones_f32), size) < size {
                 log.error("failed to load all bones!")
             }
         case .weights:
-            if cgltf.accessor_unpack_floats(attribute.data, raw_data(vertices.weights), size) < size {
+            weights_f32 = make([]f32, size)
+            if cgltf.accessor_unpack_floats(attribute.data, raw_data(weights_f32), size) < size {
                 log.error("failed to load all weights!")
             }
         case .invalid, .custom:
@@ -290,6 +296,16 @@ load_mesh :: proc(primitive: cgltf.primitive, make_tri_mesh: bool) -> (mesh: Mes
     if default_colors {
         for &vertex in vertices {
             vertex.color = 1
+        }
+    }
+    for i := 0; i < len(bones_f32); i += 4 {
+        for j in 0..<4 {
+            vertices[i/4].bones[j] = u16(bones_f32[i + j])
+        }
+    }
+    for i := 0; i < len(weights_f32); i += 4 {
+        for j in 0..<4 {
+            vertices[i/4].weights[j] = u16(weights_f32[i + j]*f32(max(u16))+0.5)
         }
     }
     mesh = make_mesh_from_soa(vertices, indices)
@@ -516,21 +532,15 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
 
 @(private)
 calculate_skeleton :: proc(scene: Scene, node: Node) -> []matrix[4,4]f32 {
-    bones: [dynamic]matrix[4,4]f32
-    if node.animated {
-        //look up the actual skeleton, and multiply with inv_bind
-        //animation *should* be fully calculated at this point
-        skeleton := &scene.skeletons[node.skin]
-        bones = make([dynamic]matrix[4,4]f32, context.temp_allocator)
-        for &bone in skeleton.bones {
-            inv_trans := linalg.inverse(transform.world(node))
-            bone_trans := transform.world(scene.nodes[bone.node])
-            append(&bones, inv_trans * bone_trans * bone.inv_bind)
-        }
-    } else {
-        //just use identity
-        bones = make([dynamic]matrix[4,4]f32, context.temp_allocator)
-        append(&bones, 1)
+    if !node.animated do return nil
+    //look up the actual skeleton, and multiply with inv_bind
+    //animation *should* be fully calculated at this point
+    skeleton := &scene.skeletons[node.skin]
+    bones := make([dynamic]matrix[4,4]f32, context.temp_allocator)
+    for &bone in skeleton.bones {
+        inv_trans := linalg.inverse(transform.world(node))
+        bone_trans := transform.world(scene.nodes[bone.node])
+        append(&bones, inv_trans * bone_trans * bone.inv_bind)
     }
     return bones[:]
 }
