@@ -29,6 +29,7 @@ tick :: proc(clk: ^Clock) -> bool {
     }
     clk.accumulator -= delta
     clk.current_tick += 1
+    clk.alpha = 1
     return true
 }
 
