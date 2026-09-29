@@ -365,10 +365,10 @@ compute_transform :: proc(t: Transform) -> matrix[4,4]f32 {
 world :: proc{compute_trs, compute_trs_smoothed, compute_node, compute_transform}
 
 //exact world-space procedures
-get_world_position :: proc(t: Transform) -> [3]f32 {
+world_position :: proc(t: Transform) -> [3]f32 {
     return world(t)[3].xyz
 }
-get_world_orientation :: proc(t: Transform) -> (forward, right, up: [3]f32) {
+world_orientation :: proc(t: Transform) -> (forward, right, up: [3]f32) {
     basis := cast(matrix[3,3]f32)(world(t))
     right = linalg.normalize(basis[0])
     up = linalg.normalize(basis[1])
