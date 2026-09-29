@@ -62,8 +62,8 @@ tick :: proc() {
         window.close()
     }
 
-    cam_trans := transform.write(cam_trans)
-    cam_pos := &cam_trans.translation
+    cam_local := transform.local(&cam_trans)
+    cam_pos := &cam_local.translation
 
     s := linalg.sin(cam_angle)
     c := linalg.cos(cam_angle)
@@ -91,27 +91,29 @@ tick :: proc() {
         cam_angle += 0.01
     }
     //graphics.look_at(&cam, cam_pos^, cam_pos^ + {s, 0, -c})
-    transform.look_at(cam_trans, cam_pos^ + {s, 0, -c})
+    transform.look_at(&cam_trans, cam_pos^ + {s, 0, -c})
 
-    audio.set_listener_position(cam_pos^)
-    audio.set_listener_orientation({s, 0, -c})
+    //audio.set_listener_position(cam_pos^)
+    //audio.set_listener_orientation({s, 0, -c})
+    audio.set_listener_transform(cam_trans)
 
     @static counter: f32 = 0
     counter += 0.01
-    maxwell_trans := transform.write(maxwell.root)
-    maxwell_trans.translation = {0, 0.1 + 0.05 * linalg.sin(counter), 0}
-    transform.rotatey(maxwell_trans, 0.02)
-    audio.set_sound_position(&the_power, maxwell_trans.translation)
+    maxwell_local := transform.local(maxwell.root)
+    maxwell_local.translation = {0, 0.1 + 0.05 * linalg.sin(counter), 0}
+    transform.rotatey(maxwell_local, 0.02)
+    //audio.set_sound_position(&the_power, maxwell_trans.translation)
+    audio.set_sound_transform(&the_power, maxwell.root)
 }
 
 draw :: proc(alpha, delta: f64) {
 
-    graphics.draw_camera(cam, transform.world(cam_trans, alpha))
+    graphics.draw_camera(cam, cam_trans)
     graphics.draw_mesh(quad, quad_mat)
 
     graphics.draw_spot_light(spot_light)
 
-    graphics.draw_scene(maxwell, alpha)
+    graphics.draw_scene(maxwell)
 }
 
 quit :: proc() {

@@ -169,6 +169,25 @@ unlink_node :: proc(trans: Node) {
     }
 }
 
+get_parent :: proc(trans: Node) -> Node {
+    if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
+        return {t.parent, trans.tree}
+    }
+    return {}
+}
+get_first_child :: proc(trans: Node) -> Node {
+    if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
+        return {t.first_child, trans.tree}
+    }
+    return {}
+}
+get_next_sibling :: proc(trans: Node) -> Node {
+    if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
+        return {t.next_sibling, trans.tree}
+    }
+    return {}
+}
+
 //live, interpolated, user-transforms
 Transform :: union {
     //TRS_Angles, //need to think about JSON/promotion semantics
@@ -192,7 +211,7 @@ promote :: proc(t: ^Transform, tt: ^Tree) -> Node {
     case TRS_Smoothed:
         return insert_node_smoothed(t, tt=tt)
     case matrix[4,4]f32:
-        tx, rx, sx := get_world_trs(t)
+        tx, rx, sx := get_trs_from_matrix(t)
         return insert_node({tx, rx, sx}, tt=tt)
     case nil: //promote nil to ORIGIN
         return insert_node(tt=tt)
@@ -254,7 +273,7 @@ local_node :: proc(n: Node) -> ^TRS {
         case TRS_Smoothed:
             return clock.write(&val, n.tree.clk)
         case matrix[4,4]f32:
-            trs := TRS{get_world_trs(val)}
+            trs := TRS{get_trs_from_matrix(val)}
             t.local = TRS_Smoothed{trs, trs, n.tree.clk.current_tick}
             return clock.write(&t.local.(TRS_Smoothed), n.tree.clk)
         }
@@ -279,7 +298,7 @@ local_transform :: proc(t: ^Transform) -> ^TRS {
     case matrix[4,4]f32:
         //if you're trying to get a local TRS out of a computed matrix, you probably want extraction...
         //shear would be lost, though.
-        trs := TRS{get_world_trs(val)}
+        trs := TRS{get_trs_from_matrix(val)}
         t^ = TRS_Smoothed{trs, trs, clock.default.current_tick}
         return local_trs_smoothed(&t.(TRS_Smoothed), clock.default)
     }
@@ -345,9 +364,55 @@ compute_transform :: proc(t: Transform) -> matrix[4,4]f32 {
 
 world :: proc{compute_trs, compute_trs_smoothed, compute_node, compute_transform}
 
+//exact world-space procedures
+get_world_position :: proc(t: Transform) -> [3]f32 {
+    return world(t)[3].xyz
+}
+get_world_orientation :: proc(t: Transform) -> (forward, right, up: [3]f32) {
+    basis := cast(matrix[3,3]f32)(world(t))
+    right = linalg.normalize(basis[0])
+    up = linalg.normalize(basis[1])
+    forward = -linalg.normalize(basis[2])
+    return
+}
+
+//but after you've already got a world matrix... these are lossy (except translation)
+get_translation_from_matrix :: proc(world: matrix[4,4]f32) -> [3]f32 {
+    return world[3].xyz
+}
+
+get_scale_from_matrix :: proc(world: matrix[4,4]f32) -> [3]f32 {
+    basis := cast(matrix[3,3]f32)(world)
+    return {linalg.length(basis[0]), linalg.length(basis[1]), linalg.length(basis[2])}
+}
+
+get_rotation_from_matrix :: proc(world: matrix[4,4]f32) -> quaternion128 {
+    basis := cast(matrix[3,3]f32)(world)
+    basis[0] = linalg.normalize(basis[0])
+    basis[1] = linalg.normalize(basis[1])
+    basis[2] = linalg.normalize(basis[2])
+    return linalg.to_quaternion(basis)
+}
+
+get_trs_from_matrix :: proc(world: matrix[4,4]f32) -> (translation: [3]f32, rotation: quaternion128, scale: [3]f32) {
+    translation = world[3].xyz
+    basis := cast(matrix[3,3]f32)(world)
+    scale.x = linalg.length(basis[0])
+    scale.y = linalg.length(basis[1])
+    scale.z = linalg.length(basis[2])
+    basis[0] /= scale.x
+    basis[1] /= scale.y
+    basis[2] /= scale.z
+    rotation = linalg.to_quaternion(basis)
+    return
+}
+
 //helper procs
 translate_trs :: proc(t: ^TRS, translation: [3]f32) {
     t.translation += translation
+}
+set_translation_trs :: proc(t: ^TRS, translation: [3]f32) {
+    t.translation = translation
 }
 rotation_from_angles :: proc(rotation: [3]f32) -> quaternion128 {
     return linalg.quaternion_from_euler_angles(expand_values(rotation), .XYZ)
@@ -364,8 +429,18 @@ rotatey_trs :: proc(t: ^TRS, rotation: f32) {
 rotatez_trs :: proc(t: ^TRS, rotation: f32) {
     t.rotation = linalg.quaternion_from_euler_angle_z(rotation) * t.rotation
 }
+set_rotation_trs_angles :: proc(t: ^TRS, rotation: [3]f32) {
+    t.rotation = rotation_from_angles(rotation)
+}
+set_rotation_trs_quaternion :: proc(t: ^TRS, rotation: quaternion128) {
+    t.rotation = rotation
+}
+set_rotation_trs :: proc{set_rotation_trs_angles, set_rotation_trs_quaternion}
 scale_trs :: proc(t: ^TRS, scale: [3]f32) {
     t.scale *= scale
+}
+set_scale_trs :: proc(t: ^TRS, scale: [3]f32) {
+    t.scale = scale
 }
 
 look_at_trs :: proc(viewer: ^TRS, target: [3]f32, up: [3]f32 = {0, 1, 0}) {
@@ -375,83 +450,88 @@ look_at_trs :: proc(viewer: ^TRS, target: [3]f32, up: [3]f32 = {0, 1, 0}) {
     viewer.rotation = linalg.quaternion_from_forward_and_up(forward, up)
 }
 
-get_world_translation :: proc(world: matrix[4,4]f32) -> [3]f32 {
-    return world[3].xyz
+//helper procs for Node
+translate_n :: proc(n: Node, translation: [3]f32) {
+    translate_trs(local_node(n), translation)
 }
-
-get_world_scale :: proc(world: matrix[4,4]f32) -> [3]f32 {
-    basis := cast(matrix[3,3]f32)(world)
-    return {linalg.length(basis[0]), linalg.length(basis[1]), linalg.length(basis[2])}
+set_translation_n :: proc(n: Node, translation: [3]f32) {
+    set_translation_trs(local_node(n), translation)
 }
-
-get_world_rotation :: proc(world: matrix[4,4]f32) -> quaternion128 {
-    basis := cast(matrix[3,3]f32)(world)
-    basis[0] = linalg.normalize(basis[0])
-    basis[1] = linalg.normalize(basis[1])
-    basis[2] = linalg.normalize(basis[2])
-    return linalg.to_quaternion(basis)
+rotate_n :: proc(n: Node, rotation: [3]f32) {
+    rotate_trs(local_node(n), rotation)
 }
-
-get_world_trs :: proc(world: matrix[4,4]f32) -> (translation: [3]f32, rotation: quaternion128, scale: [3]f32) {
-    translation = world[3].xyz
-    basis := cast(matrix[3,3]f32)(world)
-    scale.x = linalg.length(basis[0])
-    scale.y = linalg.length(basis[1])
-    scale.z = linalg.length(basis[2])
-    basis[0] /= scale.x
-    basis[1] /= scale.y
-    basis[2] /= scale.z
-    rotation = linalg.to_quaternion(basis)
-    return
+rotatex_n :: proc(n: Node, rotation: f32) {
+    rotatex_trs(local_node(n), rotation)
 }
-
-get_parent :: proc(trans: Node) -> Node {
-    if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
-        return {t.parent, trans.tree}
-    }
-    return {}
+rotatey_n :: proc(n: Node, rotation: f32) {
+    rotatey_trs(local_node(n), rotation)
 }
-get_first_child :: proc(trans: Node) -> Node {
-    if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
-        return {t.first_child, trans.tree}
-    }
-    return {}
+rotatez_n :: proc(n: Node, rotation: f32) {
+    rotatez_trs(local_node(n), rotation)
 }
-get_next_sibling :: proc(trans: Node) -> Node {
-    if t, ok := hm.get(&trans.tree.transforms, trans.handle); ok {
-        return {t.next_sibling, trans.tree}
-    }
-    return {}
+set_rotation_n_angles :: proc(n: Node, rotation: [3]f32) {
+    set_rotation_trs_angles(local_node(n), rotation)
+}
+set_rotation_n_quaternion :: proc(n: Node, rotation: quaternion128) {
+    set_rotation_trs_quaternion(local_node(n), rotation)
+}
+set_rotation_n :: proc{set_rotation_n_angles, set_rotation_n_quaternion}
+scale_n :: proc(n: Node, scale: [3]f32) {
+    scale_trs(local_node(n), scale)
+}
+set_scale_n :: proc(n: Node, scale: [3]f32) {
+    set_scale_trs(local_node(n), scale)
+}
+look_at_n :: proc(viewer: Node, target: [3]f32, up: [3]f32 = {0, 1, 0}) {
+    look_at_trs(local_node(viewer), target, up)
 }
 
 //helper procs for Transform itself
-translate_t :: proc(t: Node, translation: [3]f32) {
+translate_t :: proc(t: ^Transform, translation: [3]f32) {
     translate_trs(local(t), translation)
 }
-rotate_t :: proc(t: Node, rotation: [3]f32) {
+set_translation_t :: proc(t: ^Transform, translation: [3]f32) {
+    set_translation_trs(local(t), translation)
+}
+rotate_t :: proc(t: ^Transform, rotation: [3]f32) {
     rotate_trs(local(t), rotation)
 }
-rotatex_t :: proc(t: Node, rotation: f32) {
+rotatex_t :: proc(t: ^Transform, rotation: f32) {
     rotatex_trs(local(t), rotation)
 }
-rotatey_t :: proc(t: Node, rotation: f32) {
+rotatey_t :: proc(t: ^Transform, rotation: f32) {
     rotatey_trs(local(t), rotation)
 }
-rotatez_t :: proc(t: Node, rotation: f32) {
+rotatez_t :: proc(t: ^Transform, rotation: f32) {
     rotatez_trs(local(t), rotation)
 }
-scale_t :: proc(t: Node, scale: [3]f32) {
+set_rotation_t_angles :: proc(t: ^Transform, rotation: [3]f32) {
+    set_rotation_trs_angles(local(t), rotation)
+}
+set_rotation_t_quaternion :: proc(t: ^Transform, rotation: quaternion128) {
+    set_rotation_trs_quaternion(local(t), rotation)
+}
+set_rotation_t :: proc{set_rotation_t_angles, set_rotation_t_quaternion}
+scale_t :: proc(t: ^Transform, scale: [3]f32) {
     scale_trs(local(t), scale)
 }
+set_scale_t :: proc(t: ^Transform, scale: [3]f32) {
+    set_scale_trs(local(t), scale)
+}
 
-look_at_t :: proc(viewer: Node, target: [3]f32, up: [3]f32 = {0, 1, 0}) {
+look_at_t :: proc(viewer: ^Transform, target: [3]f32, up: [3]f32 = {0, 1, 0}) {
     look_at_trs(local(viewer), target, up)
 }
 
-translate :: proc{translate_trs, translate_t}
-rotate :: proc{rotate_trs, rotate_t}
-rotatex :: proc{rotatex_trs, rotatex_t}
-rotatey :: proc{rotatey_trs, rotatey_t}
-rotatez :: proc{rotatez_trs, rotatez_t}
-scale :: proc{scale_trs, scale_t}
-look_at :: proc{look_at_trs, look_at_t}
+translate :: proc{translate_trs, translate_n, translate_t}
+set_translation :: proc{set_translation_trs, set_translation_n, set_translation_t}
+rotate :: proc{rotate_trs, rotate_n, rotate_t}
+rotatex :: proc{rotatex_trs, rotatex_n, rotatex_t}
+rotatey :: proc{rotatey_trs, rotatey_n, rotatey_t}
+rotatez :: proc{rotatez_trs, rotatez_n, rotatez_t}
+set_rotation :: proc{set_rotation_trs_angles, set_rotation_trs_quaternion,
+                     set_rotation_n_angles, set_rotation_n_quaternion,
+                     set_rotation_t_angles, set_rotation_t_quaternion}
+scale :: proc{scale_trs, scale_n, scale_t}
+set_scale :: proc{set_scale_trs, set_scale_n, set_scale_t}
+look_at :: proc{look_at_trs, look_at_n, look_at_t}

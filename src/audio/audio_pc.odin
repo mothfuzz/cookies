@@ -288,9 +288,7 @@ set_listener_position :: proc(position: [3]f32, listener_index: uint = 0) {
 
 set_listener_orientation :: proc(direction: [3]f32, up: [3]f32 = {0, 1, 0}, listener_index: uint = 0) {
     ma.engine_listener_set_direction(&engine, u32(listener_index), expand_values(direction))
-    if up != {0, 1, 0} {
-        ma.engine_listener_set_world_up(&engine, u32(listener_index), expand_values(up))
-    }
+    ma.engine_listener_set_world_up(&engine, u32(listener_index), expand_values(up))
 }
 
 set_global_min_distance :: proc(d: f32) {
