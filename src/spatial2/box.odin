@@ -104,8 +104,8 @@ box_overlapping :: proc(a: Box, atrans: matrix[4,4]f32, b: Shape, btrans: matrix
         case Sphere:
         local, frame := box_frame(a, atrans)
         bt := transform_sphere(b, btrans)
-        bt.center = frame_point(frame, b.center)
-        return sphere_aabb(Sphere{bt.center, bt.radius}, local)
+        bt.center = frame_point(frame, bt.center)
+        return sphere_aabb(bt, local)
     }
     return false
 }

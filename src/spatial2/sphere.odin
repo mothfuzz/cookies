@@ -33,7 +33,7 @@ sphere_aabb :: proc(a: Sphere, b: Box) -> bool {
 
 transform_sphere :: proc(s: Sphere, t: matrix[4,4]f32) -> (st: Sphere) {
     st.center = (t*[4]f32{**s.center, 1}).xyz
-    max_scale := linalg.sqrt(max(linalg.length2(t[0].xyz), linalg.length2(t[0].xyz), linalg.length2(t[0].xyz)))
+    max_scale := linalg.sqrt(max(linalg.length2(t[0].xyz), linalg.length2(t[1].xyz), linalg.length2(t[2].xyz)))
     st.radius = s.radius * max_scale
     return
 }
