@@ -4,7 +4,6 @@ Entry :: struct(Entity: typeid) {
     shape: Shape,
     extents: [2][3]f32,
     trans: matrix[4,4]f32,
-    //maybe cache inv_trans here too? For OBB == AABB in Box's local space trick
     entity: Entity,
 }
 
@@ -27,7 +26,7 @@ accel_nearby :: proc{grid_nearby}
 accel_neighbors :: proc{grid_neighbors}
 accel_pairs :: proc{grid_pairs}
 
-insert :: proc(s: ^Spatial($Entity, $Accel), e: Entity, shape: Shape, trans: matrix[4,4]f32 = 1) {
+insert_matrix :: proc(s: ^Spatial($Entity, $Accel), e: Entity, shape: Shape, trans: matrix[4,4]f32 = 1) {
     entry := Entry(Entity){shape, shape_extents(shape, trans), trans, e}
     id, ok := pop_safe(&s.free_list)
     if ok {
@@ -40,7 +39,7 @@ insert :: proc(s: ^Spatial($Entity, $Accel), e: Entity, shape: Shape, trans: mat
     accel_insert(&s.accel, id, entry.extents)
 }
 
-update :: proc(s: ^Spatial($Entity, $Accel), e: Entity, trans: matrix[4,4]f32) {
+update_matrix :: proc(s: ^Spatial($Entity, $Accel), e: Entity, trans: matrix[4,4]f32) {
     if id, ok := s.entities[e]; ok {
         entry := &s.entries[id]
         entry.trans = trans
@@ -48,6 +47,9 @@ update :: proc(s: ^Spatial($Entity, $Accel), e: Entity, trans: matrix[4,4]f32) {
         accel_update(&s.accel, id, entry.extents)
     }
 }
+
+insert :: proc{insert_matrix, insert_transform}
+update :: proc{update_matrix, update_transform}
 
 remove :: proc(s: ^Spatial($Entity, $Accel), e: Entity) {
     if id, ok := s.entities[e]; ok {
