@@ -26,8 +26,8 @@ sphere_sphere :: proc(a, b: Sphere) -> bool {
 sphere_aabb :: proc(a: Sphere, b: Box) -> bool {
     mini := b.center - b.half_extents
     maxi := b.center + b.half_extents
-    closest := linalg.clamp(b.center, mini, maxi)
-    distance := linalg.length2(closest - b.center)
+    closest := linalg.clamp(a.center, mini, maxi)
+    distance := linalg.length2(closest - a.center)
     return distance <= a.radius * a.radius
 }
 

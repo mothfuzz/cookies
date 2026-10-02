@@ -72,7 +72,7 @@ update_guys :: proc() {
     it := handle_map.iterator_make(&guys)
     for guy, handle in handle_map.iterate(&it) {
         transform.rotatez(&guy.trans, 0.005 * math.TAU)
-        spatial.update(&guy_grid, handle, transform.world(guy.trans))
+        spatial.update(&guy_grid, handle, guy.trans)
         guy.colliding = false
     }
 

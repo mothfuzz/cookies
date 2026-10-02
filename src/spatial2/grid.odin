@@ -1,6 +1,7 @@
 package spatial2
 
 import "core:log"
+import "core:math"
 
 Grid_Entry :: struct {
     extents: [2][3]int, //AABB for all cells this id belongs to
@@ -15,8 +16,8 @@ Grid :: struct(Cell_Size: int) {
 @(private)
 cell_extents :: proc(e: [2][3]f32, cell_size: int) -> (out: [2][3]int) {
     cs := f32(cell_size)
-    out[0] = {int(e[0].x/cs), int(e[0].y/cs), int(e[0].z/cs)}
-    out[1] = {int(e[1].x/cs), int(e[1].y/cs), int(e[1].z/cs)}
+    out[0] = {int(math.floor(e[0].x/cs)), int(math.floor(e[0].y/cs)), int(math.floor(e[0].z/cs))}
+    out[1] = {int(math.floor(e[1].x/cs)), int(math.floor(e[1].y/cs)), int(math.floor(e[1].z/cs))}
     return
 }
 
@@ -54,13 +55,15 @@ cell_slot :: proc(e: [2][3]int, cell: [3]int) -> int {
 grid_remove :: proc(g: ^Grid($Cell_Size), id: int) {
     if id < 0 || id >= len(g.entries) do return
     entry := g.entries[id]
+    slots := entry.slots
+    defer delete(slots)
     i := 0
     for x in entry.extents[0].x..=entry.extents[1].x {
         for y in entry.extents[0].y..=entry.extents[1].y {
             for z in entry.extents[0].z..=entry.extents[1].z {
                 cell_index := [3]int{x, y, z}
                 cell := &g.cells[cell_index]
-                slot := entry.slots[i] //i is index into slots, slot is index into cell
+                slot := slots[i] //i is index into slots, slot is index into cell
                 i += 1
                 //if this isn't already the last cell, make sure to update the entry that's being swapped
                 //with its new slot (i.e. the current slot)

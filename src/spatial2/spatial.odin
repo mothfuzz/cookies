@@ -1,5 +1,7 @@
 package spatial2
 
+import "core:math/linalg"
+
 Entry :: struct(Entity: typeid) {
     shape: Shape,
     extents: [2][3]f32,
@@ -80,10 +82,10 @@ nearby_internal :: proc(s: ^Spatial($Entity, $Accel), position: [3]f32, radius: 
     extents := [2][3]f32{{position-radius}, {position+radius}}
     for id in accel_nearby(&s.accel, extents) {
         entry := s.entries[id]
-        test_position := entry.trans[3]
+        test_position := entry.trans[3].xyz
         displacement := test_position - position
-        if displacement*displacement <= radius*radius {
-            append(&results, entry.entity)
+        if linalg.dot(displacement, displacement) <= radius*radius {
+            append(results, entry.entity)
         }
     }
 }
