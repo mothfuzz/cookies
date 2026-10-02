@@ -2,7 +2,7 @@ package main
 
 import "cookies:engine"
 import "cookies:transform"
-import "cookies:spatial"
+import spatial "cookies:spatial2"
 import "cookies:graphics"
 import "cookies:window"
 import "cookies:input"
@@ -19,7 +19,6 @@ Handle :: handle_map.Handle16
 TheGuy :: struct {
     handle: Handle,
     trans: transform.Transform,
-    hitbox: spatial.Bounding_Box,
     colliding: bool,
 }
 
@@ -28,17 +27,15 @@ guy_mat: graphics.Material
 cam: graphics.Camera
 
 make_guy :: proc() -> (guy: TheGuy) {
-    guy.trans = transform.make()
-    trans := transform.write(guy.trans)
     //clustered around the middle of the screen
-    trans.translation.x = (rand.float32() - 0.5) * Screen_Width / 2
-    trans.translation.y = (rand.float32() - 0.5) * Screen_Height / 2
-    guy.hitbox = {{-16, -16, -16}, {16, 16, 16}}
+    rand_x := (rand.float32() - 0.5) * Screen_Width / 2
+    rand_y := (rand.float32() - 0.5) * Screen_Height / 2
+    guy.trans = transform.make({translation={rand_x, rand_y, 0}})
     return
 }
 
 guys: handle_map.Dynamic_Handle_Map(TheGuy, Handle)
-guy_grid := spatial.init(spatial.Grid(Handle, 16))
+guy_grid: spatial.Spatial(Handle, spatial.Grid(16))
 
 init :: proc() {
 
@@ -56,13 +53,15 @@ init :: proc() {
     
     for i in 0..<10 {
         g := handle_map.add(&guys, make_guy())
-        guy := handle_map.get(&guys, g)
-        spatial.insert(&guy_grid, g, guy.hitbox)
+        spatial.insert(&guy_grid, g, spatial.Box{0, 16})
     }
 }
 
 cleanup :: proc() {
-    spatial.clear(&guy_grid)
+    it := handle_map.iterator_make(&guys)
+    for guy, handle in handle_map.iterate(&it) {
+        spatial.remove(&guy_grid, handle)
+    }
     handle_map.dynamic_destroy(&guys)
     
     graphics.delete_material(guy_mat)
@@ -72,29 +71,21 @@ cleanup :: proc() {
 update_guys :: proc() {
     it := handle_map.iterator_make(&guys)
     for guy, handle in handle_map.iterate(&it) {
-        trans := transform.write(guy.trans)
-        transform.rotatez(trans, 0.005 * math.TAU)
+        transform.rotatez(&guy.trans, 0.005 * math.TAU)
         spatial.update(&guy_grid, handle, transform.world(guy.trans))
         guy.colliding = false
     }
 
-    calculate_collisions()
+    for pair in spatial.pairs(&guy_grid) {
+        guy_a := handle_map.get(&guys, pair[0])
+        guy_b := handle_map.get(&guys, pair[1])
+
+        guy_a.colliding = true
+        guy_b.colliding = true
+    }
 
     if input.key_pressed(.Key_Escape) {
         window.close()
-    }
-}
-
-calculate_collisions :: proc() {
-    it := handle_map.iterator_make(&guys)
-    for _, handle_a in handle_map.iterate(&it) {
-        for handle_b in spatial.overlapping(&guy_grid, handle_a) {
-            guy_a := handle_map.get(&guys, handle_a)
-            guy_b := handle_map.get(&guys, handle_b)
-
-            guy_a.colliding = true
-            guy_b.colliding = true
-        }
     }
 }
 
@@ -102,12 +93,12 @@ draw_guys :: proc(alpha, delta: f64) {
     graphics.draw_camera(cam)
     it := handle_map.iterator_make(&guys)
     for guy, handle in handle_map.iterate(&it) {
-        trans := transform.world(guy.trans, alpha)
-        hitbox := spatial.transform(guy.hitbox, trans)
-        position := (hitbox.min + hitbox.max)/2
-        scale := hitbox.max - hitbox.min
-        graphics.draw_sprite(guy_mat, trans)
-        graphics.ui_draw_rect({position.x, position.y, scale.x, scale.y}, guy.colliding?{0,1,0,0.5}:{1,0,0,0.5})
+        //trans := transform.world(guy.trans, alpha)
+        graphics.draw_sprite(guy_mat, guy.trans)
+        extents := spatial.world_extents(&guy_grid, handle)
+        center := (extents[0].xy + extents[1].xy)/2
+        size := extents[1] - extents[0]
+        graphics.ui_draw_rect({center.x, center.y, size.x, size.y}, guy.colliding?{0,1,0,0.25}:{1,0,0,0.25})
     }
 }
 
