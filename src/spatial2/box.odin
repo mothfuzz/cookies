@@ -40,7 +40,7 @@ box_box :: proc(a: Box, b: Box, b_rot: matrix[3,3]f32) -> bool {
     rb := abs_r * b.half_extents
     ta := b.center - a.center
     for i in 0..<3 {
-        if abs(ta[i]) > a.half_extents[i] + b.half_extents[i] {
+        if abs(ta[i]) > a.half_extents[i] + rb[i] {
             return false
         }
     }
@@ -57,7 +57,7 @@ box_box :: proc(a: Box, b: Box, b_rot: matrix[3,3]f32) -> bool {
     ra := linalg.transpose(abs_r) * a.half_extents
     tb := linalg.transpose(b_rot) * ta
     for i in 0..<3 {
-        if abs(tb[i]) > a.half_extents[i] + b.half_extents[i] {
+        if abs(tb[i]) > ra[i] + b.half_extents[i] {
             return false
         }
     }
@@ -105,7 +105,13 @@ box_overlapping :: proc(a: Box, atrans: matrix[4,4]f32, b: Shape, btrans: matrix
         local, frame := box_frame(a, atrans)
         bt := transform_sphere(b, btrans)
         bt.center = frame_point(frame, bt.center)
-        return sphere_aabb(bt, local)
+        return sphere_box(bt, local)
+        case Capsule:
+        local, frame := box_frame(a, atrans)
+        bt := transform_capsule(b, btrans)
+        bt.a = frame_point(frame, bt.a)
+        bt.b = frame_point(frame, bt.b)
+        return capsule_box(bt, local)
     }
     return false
 }
