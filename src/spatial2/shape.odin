@@ -11,6 +11,7 @@ shape_extents :: proc(s: Shape, t: matrix[4,4]f32) -> [2][3]f32 {
     #partial switch s in s {
         case Box: return box_extents(s, t)
         case Sphere: return sphere_extents(s, t)
+        case Capsule: return capsule_extents(s, t)
     }
     return 0
 }
@@ -19,13 +20,9 @@ shape_overlapping :: proc(a: Shape, atrans: matrix[4,4]f32, b: Shape, btrans: ma
     #partial switch a in a {
         case Box: return box_overlapping(a, atrans, b, btrans)
         case Sphere: return sphere_overlapping(a, atrans, b, btrans)
+        case Capsule: return capsule_overlapping(a, atrans, b, btrans)
     }
     return false
-}
-
-Capsule :: struct {
-    a, b: [3]f32,
-    radius: f32,
 }
 
 Convex_Hull :: distinct int

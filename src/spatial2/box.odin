@@ -7,6 +7,14 @@ Box :: struct {
     half_extents: [3]f32,
 }
 
+box_support :: proc(b: Box, dir: [3]f32) -> [3]f32 {
+    return b.center + {
+        dir.x >= 0 ? b.half_extents.x : -b.half_extents.x,
+        dir.y >= 0 ? b.half_extents.y : -b.half_extents.y,
+        dir.z >= 0 ? b.half_extents.z : -b.half_extents.z,
+    }
+}
+
 box_extents :: proc(b: Box, t: matrix[4,4]f32) -> [2][3]f32 {
     center := (t * [4]f32{**b.center, 1}).xyz
     axes := [3][3]f32{t[0].xyz * b.half_extents.x, t[1].xyz * b.half_extents.y, t[2].xyz * b.half_extents.z}

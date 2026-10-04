@@ -7,23 +7,30 @@ Sphere :: struct {
     radius: f32,
 }
 
+sphere_support :: proc(s: Sphere, dir: [3]f32) -> [3]f32 {
+    l := linalg.length2(dir)
+    if l < 1e-12 do return s.center //avoid NaN
+    return s.center + dir * (s.radius / linalg.sqrt(l))
+}
+
 sphere_extents :: proc(s: Sphere, t: matrix[4,4]f32) -> [2][3]f32 {
     center := (t * [4]f32{**s.center, 1}).xyz
+    axes := [3][3]f32{t[0].xyz * s.radius, t[1].xyz * s.radius, t[2].xyz * s.radius}
     e: [3]f32
-    e[0] = s.radius * linalg.length(t[0].xyz)
-    e[1] = s.radius * linalg.length(t[1].xyz)
-    e[2] = s.radius * linalg.length(t[2].xyz)
+    for i in 0..<3 {
+        row := [3]f32{t[i, 0], t[i, 1], t[i, 2]}
+        e[i] = s.radius * linalg.length(row)
+    }
     return {center - e, center + e}
 }
 
 sphere_sphere :: proc(a, b: Sphere) -> bool {
     v := b.center - a.center
     r := a.radius + b.radius
-    //dot product of displacement vector with itself == squared distance
-    return linalg.dot(v, v) <= r * r
+    return linalg.length2(v) <= r * r
 }
 
-sphere_aabb :: proc(a: Sphere, b: Box) -> bool {
+sphere_box :: proc(a: Sphere, b: Box) -> bool {
     mini := b.center - b.half_extents
     maxi := b.center + b.half_extents
     closest := linalg.clamp(a.center, mini, maxi)
@@ -40,10 +47,12 @@ transform_sphere :: proc(s: Sphere, t: matrix[4,4]f32) -> (st: Sphere) {
 
 sphere_overlapping :: proc(a: Sphere, atrans: matrix[4,4]f32, b: Shape, btrans: matrix[4,4]f32) -> bool {
     #partial switch b in b {
-        case Box:
-        return box_overlapping(b, btrans, a, atrans)
         case Sphere:
         return sphere_sphere(transform_sphere(a, atrans), transform_sphere(b, btrans))
+        case Box:
+        return box_overlapping(b, btrans, a, atrans)
+        case Capsule:
+        return capsule_overlapping(b, btrans, a, atrans)
     }
     return false
 }
