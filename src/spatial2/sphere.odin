@@ -13,17 +13,6 @@ sphere_support :: proc(s: Sphere, dir: [3]f32) -> [3]f32 {
     return s.center + dir * (s.radius / linalg.sqrt(l))
 }
 
-sphere_extents :: proc(s: Sphere, t: matrix[4,4]f32) -> [2][3]f32 {
-    center := (t * [4]f32{**s.center, 1}).xyz
-    axes := [3][3]f32{t[0].xyz * s.radius, t[1].xyz * s.radius, t[2].xyz * s.radius}
-    e: [3]f32
-    for i in 0..<3 {
-        row := [3]f32{t[i, 0], t[i, 1], t[i, 2]}
-        e[i] = s.radius * linalg.length(row)
-    }
-    return {center - e, center + e}
-}
-
 sphere_sphere :: proc(a, b: Sphere) -> bool {
     v := b.center - a.center
     r := a.radius + b.radius

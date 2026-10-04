@@ -17,7 +17,7 @@ Grid :: struct(Cell_Size: int) {
 cell_extents :: proc(e: [2][3]f32, cell_size: int) -> (out: [2][3]int) {
     cs := f32(cell_size)
     out[0] = {int(math.floor(e[0].x/cs)), int(math.floor(e[0].y/cs)), int(math.floor(e[0].z/cs))}
-    out[1] = {int(math.floor(e[1].x/cs)), int(math.floor(e[1].y/cs)), int(math.floor(e[1].z/cs))}
+    out[1] = {int(math.ceil(e[1].x/cs)), int(math.ceil(e[1].y/cs)), int(math.ceil(e[1].z/cs))}
     return
 }
 

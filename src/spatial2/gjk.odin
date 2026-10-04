@@ -117,32 +117,6 @@ tetrahedron_simplex :: proc(simplex: ^Simplex, dir: ^[3]f32) -> bool {
     return true
 }
 
-shape_support :: proc(s: Shape, dir: [3]f32) -> [3]f32 {
-    //dispatch logic here
-    switch s in s {
-    case Box:
-        return box_support(s, dir)
-    case Sphere:
-        return sphere_support(s, dir)
-    case Capsule:
-        return capsule_support(s, dir)
-    case Convex_Hull:
-        return 0
-        //return hull_support(s, dir)
-    }
-    return 0
-}
-
-//transform dir to local space, get support, then transform back to world space
-shape_support_world :: proc(s: Shape, t: matrix[4,4]f32, dir: [3]f32) -> [3]f32 {
-    local_dir := [3]f32{
-        linalg.dot(t[0].xyz, dir),
-        linalg.dot(t[1].xyz, dir),
-        linalg.dot(t[2].xyz, dir),
-    }
-    return (t * [4]f32{**shape_support(s, local_dir), 1}).xyz
-}
-
 //minkowski difference for two support points
 support_diff :: proc(a: Shape, atrans: matrix[4,4]f32, b: Shape, btrans: matrix[4,4]f32, dir: [3]f32) -> [3]f32 {
     a := shape_support_world(a, atrans, +dir)

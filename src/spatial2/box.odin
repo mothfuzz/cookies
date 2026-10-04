@@ -15,17 +15,6 @@ box_support :: proc(b: Box, dir: [3]f32) -> [3]f32 {
     }
 }
 
-box_extents :: proc(b: Box, t: matrix[4,4]f32) -> [2][3]f32 {
-    center := (t * [4]f32{**b.center, 1}).xyz
-    axes := [3][3]f32{t[0].xyz * b.half_extents.x, t[1].xyz * b.half_extents.y, t[2].xyz * b.half_extents.z}
-    //Arvo's method
-    e: [3]f32
-    for a in axes {
-        e += linalg.abs(a)
-    }
-    return {center - e, center + e}
-}
-
 aabb_aabb :: proc(a: [2][3]f32, b: [2][3]f32) -> bool {
     return a[1].x >= b[0].x &&
             a[1].y >= b[0].y &&

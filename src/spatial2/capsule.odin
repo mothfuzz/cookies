@@ -12,19 +12,6 @@ capsule_support :: proc(c: Capsule, d: [3]f32) -> [3]f32 {
     return sphere_support(Sphere{endpoint, c.radius}, d)
 }
 
-capsule_extents :: proc(c: Capsule, t: matrix[4,4]f32) -> [2][3]f32 {
-    a := (t * [4]f32{**c.a, 1}).xyz
-    b := (t * [4]f32{**c.b, 1}).xyz
-    mini := linalg.min(a, b)
-    maxi := linalg.max(a, b)
-    e: [3]f32
-    for i in 0..<3 {
-        row := [3]f32{t[i, 0], t[i, 1], t[i, 2]}
-        e[i] = c.radius * linalg.length(row)
-    }
-    return {mini - e, maxi + e}
-}
-
 transform_capsule :: proc(c: Capsule, t: matrix[4,4]f32) -> (ct: Capsule) {
     ct.a = (t * [4]f32{**c.a, 1}).xyz
     ct.b = (t * [4]f32{**c.b, 1}).xyz
