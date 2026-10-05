@@ -33,15 +33,3 @@ transform_sphere :: proc(s: Sphere, t: matrix[4,4]f32) -> (st: Sphere) {
     st.radius = s.radius * max_scale
     return
 }
-
-sphere_overlapping :: proc(a: Sphere, atrans: matrix[4,4]f32, b: Shape, btrans: matrix[4,4]f32) -> bool {
-    #partial switch b in b {
-        case Sphere:
-        return sphere_sphere(transform_sphere(a, atrans), transform_sphere(b, btrans))
-        case Box:
-        return box_overlapping(b, btrans, a, atrans)
-        case Capsule:
-        return capsule_overlapping(b, btrans, a, atrans)
-    }
-    return false
-}

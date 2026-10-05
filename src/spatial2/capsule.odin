@@ -29,49 +29,56 @@ point_on_segment :: proc(p, a, b: [3]f32) -> [3]f32 {
     return linalg.lerp(a, b, linalg.clamp(t, 0, 1))
 }
 
-capsule_capsule :: proc(a, b: Capsule) -> bool {
+//per Real-Time Collision Detection (Ericson)
+closest_points_segments :: proc(a1, a2, b1, b2: [3]f32) -> (c1, c2: [3]f32) {
+    EPSILON :: 1e-6
+    da := a2 - a1
+    db := b2 - b1
+    offset := a1 - b1
+    a := linalg.dot(da, da) //length2 of a
+    b := linalg.dot(db, db) //length2 of b
+    proj_a := linalg.dot(da, offset)
+    proj_b := linalg.dot(db, offset)
 
-    d0 := linalg.length2(b.a - a.a)
-    d1 := linalg.length2(b.b - a.a)
-    d2 := linalg.length2(b.a - a.b)
-    d3 := linalg.length2(b.b - a.b)
-
-    closest_a := a.a
-    if d2 < d0 || d2 < d1 || d3 < d0 || d3 < d1 {
-        closest_a = a.b
+    s, t: f32
+    if a <= EPSILON && b <= EPSILON {
+        //both segments are points
+        return a1, b1
     }
+    if a <= EPSILON {
+        //segment a is a point (s implicitly 0)
+        t = clamp(proj_b / b, 0, 1)
+    } else {
+        if b <= EPSILON {
+            //segment b is a point (t implicitly 0)
+            s = clamp(-proj_a / a, 0, 1)
+        } else {
+            //full form
+            d := linalg.dot(da, db)
+            denom := a*b - d*d
+            s = denom != 0 ? clamp((d*proj_b - proj_a*b) / denom, 0, 1) : 0
+            t = (d*s + proj_b)/b
+            //if t is outside [0, 1], clamp it and recompute s for that t
+            if t < 0 {
+                t = 0
+                s = clamp(-proj_a / a, 0, 1)
+            } else if t > 1 {
+                t = 1
+                s = clamp((d - proj_a) / a, 0, 1)
+            }
+        }
+    }
+    return a1 + da*s, b1 + db*t
+}
 
-    closest_b := point_on_segment(closest_a, b.a, b.b)
-    closest_a = point_on_segment(closest_b, a.a, a.b)
-
-    a_sphere := Sphere{center=closest_a, radius=a.radius}
-    b_sphere := Sphere{center=closest_b, radius=b.radius}
-    return sphere_sphere(a_sphere, b_sphere)
+capsule_capsule :: proc(a, b: Capsule) -> bool {
+    ca, cb := closest_points_segments(a.a, a.b, b.a, b.b)
+    r := a.radius + b.radius
+    return linalg.length2(cb - ca) <= r * r
 }
 
 capsule_sphere :: proc(a: Capsule, b: Sphere) -> bool {
     closest_a := point_on_segment(b.center, a.a, a.b)
     a_sphere := Sphere{center=closest_a, radius=a.radius}
     return sphere_sphere(a_sphere, b)
-}
-
-capsule_box :: proc(a: Capsule, b: Box) -> bool {
-    center := (a.a + a.b)/2
-    mini := b.center - b.half_extents
-    maxi := b.center + b.half_extents
-    closest_b := linalg.clamp(center, mini, maxi)
-    closest_a := point_on_segment(closest_b, a.a, a.b)
-    return linalg.length2(closest_b - closest_a) <= a.radius * a.radius
-}
-
-capsule_overlapping :: proc(a: Capsule, atrans: matrix[4,4]f32, b: Shape, btrans: matrix[4,4]f32) -> bool {
-    #partial switch b in b {
-        case Sphere:
-        return capsule_sphere(transform_capsule(a, atrans), transform_sphere(b, btrans))
-        case Capsule:
-        return capsule_capsule(transform_capsule(a, atrans), transform_capsule(b, btrans))
-        case Box:
-        return box_overlapping(b, btrans, a, atrans)
-    }
-    return false
 }

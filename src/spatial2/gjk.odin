@@ -35,6 +35,11 @@ line_simplex :: proc(simplex: ^Simplex, dir: ^[3]f32) -> bool {
     if linalg.dot(ab, ao) > 0 {
         //inside the segment, keep A & B
         dir^ = linalg.cross(linalg.cross(ab, ao), ab)
+        abl := linalg.length2(ab)
+        if linalg.length2(dir^) <= 1e-12 * abl * abl * abl {
+            //origin is on the segment, thus colliding
+            return true
+        }
     } else {
         //outside the segment, origin is somewhere past A
         simplex.dim = 1
@@ -139,7 +144,7 @@ shape_center :: proc(s: Shape) -> [3]f32 {
 }
 
 
-overlap_gjk :: proc(a: Shape, atrans: matrix[4,4]f32, b: Shape, btrans: matrix[4,4]f32) -> bool {
+boolean_gjk :: proc(a: Shape, atrans: matrix[4,4]f32, b: Shape, btrans: matrix[4,4]f32) -> bool {
     //start with a search direction that points between the two shapes
     ca := (atrans * [4]f32{**shape_center(a), 1}).xyz
     cb := (btrans * [4]f32{**shape_center(b), 1}).xyz
@@ -162,10 +167,14 @@ overlap_gjk :: proc(a: Shape, atrans: matrix[4,4]f32, b: Shape, btrans: matrix[4
         //get new support point
         p = support_diff(a, atrans, b, btrans, dir)
 
+        d := linalg.dot(p, dir)
         //if the furthest point along dir didn't cross the origin, the shapes cannot be intersecting
-        //might also check epsilon here as well
-        if linalg.dot(p, dir) < 0 {
+        if d < -1e-12 {
             return false
+        }
+        //but if the furthest point is touching the origin, the shapes *are* intersecting
+        if d < 1e-12 {
+            return true
         }
 
         push_simplex(&simplex, p)
