@@ -138,7 +138,7 @@ shape_center :: proc(s: Shape) -> [3]f32 {
     case Capsule:
         return (s.a + s.b) / 2
     case Convex_Hull:
-        return 0
+        return s.center
     }
     return 0
 }

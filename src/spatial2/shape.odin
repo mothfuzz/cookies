@@ -6,9 +6,10 @@ Shape :: union #no_nil {
     Box,
     Sphere,
     Capsule,
-    Convex_Hull, //ID, not verts
+    Convex_Hull,
 }
 
+//until we can get the named tag directly in Odin
 Shape_Kind :: enum {
     Box,
     Sphere,
@@ -36,8 +37,7 @@ shape_support :: proc(s: Shape, dir: [3]f32) -> [3]f32 {
     case Capsule:
         return capsule_support(s, dir)
     case Convex_Hull:
-        return 0
-        //return hull_support(s, dir)
+        return hull_support(s, dir)
     }
     return 0
 }
@@ -186,4 +186,3 @@ shape_overlapping :: proc(a: Shape, atrans: matrix[4,4]f32, b: Shape, btrans: ma
     return boolean_gjk(a, atrans, b, btrans)
 }
 
-Convex_Hull :: distinct int
