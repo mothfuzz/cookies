@@ -6,6 +6,7 @@ Shape :: union #no_nil {
     Box,
     Sphere,
     Capsule,
+    Cylinder,
     Convex_Hull,
 }
 
@@ -14,6 +15,7 @@ Shape_Kind :: enum {
     Box,
     Sphere,
     Capsule,
+    Cylinder,
     Convex_Hull,
 }
 
@@ -22,9 +24,26 @@ shape_kind :: proc(s: Shape) -> Shape_Kind {
     case Box: return .Box
     case Sphere: return .Sphere
     case Capsule: return .Capsule
+    case Cylinder: return .Cylinder
     case Convex_Hull: return .Convex_Hull
     }
     return nil
+}
+
+shape_center :: proc(s: Shape) -> [3]f32 {
+    switch s in s {
+    case Box:
+        return s.center
+    case Sphere:
+        return s.center
+    case Capsule:
+        return (s.a + s.b) / 2
+    case Cylinder:
+        return (s.a + s.b) / 2
+    case Convex_Hull:
+        return s.center
+    }
+    return 0
 }
 
 shape_support :: proc(s: Shape, dir: [3]f32) -> [3]f32 {
@@ -36,6 +55,8 @@ shape_support :: proc(s: Shape, dir: [3]f32) -> [3]f32 {
         return sphere_support(s, dir)
     case Capsule:
         return capsule_support(s, dir)
+    case Cylinder:
+        return cylinder_support(s, dir)
     case Convex_Hull:
         return hull_support(s, dir)
     }

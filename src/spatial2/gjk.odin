@@ -129,21 +129,6 @@ support_diff :: proc(a: Shape, atrans: matrix[4,4]f32, b: Shape, btrans: matrix[
     return a - b
 }
 
-shape_center :: proc(s: Shape) -> [3]f32 {
-    switch s in s {
-    case Box:
-        return s.center
-    case Sphere:
-        return s.center
-    case Capsule:
-        return (s.a + s.b) / 2
-    case Convex_Hull:
-        return s.center
-    }
-    return 0
-}
-
-
 boolean_gjk :: proc(a: Shape, atrans: matrix[4,4]f32, b: Shape, btrans: matrix[4,4]f32) -> bool {
     //start with a search direction that points between the two shapes
     ca := (atrans * [4]f32{**shape_center(a), 1}).xyz
