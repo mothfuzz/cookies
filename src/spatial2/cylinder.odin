@@ -12,6 +12,6 @@ cylinder_support :: proc(c: Cylinder, dir: [3]f32) -> [3]f32 {
     tip := linalg.dot(dir, axis) > 0 ? c.b : c.a
     perp := dir - axis * (linalg.dot(dir, axis) / linalg.dot(axis, axis))
     l := linalg.length2(perp)
-    if l < 1e-12 do return tip   //dir is parallel to the axis: any point on the cap is valid
+    if l < 1e-12 do return tip //dir is parallel to axis: any point on the tip is valid
     return tip + perp * (c.radius / linalg.sqrt(l))
 }
