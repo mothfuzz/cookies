@@ -496,9 +496,11 @@ fn solid_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> @location
     if final_color.a < 0.9 {
         discard;
     }
-    final_color = apply_light_environment(in, final_color, front_facing);
-    let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
-    final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
+    if(in.indices[2] != 0) {
+        final_color = apply_light_environment(in, final_color, front_facing);
+        let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
+        final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
+    }
     final_color = apply_fog(in.position, final_color);
 
     return final_color * camera.color.a;
@@ -517,9 +519,11 @@ fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut 
         discard;
     }
     var final_color = base_color;
-    final_color = apply_light_environment(in, final_color, front_facing);
-    let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
-    final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
+    if(in.indices[2] != 0) {
+        final_color = apply_light_environment(in, final_color, front_facing);
+        let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
+        final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
+    }
     final_color = apply_fog(in.position, final_color);
     //final_color.a = base_color.a;
     final_color = vec4<f32>(final_color.rgb * camera.color.a, final_color.a);

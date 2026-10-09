@@ -424,7 +424,7 @@ Mesh_Draw :: struct {
 Instance :: struct {
     transform: matrix[4,4]f32,
     using dynamic_material: Dynamic_Material,
-    indices: [4]i32, //skeleton_offset, environment_probe A, environment_probe B, unused
+    indices: [4]i32, //skeleton_offset, environment_probe A, environment_probe B, unlit
 }
 
 //this happens at an earlier stage than draw_instances i.e. multiple materials could be bound for one mesh

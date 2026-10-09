@@ -742,7 +742,8 @@ draw_environment_probe :: proc(probe: Environment_Probe, layers: Layer_Mask = Al
 
 @(private)
 draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32,
-                           dynamic_material: Dynamic_Material, sprite, billboard, double_sided: bool,
+                           dynamic_material: Dynamic_Material,
+                           sprite, billboard, double_sided, unlit: bool,
                            bones: []matrix[4,4]f32, layers: Layer_Mask) {
 
     //get the batch
@@ -771,6 +772,9 @@ draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32
                 draw.cull_mode = .Front_CCW
             }
         }
+        if unlit {
+            draw.indices[3] = 1
+        }
         mini := &frame.scene_extents[0]
         maxi := &frame.scene_extents[1]
         //Arvo's method - convert transformed bounding axes to AABB using absolute values
@@ -798,13 +802,13 @@ draw_mesh :: proc(mesh: Mesh, material: Material, trans: transform.Transform = n
                   base_color_tint: [4]f32 = 1,
                   ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
                   emissive_tint: [3]f32 = 1,
-                  sprite: bool = false, billboard: bool = false, double_sided: bool = false,
+                  sprite: bool = false, billboard: bool = false, double_sided: bool = false, unlit: bool = false,
                   bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
     trans := transform.world(trans)
     pbr_tint := [4]f32{ambient_tint, roughness_tint, metallic_tint, 1}
     emissive_tint := [4]f32{emissive_tint.r, emissive_tint.g, emissive_tint.b, 1}
     dynamic_material := Dynamic_Material{clip_rect, base_color_tint, pbr_tint, emissive_tint}
-    draw_mesh_internal(mesh, material, trans, dynamic_material, sprite, billboard, double_sided, bones, layers)
+    draw_mesh_internal(mesh, material, trans, dynamic_material, sprite, billboard, double_sided, unlit, bones, layers)
 }
 
 //sprites are just special kinds of meshes
@@ -814,10 +818,10 @@ draw_sprite :: proc(material: Material, trans: transform.Transform = nil,
                     base_color_tint: [4]f32 = 1,
                     ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
                     emissive_tint: [3]f32 = 1,
-                    billboard: bool = true, double_sided: bool = false, layers: Layer_Mask = All_Layers) {
+                    billboard: bool = true, double_sided: bool = false, unlit: bool = false, layers: Layer_Mask = All_Layers) {
     draw_mesh(quad_mesh, material, trans, clip_rect,
               base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint,
-              true, billboard, double_sided, nil, layers)
+              true, billboard, double_sided, unlit, nil, layers)
 }
 
 @(private)
