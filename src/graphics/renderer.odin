@@ -6,6 +6,7 @@ import "base:runtime"
 import "vendor:wgpu"
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 
 //whoa we did it we imported another cookies package in a cookies package
 import "cookies:transform"
@@ -883,18 +884,28 @@ draw_point :: proc(p: [3]f32, color: [4]f32 = 1, trans: transform.Transform = ni
 Mesh_Batch :: struct {
     mesh: Mesh,
     material: Material,
+    hash: Batch_Hash,
     instances: [Cull_Mode][]Mesh_Draw,
 }
 @(private)
 flatten_action :: proc(f: Frame) -> []Mesh_Batch {
     batches := make([dynamic]Mesh_Batch)
     for hash, batch_draw in f.action {
-        batch := Mesh_Batch{mesh=batch_draw.mesh, material=batch_draw.material}
+        batch := Mesh_Batch{mesh=batch_draw.mesh, material=batch_draw.material, hash=hash}
+        use_batch := false
         for mode in Cull_Mode {
             batch.instances[mode] = batch_draw.instances[mode][:]
+            if len(batch.instances[mode]) > 0 {
+                use_batch = true
+            }
         }
-        append(&batches, batch)
+        if use_batch {
+            append(&batches, batch)
+        }
     }
+    slice.sort_by(batches[:], proc(a, b: Mesh_Batch) -> bool {
+        return a.hash < b.hash
+    })
     return batches[:]
 }
 @(private)
@@ -1235,6 +1246,7 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
     pipeline_set: bool = false
     prev_topology: Mesh_Topology
     prev_cull_mode: Cull_Mode
+    bind_instances(render_pass)
     for draw in draws {
         if prev_material == 0 || draw.material.hash != prev_material {
             bind_material(render_pass, 1, draw.material)

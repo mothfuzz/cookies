@@ -90,6 +90,13 @@ make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil, topolog
             log.debug("No tangents, calculating...")
             calculate_tangents(vertices.position[0:n], vertices.normal[0:n], vertices.texcoord[0:n], indices, vertices.tangent[0:n])
         }
+    } else if topology == .Lines {
+        if vertices.tangent[0] == 0 {
+            log.debug("creating artificial tangents for lines...")
+            calculate_lines_tangents(vertices.position[0:n], indices, vertices.tangent[0:n])
+        }
+    } else {
+        //1px points don't really have anything sensible...
     }
     if wireframe {
         //implies topology=.Lines but whatever
@@ -331,6 +338,27 @@ calculate_tangents :: proc(vertices: [][3]f32, normals: [][3]f32, texcoords: [][
     }
 }
 
+calculate_lines_tangents :: proc(vertices: [][3]f32, indices: []u32, out_tangents: [][4]f32) {
+    indices := indices
+    if indices == nil || len(indices) == 0 {
+        indices = make([]u32, len(vertices))
+        for i in 0..<len(vertices) {
+            indices[i] = u32(i)
+        }
+    }
+    for i := 0; i+1 < len(indices); i += 2 {
+        ai := indices[i+0]
+        bi := indices[i+1]
+        ab := vertices[bi] - vertices[ai]
+        out_tangents[ai].xyz += ab
+        out_tangents[bi].xyz += ab
+    }
+    for &tangent in out_tangents {
+        tangent.xyz = linalg.normalize(tangent.xyz)
+        tangent.w = 1.0
+    }
+}
+
 //for if you have a triangle mesh with triangle-based indices and want to render it wireframe
 triangles_to_lines :: proc(indices: []u32) -> []u32 {
     seen := make(map[[2]u32]struct{}, len(indices), context.temp_allocator)
@@ -460,17 +488,6 @@ Instance :: struct {
     indices: [4]i32, //skeleton_offset, environment_probe A, environment_probe B, unlit
 }
 
-//this happens at an earlier stage than draw_instances i.e. multiple materials could be bound for one mesh
-bind_mesh :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh) {
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 0, mesh.positions, 0, wgpu.BufferGetSize(mesh.positions))
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 1, mesh.normals, 0, wgpu.BufferGetSize(mesh.normals))
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 2, mesh.tangents, 0, wgpu.BufferGetSize(mesh.tangents))
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 3, mesh.texcoords, 0, wgpu.BufferGetSize(mesh.texcoords))
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 4, mesh.colors, 0, wgpu.BufferGetSize(mesh.colors))
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 5, mesh.bones, 0, wgpu.BufferGetSize(mesh.bones))
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 6, mesh.weights, 0, wgpu.BufferGetSize(mesh.weights))
-}
-
 //calculates local mesh data (i.e. not relative to camera)
 calculate_mesh_local :: proc(instance: ^Mesh_Draw, mesh: Mesh, material: Material) {
     //calculate clip_rect
@@ -555,17 +572,34 @@ delete_instance_buffer :: proc() {
     }
 }
 
+//this happens at an earlier stage than draw_instances i.e. multiple materials could be bound for one mesh
+bind_mesh :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh) {
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 0, mesh.positions, 0, wgpu.BufferGetSize(mesh.positions))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 1, mesh.normals, 0, wgpu.BufferGetSize(mesh.normals))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 2, mesh.tangents, 0, wgpu.BufferGetSize(mesh.tangents))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 3, mesh.texcoords, 0, wgpu.BufferGetSize(mesh.texcoords))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 4, mesh.colors, 0, wgpu.BufferGetSize(mesh.colors))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 5, mesh.bones, 0, wgpu.BufferGetSize(mesh.bones))
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 6, mesh.weights, 0, wgpu.BufferGetSize(mesh.weights))
+    if mesh.indices != nil {
+        wgpu.RenderPassEncoderSetIndexBuffer(render_pass, mesh.indices, .Uint32, 0, wgpu.BufferGetSize(mesh.indices))
+    }
+}
+
+//this is once per pass, binding the whole buffer once, we slice into it using an offset in Draw
+bind_instances :: proc(render_pass: wgpu.RenderPassEncoder) {
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, instance_data_location, instance_buffer, 0, instance_buffer_cap)
+}
+
+
 //assumes material, mesh, and camera are all already bound & calculations are all done.
 @(private)
 draw_mesh_instances :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh, count: u32, buffer_offset: u64) {
     if count == 0 do return
-    size := u64(count) * u64(size_of(Instance))
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, instance_data_location, instance_buffer, buffer_offset, size)
-
+    first_instance := u32(buffer_offset / size_of(Instance))
     if mesh.indices != nil {
-        wgpu.RenderPassEncoderSetIndexBuffer(render_pass, mesh.indices, .Uint32, 0, wgpu.BufferGetSize(mesh.indices))
-        wgpu.RenderPassEncoderDrawIndexed(render_pass, mesh.size, count, 0, 0, 0)
+        wgpu.RenderPassEncoderDrawIndexed(render_pass, mesh.size, count, 0, 0, first_instance)
     } else {
-        wgpu.RenderPassEncoderDraw(render_pass, mesh.size, count, 0, 0)
+        wgpu.RenderPassEncoderDraw(render_pass, mesh.size, count, 0, first_instance)
     }
 }
