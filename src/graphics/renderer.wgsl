@@ -496,7 +496,7 @@ fn solid_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> @location
     if final_color.a < 0.9 {
         discard;
     }
-    if(in.indices[2] != 0) {
+    if(in.indices[3] == 0) {
         final_color = apply_light_environment(in, final_color, front_facing);
         let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
         final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
@@ -519,7 +519,7 @@ fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut 
         discard;
     }
     var final_color = base_color;
-    if(in.indices[2] != 0) {
+    if(in.indices[3] == 0) {
         final_color = apply_light_environment(in, final_color, front_facing);
         let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
         final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
