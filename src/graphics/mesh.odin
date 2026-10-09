@@ -29,9 +29,16 @@ Mesh_Key :: struct {
     path: cstring,
 }
 
+Mesh_Topology :: enum {
+    Triangles,
+    Lines,
+    Points,
+}
+
 Mesh :: struct {
     using key: Mesh_Key,
     size: u32,
+    topology: Mesh_Topology,
     //buffers (currently at 8 - if we need more then we can interleave.)
     positions: wgpu.Buffer,
     normals: wgpu.Buffer,
@@ -61,27 +68,34 @@ Mesh :: struct {
     mesh = make_mesh_from_soa(new_vertices, indices)
     return
 }*/
-make_mesh_from_slice :: proc(vertices: []Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
+make_mesh_from_slice :: proc(vertices: []Vertex, indices: []u32 = nil, topology: Mesh_Topology = .Triangles, wireframe: bool = false) -> (mesh: Mesh) {
     size := len(vertices)
     new_vertices := make(#soa[]Vertex, size)
     for i in 0..<size {
         new_vertices[i] = vertices[i]
     }
-    mesh = make_mesh_from_soa(new_vertices, indices)
+    mesh = make_mesh_from_soa(new_vertices, indices, topology, wireframe)
     delete(new_vertices)
     return
 }
-make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil) -> (mesh: Mesh) {
+make_mesh_from_soa :: proc(vertices: #soa[]Vertex, indices: []u32 = nil, topology: Mesh_Topology = .Triangles, wireframe: bool = false) -> (mesh: Mesh) {
     n := len(vertices)
-    if vertices.normal[0] == 0 {
-        log.debug("No normals, calculating...")
-        calculate_normals(vertices.position[0:n], indices, vertices.normal[0:n])
+    indices := indices
+    if topology == .Triangles {
+        if vertices.normal[0] == 0 {
+            log.debug("No normals, calculating...")
+            calculate_normals(vertices.position[0:n], indices, vertices.normal[0:n])
+        }
+        if vertices.tangent[0] == 0 {
+            log.debug("No tangents, calculating...")
+            calculate_tangents(vertices.position[0:n], vertices.normal[0:n], vertices.texcoord[0:n], indices, vertices.tangent[0:n])
+        }
     }
-    if vertices.tangent[0] == 0 {
-        log.debug("No tangents, calculating...")
-        n := len(vertices)
-        calculate_tangents(vertices.position[0:n], vertices.normal[0:n], vertices.texcoord[0:n], indices, vertices.tangent[0:n])
+    if wireframe {
+        //implies topology=.Lines but whatever
+        indices = triangles_to_lines(indices)
     }
+    mesh.topology = topology
     mesh.positions = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.position[0:n])
     mesh.normals = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.normal[0:n])
     mesh.tangents = wgpu.DeviceCreateBufferWithDataSlice(ren.device, &{usage={.Vertex, .CopyDst}}, vertices.tangent[0:n])
@@ -315,6 +329,25 @@ calculate_tangents :: proc(vertices: [][3]f32, normals: [][3]f32, texcoords: [][
         out_tangents[bi] = tangent
         out_tangents[ci] = tangent
     }
+}
+
+//for if you have a triangle mesh with triangle-based indices and want to render it wireframe
+triangles_to_lines :: proc(indices: []u32) -> []u32 {
+    seen := make(map[[2]u32]struct{}, len(indices), context.temp_allocator)
+    //max same size if there are no shared edges
+    lines := make([dynamic]u32, 0, len(indices))
+    for i := 0; i < len(indices)-2; i += 3 {
+        tri := [3]u32{indices[i], indices[i+1], indices[i+2]}
+        //iterate through triangle edges
+        for j in 0..<3 {
+            a, b := tri[j], tri[(j+1)%3]
+            edge := [2]u32{min(a, b), max(a, b)} //make sure they're sorted for dedup
+            if edge in seen do continue
+            seen[edge] = {}
+            append(&lines, a, b)
+        }
+    }
+    return lines[:]
 }
 
 delete_mesh :: proc(mesh: Mesh) {

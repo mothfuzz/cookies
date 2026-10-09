@@ -28,8 +28,8 @@ DIRECTIONAL_CASCADE_SPLIT_WEIGHT :: 0.5
 SPOT_LIGHT_SHADOW_MAP_RES :: 1024
 
 
-create_shadow_pipeline :: proc(cull_mode: Cull_Mode) {
-    ren.solid_shadow_pipelines[cull_mode] = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+create_shadow_pipeline :: proc(cull_mode: Cull_Mode) -> (solid, trans: wgpu.RenderPipeline) {
+    solid = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         label = "solid shadows",
         layout = ren.shadow_layout,
         vertex = {
@@ -78,7 +78,7 @@ create_shadow_pipeline :: proc(cull_mode: Cull_Mode) {
             mask = 0xffffffff,
         },
     })
-    ren.trans_shadow_pipelines[cull_mode] = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+    trans = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         label = "trans shadows",
         layout = ren.shadow_layout,
         vertex = {
@@ -123,7 +123,7 @@ create_shadow_pipeline :: proc(cull_mode: Cull_Mode) {
             mask = 0xffffffff,
         },
     })
-    
+    return
 }
 
 
@@ -135,7 +135,9 @@ init_shadows :: proc() {
     })
 
     for cull_mode in Cull_Mode {
-        create_shadow_pipeline(cull_mode)
+        solid, trans := create_shadow_pipeline(cull_mode)
+        ren.solid_shadow_pipelines[cull_mode] = solid
+        ren.trans_shadow_pipelines[cull_mode] = trans
     }
 
     size: [2]uint = POINT_LIGHT_SHADOW_MAP_RES
@@ -379,9 +381,12 @@ render_shadow_maps :: proc(command_encoder: wgpu.CommandEncoder, passes: Passes,
             },
         })
 
+        pipelines: Pipelines //shadows skip points & lines
+
         bind_shadow_camera(solid_shadow_pass, 0, shadow_cam)
         bind_skeletons(solid_shadow_pass, 2)
-        execute_draw_calls(solid_shadow_pass, passes.solid_shadows[i].draw_calls[:], ren.solid_shadow_pipelines)
+        pipelines.main = ren.solid_shadow_pipelines
+        execute_draw_calls(solid_shadow_pass, passes.solid_shadows[i].draw_calls[:], pipelines)
 
         wgpu.RenderPassEncoderEnd(solid_shadow_pass)
         wgpu.RenderPassEncoderRelease(solid_shadow_pass)
@@ -404,7 +409,8 @@ render_shadow_maps :: proc(command_encoder: wgpu.CommandEncoder, passes: Passes,
 
         bind_shadow_camera(trans_shadow_pass, 0, shadow_cam)
         bind_skeletons(trans_shadow_pass, 2)
-        execute_draw_calls(trans_shadow_pass, passes.trans_shadows[i].draw_calls[:], ren.trans_shadow_pipelines)
+        pipelines.main = ren.trans_shadow_pipelines
+        execute_draw_calls(trans_shadow_pass, passes.trans_shadows[i].draw_calls[:], pipelines)
 
         wgpu.RenderPassEncoderEnd(trans_shadow_pass)
         wgpu.RenderPassEncoderRelease(trans_shadow_pass)

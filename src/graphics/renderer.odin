@@ -31,6 +31,10 @@ Renderer :: struct {
     layout: wgpu.PipelineLayout,
     solid_pipelines: [Cull_Mode]wgpu.RenderPipeline,
     trans_pipelines: [Cull_Mode]wgpu.RenderPipeline,
+    solid_lines_pipeline: wgpu.RenderPipeline,
+    trans_lines_pipeline: wgpu.RenderPipeline,
+    solid_points_pipeline: wgpu.RenderPipeline,
+    trans_points_pipeline: wgpu.RenderPipeline,
     oit_composite_layout: wgpu.PipelineLayout,
     oit_composite_pipeline: wgpu.RenderPipeline,
     oit_composite_bind_group_layout: wgpu.BindGroupLayout,
@@ -70,6 +74,12 @@ wgpu_cull_mode := [Cull_Mode]wgpu.CullMode {
         .Back_CCW = .Back,
         .Front_CCW = .Front,
         .None = .None,
+}
+
+wgpu_topology := [Mesh_Topology]wgpu.PrimitiveTopology {
+        .Triangles = .TriangleList,
+        .Lines = .LineList,
+        .Points = .PointList,
 }
 
 screen_resolution: [2]uint
@@ -186,8 +196,8 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
 uniform_alignment: int
 storage_alignment: int
 
-create_pipeline :: proc(cull_mode: Cull_Mode) {
-    ren.solid_pipelines[cull_mode] = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+create_pipeline :: proc(cull_mode: Cull_Mode, topology: Mesh_Topology) -> (solid, trans: wgpu.RenderPipeline) {
+    solid = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         label = "solid",
         layout = ren.layout,
         vertex = {
@@ -206,7 +216,7 @@ create_pipeline :: proc(cull_mode: Cull_Mode) {
             },
         },
         primitive = {
-            topology = .TriangleList,
+            topology = wgpu_topology[topology],
             cullMode = wgpu_cull_mode[cull_mode],
             frontFace = .CCW,
         },
@@ -257,7 +267,7 @@ create_pipeline :: proc(cull_mode: Cull_Mode) {
             },
         },
     }
-    ren.trans_pipelines[cull_mode] = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+    trans = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         label = "trans",
         layout = ren.layout,
         vertex = {
@@ -273,7 +283,7 @@ create_pipeline :: proc(cull_mode: Cull_Mode) {
             targets = raw_data(trans_targets),
         },
         primitive = {
-            topology = .TriangleList,
+            topology = wgpu_topology[topology],
             cullMode = wgpu_cull_mode[cull_mode],
             frontFace = .CCW,
         },
@@ -287,6 +297,7 @@ create_pipeline :: proc(cull_mode: Cull_Mode) {
             mask = 0xffffffff,
         },
     })
+    return
 }
 
 @(private)
@@ -368,8 +379,17 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
 
     log.debug("creating main pipelines...")
     for cull_mode in Cull_Mode {
-        create_pipeline(cull_mode)
+        solid, trans := create_pipeline(cull_mode, .Triangles)
+        ren.solid_pipelines[cull_mode] = solid
+        ren.trans_pipelines[cull_mode] = trans
     }
+    lines_solid, lines_trans := create_pipeline(.None, .Lines)
+    ren.solid_lines_pipeline = lines_solid
+    ren.trans_lines_pipeline = lines_trans
+    points_solid, points_trans := create_pipeline(.None, .Points)
+    ren.solid_points_pipeline = points_solid
+    ren.trans_points_pipeline = points_trans
+
 
     log.debug("creating compositor...")
     oit_composite_layout_entries := []wgpu.BindGroupLayoutEntry{
@@ -552,6 +572,10 @@ quit :: proc() {
         wgpu.RenderPipelineRelease(ren.solid_pipelines[cull_mode])
         wgpu.RenderPipelineRelease(ren.trans_pipelines[cull_mode])
     }
+    wgpu.RenderPipelineRelease(ren.solid_lines_pipeline)
+    wgpu.RenderPipelineRelease(ren.trans_lines_pipeline)
+    wgpu.RenderPipelineRelease(ren.solid_points_pipeline)
+    wgpu.RenderPipelineRelease(ren.trans_points_pipeline)
     wgpu.PipelineLayoutRelease(ren.layout)
     wgpu.RenderPipelineRelease(ren.oit_composite_pipeline)
     wgpu.PipelineLayoutRelease(ren.oit_composite_layout)
@@ -765,13 +789,12 @@ draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32
             draw.indices[0] = -1
         }
         calculate_mesh_local(&draw, mesh, material)
-        if double_sided {
+        if double_sided || mesh.topology != .Triangles {
             draw.cull_mode = .None
-        } else {
-            if linalg.determinant(cast(matrix[3,3]f32)(trans)) < 0 {
+        } else if linalg.determinant(cast(matrix[3,3]f32)(trans)) < 0 {
                 draw.cull_mode = .Front_CCW
-            }
         }
+    
         if unlit {
             draw.indices[3] = 1
         }
@@ -822,6 +845,38 @@ draw_sprite :: proc(material: Material, trans: transform.Transform = nil,
     draw_mesh(quad_mesh, material, trans, clip_rect,
               base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint,
               true, billboard, double_sided, unlit, nil, layers)
+}
+
+@(export)
+draw_line :: proc(a, b: [3]f32, color: [4]f32 = 1, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
+    local: matrix[4,4]f32
+    ab := b - a
+    p1, p2: [3]f32
+    if ab == 0 {
+        p1, p2 = {1, 0, 0}, {0, 1, 0}
+    } else {
+        if abs(ab.x) > abs(ab.z) {
+            p1 = {-ab.y, ab.x, 0}
+        } else {
+            p1 = {0, -ab.z, ab.y}
+        }
+        p2 = linalg.cross(ab, p1)
+    }
+    local[0].xyz = p1
+    local[1].xyz = p2
+    local[2].xyz = ab
+    local[3].xyz = a
+    local[3].w = 1
+
+    draw_mesh(line_mesh, white_material, transform.world(trans) * local, base_color_tint=color, unlit=true, layers=layers)
+}
+
+@(export)
+draw_point :: proc(p: [3]f32, color: [4]f32 = 1, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
+    local: matrix[4,4]f32 = 1
+    local[3].xyz = p
+
+    draw_mesh(point_mesh, white_material, transform.world(trans) * local, base_color_tint=color, unlit=true, layers=layers)
 }
 
 @(private)
@@ -998,7 +1053,7 @@ Pass_Staging :: struct {
 }
 
 @(private)
-compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pass_Staging) {
+compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pass_Staging, skip_points_lines: bool = false) {
     cam_flip := linalg.determinant(cast(matrix[3,3]f32)(cam.view)) < 0
     remap := [Cull_Mode]Cull_Mode{
             .Back_CCW = cam_flip ? .Front_CCW : .Back_CCW,
@@ -1007,6 +1062,7 @@ compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, tra
     }
     for mode in Cull_Mode {
         for batch in batches {
+            if batch.mesh.topology != .Triangles && skip_points_lines do continue
             solid_start, trans_start: u32
             if solid != nil {
                 solid_start = u32(len(solid.instances))
@@ -1100,7 +1156,7 @@ compute_passes :: proc(batches: []Mesh_Batch, cameras: []Camera_Draw, shadow_cam
         compute_pass_staging(batches, cam, &solid_main_staging[i], &trans_main_staging[i])
     }
     for cam, i in shadow_cameras {
-        compute_pass_staging(batches, cam, &solid_shadows_staging[i], &trans_shadows_staging[i])
+        compute_pass_staging(batches, cam, &solid_shadows_staging[i], &trans_shadows_staging[i], true)
     }
 
     //actually pack the staging passes to the real passes
@@ -1165,13 +1221,20 @@ delete_passes :: proc(passes: Passes) {
     delete(passes.trans_main)
 }
 
+Pipelines :: struct {
+    main: [Cull_Mode]wgpu.RenderPipeline,
+    lines: wgpu.RenderPipeline,
+    points: wgpu.RenderPipeline,
+}
+
 @(private)
-execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Call, pipelines: [Cull_Mode]wgpu.RenderPipeline) {
+execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Call, pipelines: Pipelines) {
     //lights and cameras are already bound at this point.
     prev_material: Material_Hash
     prev_mesh: Mesh_Hash
+    pipeline_set: bool = false
+    prev_topology: Mesh_Topology
     prev_cull_mode: Cull_Mode
-    cull_mode_set: bool = false
     for draw in draws {
         if prev_material == 0 || draw.material.hash != prev_material {
             bind_material(render_pass, 1, draw.material)
@@ -1181,10 +1244,16 @@ execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Ca
             bind_mesh(render_pass, draw.mesh)
             prev_mesh = draw.mesh.hash
         }
-        if cull_mode_set == false || draw.cull_mode != prev_cull_mode {
-            wgpu.RenderPassEncoderSetPipeline(render_pass, pipelines[draw.cull_mode])
+        topology := draw.mesh.topology
+        if pipeline_set == false || draw.cull_mode != prev_cull_mode || topology != prev_topology {
+            switch topology {
+            case .Triangles: wgpu.RenderPassEncoderSetPipeline(render_pass, pipelines.main[draw.cull_mode])
+            case .Lines: wgpu.RenderPassEncoderSetPipeline(render_pass, pipelines.lines)
+            case .Points: wgpu.RenderPassEncoderSetPipeline(render_pass, pipelines.points)
+            }
             prev_cull_mode = draw.cull_mode
-            cull_mode_set = true
+            prev_topology = draw.mesh.topology
+            pipeline_set = true
         }
         draw_mesh_instances(render_pass, draw.mesh, draw.instance_count, draw.instance_buffer_offset)
     }
@@ -1279,6 +1348,8 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
     wgpu.RenderPassEncoderEnd(camera_fill_pass)
     wgpu.RenderPassEncoderRelease(camera_fill_pass)
 
+    pipelines: Pipelines
+
     for i in target.cameras {
 
         camera := cameras[i]
@@ -1306,7 +1377,10 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
             bind_camera(render_pass, 0, camera)
             bind_skeletons(render_pass, 2)
             bind_lights(render_pass, 3, u32(i))
-            execute_draw_calls(render_pass, solid_passes[i].draw_calls[:], ren.solid_pipelines)
+            pipelines.main = ren.solid_pipelines
+            pipelines.lines = ren.solid_lines_pipeline
+            pipelines.points = ren.solid_points_pipeline
+            execute_draw_calls(render_pass, solid_passes[i].draw_calls[:], pipelines)
             wgpu.RenderPassEncoderEnd(render_pass)
             wgpu.RenderPassEncoderRelease(render_pass)
         }
@@ -1346,7 +1420,10 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
             bind_camera(render_pass, 0, camera)
             bind_skeletons(render_pass, 2)
             bind_lights(render_pass, 3, u32(i))
-            execute_draw_calls(render_pass, trans_passes[i].draw_calls[:], ren.trans_pipelines)
+            pipelines.main = ren.trans_pipelines
+            pipelines.lines = ren.trans_lines_pipeline
+            pipelines.points = ren.trans_points_pipeline
+            execute_draw_calls(render_pass, trans_passes[i].draw_calls[:], pipelines)
             wgpu.RenderPassEncoderEnd(render_pass)
             wgpu.RenderPassEncoderRelease(render_pass)
         }

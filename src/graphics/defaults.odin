@@ -9,6 +9,12 @@ pbr_tex: Texture
 white_cubemap: Texture
 black_cubemap: Texture
 trans_cubemap: Texture
+
+white_material: Material
+
+//dimensions...
+point_mesh: Mesh
+line_mesh: Mesh
 quad_mesh: Mesh
 cube_mesh: Mesh
 
@@ -21,11 +27,21 @@ init_defaults :: proc() {
     white_cubemap = make_texture_array({{0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}}, 1, true)
     black_cubemap = make_texture_array({{0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}}, 1, true)
     trans_cubemap = make_texture_array({{0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}}, 1, true)
+
+    white_material = make_material(white_tex)
+
+    point_mesh = make_mesh([]Vertex{{position={0, 0, 0}, texcoord={0, 0}, color={1, 1, 1, 1}}}, {0}, .Points)
+
+    line_mesh = make_mesh([]Vertex{
+        {position={0, 0, 0}, texcoord={0, 0}, color={1, 1, 1, 1}},
+        {position={0, 0, 1}, texcoord={1, 0}, color={1, 1, 1, 1}},
+    }, {0, 1}, .Lines)
+    
     quad_mesh = make_mesh([]Vertex{
-        {position={-0.5, +0.5, 0.0}, texcoord={0.0, 0.0}, color={1, 1, 1, 1}},
-        {position={+0.5, +0.5, 0.0}, texcoord={1.0, 0.0}, color={1, 1, 1, 1}},
-        {position={+0.5, -0.5, 0.0}, texcoord={1.0, 1.0}, color={1, 1, 1, 1}},
-        {position={-0.5, -0.5, 0.0}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
+        {position={-0.5, +0.5, 0.0}, texcoord={0, 0}, color={1, 1, 1, 1}},
+        {position={+0.5, +0.5, 0.0}, texcoord={1, 0}, color={1, 1, 1, 1}},
+        {position={+0.5, -0.5, 0.0}, texcoord={1, 1}, color={1, 1, 1, 1}},
+        {position={-0.5, -0.5, 0.0}, texcoord={0, 1}, color={1, 1, 1, 1}},
     }, {2, 1, 0, 3, 2, 0})
 
     //need all 24 vertices because we want individual UVs per face... ugh
@@ -71,6 +87,7 @@ init_defaults :: proc() {
 }
 
 delete_defaults :: proc() {
+    delete_material(white_material)
     delete_texture(white_tex)
     delete_texture(black_tex)
     delete_texture(trans_tex)
@@ -79,6 +96,8 @@ delete_defaults :: proc() {
     delete_texture(white_cubemap)
     delete_texture(black_cubemap)
     delete_texture(trans_cubemap)
+    delete_mesh(point_mesh)
+    delete_mesh(line_mesh)
     delete_mesh(quad_mesh)
     delete_mesh(cube_mesh)
 }
