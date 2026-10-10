@@ -83,6 +83,12 @@ wgpu_topology := [Mesh_Topology]wgpu.PrimitiveTopology {
         .Points = .PointList,
 }
 
+topology_constant := [Mesh_Topology]f64 {
+        .Triangles = 0,
+        .Lines = 1,
+        .Points = 2,
+}
+
 screen_resolution: [2]uint
 window_resized :: proc(size: [2]uint) {
     configure_surface(size)
@@ -198,6 +204,9 @@ uniform_alignment: int
 storage_alignment: int
 
 create_pipeline :: proc(cull_mode: Cull_Mode, topology: Mesh_Topology) -> (solid, trans: wgpu.RenderPipeline) {
+    constants := []wgpu.ConstantEntry{
+        {key = "TOPOLOGY", value = topology_constant[topology]}
+    }
     solid = wgpu.DeviceCreateRenderPipeline(ren.device, &{
         label = "solid",
         layout = ren.layout,
@@ -215,6 +224,8 @@ create_pipeline :: proc(cull_mode: Cull_Mode, topology: Mesh_Topology) -> (solid
                 format = with_srgb(ren.config.format),
                 writeMask = wgpu.ColorWriteMaskFlags_All,
             },
+            constantCount = len(constants),
+            constants = raw_data(constants),
         },
         primitive = {
             topology = wgpu_topology[topology],
@@ -282,6 +293,8 @@ create_pipeline :: proc(cull_mode: Cull_Mode, topology: Mesh_Topology) -> (solid
             entryPoint = "trans_main",
             targetCount = len(trans_targets),
             targets = raw_data(trans_targets),
+            constantCount = len(constants),
+            constants = raw_data(constants),
         },
         primitive = {
             topology = wgpu_topology[topology],

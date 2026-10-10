@@ -128,11 +128,17 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     var v: VSOut;
     let modelview = mat4x4<f32>(vertex.modelview_0, vertex.modelview_1, vertex.modelview_2, vertex.modelview_3);
     let bones = calculate_bones(vertex, instance_index);
-    let bones3 = mat3x3<f32>(bones[0].xyz, bones[1].xyz, bones[2].xyz);
     v.position = modelview * bones * vec4<f32>(vertex.position, 1.0);
-    v.normal = normalize((modelview * vec4<f32>(normalize(bones3 * vertex.normal), 0.0)).xyz);
-    let tangent = normalize((modelview * vec4<f32>(normalize(bones3 * vertex.tangent.xyz), 0.0)).xyz);
-    v.tangent = vec4<f32>(tangent, vertex.tangent.w);
+    let bones3 = mat3x3<f32>(bones[0].xyz, bones[1].xyz, bones[2].xyz);
+    let normal = bones3 * vertex.normal;
+    if(dot(normal, normal) > 0.0) {
+        v.normal = normalize((modelview * vec4<f32>(normalize(normal), 0.0)).xyz);
+    }
+    let tangent = bones3 * vertex.tangent.xyz;
+    if(dot(tangent, tangent) > 0.0) {
+        let v_tangent = normalize((modelview * vec4<f32>(normalize(tangent), 0.0)).xyz);
+        v.tangent = vec4<f32>(v_tangent, vertex.tangent.w);
+    }
     v.out_position = camera.projection * v.position;
     let tex_offset = vertex.clip_rect.xy;
     let tex_factor = vertex.clip_rect.zw;
@@ -208,11 +214,33 @@ fn calculate_influence_pbr(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: v
 struct LightInput {
     position: vec4<f32>,
     surface_normal: vec3<f32>,
+    base_normal: bool,
     n: vec3<f32>,
+    t: vec3<f32>,
     v: vec3<f32>,
     surface_color: vec4<f32>,
     roughness: f32,
     metallic: f32,
+}
+
+//compute synthetic normals for points/lines that don't already have them
+//kajiya-kay-esque, hence passing line direction into tangents
+fn effective_normal(in: LightInput, l: vec3<f32>) -> vec3<f32> {
+    if(in.base_normal) {
+        return in.n;
+    }
+    var h = l + in.v;
+    h -= in.t * dot(in.t, h);
+    let l2 = dot(h, h);
+    var n = select(in.n, h * inverseSqrt(l2), l2 > 1e-6); //return base normal if light is behind the primitive
+    if(dot(n, in.v) < 0.0) {
+        //clamp to the 'cylinder' sillhouette
+        let s = cross(in.t, in.n);
+        if(dot(s, s) > 1e-6) {
+            n = normalize(s) * select(-1.0, 1.0, dot(n, s) >= 0.0);
+        }
+    }
+    return n;
 }
 
 fn apply_point_light(in: LightInput, light_index: u32) -> vec3<f32> {
@@ -221,6 +249,7 @@ fn apply_point_light(in: LightInput, light_index: u32) -> vec3<f32> {
         return vec3<f32>(0);
     }
     let l = normalize(p.position.xyz - in.position.xyz);
+    let n = effective_normal(in, l);
     let d = distance(in.position.xyz, p.position.xyz);
     let r = p.position.w;
     if d < r {
@@ -240,7 +269,7 @@ fn apply_point_light(in: LightInput, light_index: u32) -> vec3<f32> {
             let near = 0.1;
             let far = p.position.w; //radius
             let depth_ref = near / (far - near) * (far / d - 1.0);
-            let bias = max(0.05 * (1.0 - dot(in.n, l)), 0.005);
+            let bias = max(0.05 * (1.0 - dot(n, l)), 0.005);
             for(var x = -1; x <= 1; x++) {
                 for(var y = -1; y <= 1; y++) {
                     let offset_x = right * f32(x) * texelSize;
@@ -258,8 +287,9 @@ fn apply_point_light(in: LightInput, light_index: u32) -> vec3<f32> {
             let attenuation = smoothstep(r, 0.0, d);
             let radiance = p.color.rgb * p.color.a * attenuation * light_factor;
             //let attenuation = 1.0 / (d*d);
-            //return calculate_influence_phong(in.n, in.v, l, radiance);
-            return calculate_influence_pbr(in.n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic);
+            let area = select(max(dot(n, in.v), 0.0), 1.0, in.base_normal); //weight primitive lighting by area
+            //return calculate_influence_phong(n, in.v, l, radiance) * area;
+            return calculate_influence_pbr(n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic) * area;
         }
     }
     return vec3<f32>(0);
@@ -281,6 +311,7 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
     }
 
     let l = normalize(-d.direction.xyz);
+    let n = effective_normal(in, l);
     var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
     let layer = d.shadow_index.r + cascade;
     if(layer != -1) {
@@ -320,8 +351,9 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
     }
     if(all(light_factor > vec3<f32>(0))) {
         let radiance = d.color.rgb * d.color.a * light_factor;
-        //return calculate_influence_phong(in.n, in.v, l, radiance);
-        return calculate_influence_pbr(in.n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic);
+        let area = select(max(dot(n, in.v), 0.0), 1.0, in.base_normal); //weight primitive lighting by area
+        //return calculate_influence_phong(n, in.v, l, radiance) * area;
+        return calculate_influence_pbr(n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic) * area;
     }
     return vec3<f32>(0);
 }
@@ -332,6 +364,7 @@ fn apply_spot_light(in: LightInput, light_index: u32) -> vec3<f32> {
         return vec3<f32>(0);
     }
     let l = normalize(s.position.xyz - in.position.xyz);
+    let n = effective_normal(in, l);
     let d = distance(in.position.xyz, s.position.xyz);
     if(d > s.range) {
         return vec3<f32>(0);
@@ -376,8 +409,9 @@ fn apply_spot_light(in: LightInput, light_index: u32) -> vec3<f32> {
         let falloff = clamp((theta - outer_cutoff)/epsilon, 0.0, 1.0);
         let attenuation = smoothstep(s.range, 0.0, d);
         let radiance = s.color.rgb * s.color.a * falloff * attenuation * light_factor;
-        //return calculate_influence_phong(in.n, in.v, l, radiance);
-        return calculate_influence_pbr(in.n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic);
+        let area = select(max(dot(n, in.v), 0.0), 1.0, in.base_normal); //weight primitive lighting by area
+        //return calculate_influence_phong(n, in.v, l, radiance) * area;
+        return calculate_influence_pbr(n, in.v, l, radiance, in.surface_color, in.roughness, in.metallic) * area;
     }
     return vec3<f32>(0);
 }
@@ -410,6 +444,8 @@ fn box_project(r: vec3<f32>, position: vec3<f32>, box: EnvironmentProbeBox) -> v
     return hit - box.center.xyz;
 }
 
+override TOPOLOGY: u32 = 0; // 0 = triangles, 1 = lines, 2 = points
+
 fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -> vec4<f32> {
     var final_color = in_color;
     var light = final_color.rgb;
@@ -423,19 +459,38 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
 
         light = vec3<f32>(0.0);
 
-        var n = normalize(in.normal);
-        if(all(in.tangent.xyz != vec3<f32>(0.0))) {
-            //if we have tangents, do extra calculations & use the normal map
-            //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
-            let binormal = normalize(cross(in.normal, in.tangent.xyz) * in.tangent.w);
-            let tangent_to_view = mat3x3<f32>(in.tangent.xyz, binormal, in.normal);
-            //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
-            n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
-        }
-        n = select(-n, n, front_facing);
+        var light_input: LightInput;
+
         let v = normalize(-in.position.xyz); //already in view space
 
-        let light_input = LightInput(in.position, in.normal, n, v, final_color, roughness, metallic);
+        var n = in.normal;
+        var t = in.tangent.xyz;
+        if(TOPOLOGY != 0 && dot(n, n) < 1e-6) {
+            //synthetic normals for lines/points
+            n = v;
+            if(TOPOLOGY == 1 && dot(t, t) > 0.0) {
+                t = normalize(t);
+                let p = v - t * dot(t, v); //view-facing & perpendicular to t
+                if(dot(p, p) > 1e-6) {
+                    n = normalize(p);
+                }
+            }
+            light_input = LightInput(in.position, n, false, n, t, v, final_color, roughness, metallic);
+        } else {
+            //face normals from triangles/normal map
+            n = normalize(n);
+            t = vec3<f32>(0.0); //t == 0 means triangles
+            if(all(in.tangent.xyz != vec3<f32>(0.0))) {
+                //if we have tangents, do extra calculations & use the normal map
+                //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
+                let binormal = normalize(cross(in.normal, in.tangent.xyz) * in.tangent.w);
+                let tangent_to_view = mat3x3<f32>(in.tangent.xyz, binormal, in.normal);
+                //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
+                n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
+            }
+            n = select(-n, n, front_facing);
+            light_input = LightInput(in.position, in.normal, true, n, t, v, final_color, roughness, metallic);
+        }
 
         if(in.indices[1] != -1) {
             let p_world = (camera.inv_view * vec4<f32>(in.position.xyz, 1.0)).xyz;
