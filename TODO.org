@@ -1,36 +1,44 @@
 #+title: Todo
 
+- once instances and lights are both canonicalized, GPU-driven compute culling->drawIndirect becomes obvious. Canonicalized lights are already basically clustered forward with a 1x1x1 froxel grid, so real clustered forward comes out with little work. 2026 renderer babey.
+
 - more window toggles (fullscreen, logical resolution with letterboxing/pillarboxing, vsync options, show/hide cursor, etc)
   - borderless fullscreen working, now needs separate logical resolution + framebuffer + output pass. Also do HDR/LDR + color grading here, at a later point
   - cursor lock works on desktop, but needs to be deferred on web somehow
+
+- async resource loading (ugh)
+  - user should be able to query progress, and either show a loading bar if they choose, or just let the game run and let the engine pop-in
+  - maybe rewrite loading procs on web to fit 'naturally' since they're already async
+  - probably needs handle-based resources, not pointers
   
 - big collision rewrite (spatial2):
   - move collision data the hell out of glTF - expose a format-agnostic Mesh_Data struct returned by import procs that can be queried by the user to populate collision/AI/navmesh structures themselves
   - on that note, separate acceleration structure for Tri_Mesh, expose insert_geometry() or insert_tri_mesh() or something to delineate
-  - implement shape tests for each type in spatial2
   - implement shape->triangle tests for arbitrary move() colliders
-  - raycasts!!! for each shape
-  - orientation for Boxes, transform into local space for shapes & do AABB test, SAT for OBB vs OBB
-  - implement Convex Hulls, use SAT you already wrote
+  - raycasts!!! for each shape. ...Analytical or GJK?
 
 - clean up ui_draw_* functions to be more architecturally similar to the rest of the renderer (might have to rethink coordinate systems...)
+- actually, scratch that. Get rid of UI. add a depth_clear flag to Camera. 
+- render to a UI camera with depth clear and its own layer_mask, draw_rect unlit, use z_2d/z_layer, boom.
 
 - World structure (do not incorporate Actors, requires user-knowledge of multithreading) that associates a single transform.Node with all subsystems that require the concept of 'where an entity is' (spatial grid/collision/spatial audio/etc.), fan-out to those modules in one call instead of user calling a bunch of update_/transform_* in a row
+  - maybe move actors into its own library, and don't include *any* game-level architectural abstractions in cookies
 
 - rewrite main.odin to be a better testbed/demo program to showcase engine's capabilities
 
 - gamepad support via SDL's gamepad facilities (possibly need another API for Web, or limit to desktop-only)
-- also on that note, IME input, mouse wheel, etc
+- also on that note, typing text, mouse wheel, etc
 
-- more simple rendering primitives - lines, line lists, line strips, wireframes, fill-boxes, collider shapes, etc.
+- more simple rendering primitives - lines are done, so we need '3d' - fill-boxes, procedural spheres, collider shapes, etc.
 
 - simple non-shadery postprocessing parameters (logical resolution as mentioned, LUTs, exposure/gamma settings)
-- maybe have all these in Screen_Uniforms and separate from Camera_Uniforms
+- maybe have all these in a different Screen_Uniforms buffer separate from Camera_Uniforms
 - this should be done AFTER logical resolution, as it should simply operate on the output buffer
 
-- audio settings (mainly just be able to set volume dynamically)
+- audio settings (mainly just be able to set volume & pitch dynamically)
 
 - some kind of heuristic-based environment probe selection so that multiple probes work & background probe fallback comes naturally
+- probably do this per-pixel once clustered is in
 - planar reflections using existing environment probe machinery
 
 post-1.0 features:
@@ -38,10 +46,11 @@ post-1.0 features:
 - expose "lib" package which re-imports all functionality so we don't have a dozen imports per project (a 'prelude' to use rust terms)
 - optionally use this lib package as an API surface, in order to expose dynamic loading via .dll/.so/whatever.
 - once you have dynamic loading, add modding/scripting subsystem
+  - modding should be Odin-only - don't bottleneck my favorite language to the C ABI. Just dynamically load DLLs with a defined contract (init/tick/draw/quit).
+  - scripting should take the SWIG approach of binding the engine via each language's own native libraries, i.e. pocketpy, mruby, lua, NOT via FFI.
+  - we don't want to manually write all of it. That would be ass. Maybe just let gamedevs expose per-game scripting facades, not the whole engine...
 
 - fix transmission system to be more physically-based, possibly using an SSS map / compute thickness from shadow map (if present)
-
-- implement clustered forward with CPU binning (very cheap win over current forward renderer)
 
 - ktx2 support
   1. parse ktx2 natively in Odin, don't pull in libktx. It's huge.
@@ -50,4 +59,5 @@ post-1.0 features:
 
 - user postprocessing; more involved/stylized shaders like bloom/DoF/motion blur/vignetting/film grain/etc. would have to be written in by users and added as their own pipelines/passes.
 - maybe enforce a simple pass/uniform/bind group contract that users can plug their own WGSL into.
+- maybe do the same thing for surface materials
 - build the pipes, not the water.
