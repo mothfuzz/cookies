@@ -190,16 +190,10 @@ delete_shadows :: proc() {
 }
 
 
-Shadow_Target :: enum {
+Shadow_Kind :: enum {
     Point,
     Directional,
     Spot,
-}
-Shadow_Camera_Draw :: struct {
-    using camera_view: Camera_View,
-    layer: uint,
-    target: Shadow_Target,
-    split_far: f32,
 }
 
 //way easier to calculate since we hae a fixed range
@@ -217,56 +211,6 @@ calculate_shadow_camera_positional :: proc(position, direction, up: [3]f32, fov,
     return
 }
 
-//directional lights are infinte, so use main camera & scene bounds
-@(private)
-fit_frustum :: proc(cam: Camera_View, scene_extents: [2][3]f32) -> (near, far, scale_x, scale_y: f32, scene_aabb: [8][3]f32) {
-    scale_x = cam.projection[0, 0] //1/aspect*tan(fov/2)
-    scale_y = cam.projection[1, 1] //1/tan(fov/2)
-    nf1 := cam.projection[2, 2] //-(f+n)/(f-n)
-    nf2 := cam.projection[2, 3] //-2fn/(f-n)
-
-    //start with camera near/far (might be infinite)
-    near = -nf2 / (nf1 - 1) //+z
-    far = -nf2 / (nf1 + 1) //+z
-
-    //remap near/far to scene extents for tighter fit
-    mini := scene_extents[0]
-    maxi := scene_extents[1]
-    scene_aabb = [8][3]f32{
-        {mini.x, mini.y, mini.z}, {maxi.x, mini.y, mini.z},
-        {mini.x, maxi.y, mini.z}, {maxi.x, maxi.y, mini.z},
-        {mini.x, mini.y, maxi.z}, {maxi.x, mini.y, maxi.z},
-        {mini.x, maxi.y, maxi.z}, {maxi.x, maxi.y, maxi.z},
-    }
-    first_in_front := false
-    for p, i in scene_aabb {
-        z := (cam.view * vecpos(p)).z
-        if z >= 0 do continue //+z, behind camera, can't use
-        depth := -z
-        if !first_in_front {
-            //need to map range to roughly first object actually in front of the camera
-            near, far = depth, depth
-            first_in_front = true
-        } else {
-            near = min(near, depth)
-            far = max(far, depth)
-        }
-    }
-    return
-}
-
-@(private)
-calculate_cascade_splits :: proc(near, far: f32) -> (splits: [DIRECTIONAL_CASCADES + 1]f32) {
-    for &split, i in splits {
-        //basic parallel-split cascades
-        l := f32(DIRECTIONAL_CASCADE_SPLIT_WEIGHT)
-        n := f32(DIRECTIONAL_CASCADES)
-        log_term := near * linalg.pow(far/near, f32(i)/n)
-        lin_term := near + (far-near) * f32(i)/n 
-        split = l * log_term + (1-l) * lin_term
-    }
-    return
-}
 calculate_shadow_camera_directional :: proc(direction, up: [3]f32, near, far, scale_x, scale_y: f32, inv_view: matrix[4,4]f32, scene_aabb: [8][3]f32) -> (cam: Shadow_Camera_Draw) {
 
     nw := near / scale_x
@@ -417,3 +361,5 @@ render_shadow_maps :: proc(command_encoder: wgpu.CommandEncoder, passes: Passes,
     }
 }
 
+//@(private)
+//shadow_target :: proc()

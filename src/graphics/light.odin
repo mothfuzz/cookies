@@ -8,26 +8,36 @@ Point_Light :: struct {
     color: [4]f32,
     range: f32,
     render_shadows: bool,
-    shadow_index: int,
 }
-Point_Light_Uniforms :: struct #packed {
-    position: [4]f32, //view space xyz + radius
-    color: [4]f32, //rgb+intensity
-    shadow_index: [4]i32,
-}
+
+POINT_SHADOW_RES :: #config(POINT_SHADOW_RES, 1024)
+
 Directional_Light :: struct {
     direction: [3]f32,
     color: [4]f32,
     render_shadows: bool,
-    shadow_index: int,
 }
-Directional_Light_Uniforms :: struct #packed {
-    direction: [4]f32,
-    color: [4]f32,
-    view_to_shadow: [DIRECTIONAL_CASCADES]matrix[4,4]f32,
-    cascade_splits: [4]f32,
-    shadow_index: [4]i32,
+
+DIRECTIONAL_SHADOW_RES :: #config(DIRECTIONAL_SHADOW_RES, 2048)
+DIRECTIONAL_CASCADES :: #config(DIRECTIONAL_CASCADES, 4)
+DIRECTIONAL_CASCADE_SPLIT_WEIGHT :: #config(DIRECTIONAL_CASCADE_SPLIT_WEIGHT, 0.5)
+Directional_Cascades :: enum u8 {
+    Default,
+    Off,
+    One, Two, Three, Four,
 }
+num_directional_cascades :: proc(d: Directional_Cascades) -> (cascade_count: u32) {
+    switch d {
+    case .Default: cascade_count = DIRECTIONAL_CASCADES
+    case .Off: cascade_count = 0
+    case .One: cascade_count = 1
+    case .Two: cascade_count = 2
+    case .Three: cascade_count = 3
+    case .Four: cascade_count = 4
+    }
+    return
+}
+
 Spot_Light :: struct {
     position: [3]f32,
     direction: [3]f32,
@@ -36,17 +46,9 @@ Spot_Light :: struct {
     color: [4]f32,
     range: f32,
     render_shadows: bool,
-    shadow_index: int,
 }
-Spot_Light_Uniforms :: struct #packed {
-    position: [4]f32, //xyz + inner angle
-    direction: [4]f32, //xyz + outer angle
-    color: [4]f32,
-    view_to_shadow: matrix[4,4]f32,
-    shadow_index: i32,
-    range: f32,
-    _: [2]f32,
-}
+
+SPOT_SHADOW_RES :: #config(SPOT_SHADOW_RES, 1024)
 
 LIGHT_MINIMUM :: 0.001 //~= 0
 
@@ -195,17 +197,6 @@ Light_Draw :: struct {
     },
     transform: matrix[4,4]f32,
     layer_mask: Layer_Mask,
-}
-
-Lights :: struct {
-    point_lights: []Point_Light,
-    directional_lights: []Directional_Light,
-    spot_lights: []Spot_Light,
-    shadow_cameras: []Shadow_Camera_Draw, //point*6, directional*cams*cascades, spot
-    num_point_shadows: int,
-    num_directional_shadows: int,
-    num_spot_shadows: int,
-    rebind: bool,
 }
 
 vecpos :: proc(p: [3]f32) -> [4]f32 {
@@ -361,31 +352,6 @@ calculate_lights :: proc(lights: []Light_Draw, cameras: []Camera_Draw, scene_ext
     }
 }
 
-delete_lights :: proc(lights: Lights) {
-    delete(lights.point_lights)
-    delete(lights.directional_lights)
-    delete(lights.spot_lights)
-    delete(lights.shadow_cameras)
-}
-
-Lights_Uniforms :: struct {
-    point_lights: []Point_Light_Uniforms,
-    directional_lights: []Directional_Light_Uniforms,
-    spot_lights: []Spot_Light_Uniforms,
-}
-
-Shadow_Offsets :: struct {
-    p, d, s: int,
-    num_cameras: int,
-}
-shadow_offsets :: proc(lights: Lights, cameras: []Camera_Draw) -> (offsets: Shadow_Offsets) {
-    offsets.p = 0
-    offsets.d = lights.num_point_shadows * 6
-    offsets.s = offsets.d + lights.num_directional_shadows * len(cameras) * DIRECTIONAL_CASCADES
-    offsets.num_cameras = len(cameras)
-    return
-}
-
 calculate_lights_uniforms :: proc(lights: Lights, camera: Camera_Uniforms, camera_index: int, offsets: Shadow_Offsets) -> Lights_Uniforms {
     //convert lights to view-space & pack into uniform buffers
 
@@ -441,12 +407,6 @@ calculate_lights_uniforms :: proc(lights: Lights, camera: Camera_Uniforms, camer
     }
 
     return {point_light_uniforms[:], directional_light_uniforms[:], spot_light_uniforms[:]}
-}
-
-delete_lights_uniforms :: proc(lights: Lights_Uniforms) {
-    delete(lights.point_lights)
-    delete(lights.directional_lights)
-    delete(lights.spot_lights)
 }
 
 light_bind_group: wgpu.BindGroup

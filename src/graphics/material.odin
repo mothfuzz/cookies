@@ -4,45 +4,6 @@ import "vendor:wgpu"
 import "core:hash"
 import "core:slice"
 
-material_layout_entries := []wgpu.BindGroupLayoutEntry{
-    wgpu.BindGroupLayoutEntry{
-        binding = 0,
-        visibility = {.Fragment},
-        sampler = {type = .Filtering},
-    },
-    //base_color
-    wgpu.BindGroupLayoutEntry{
-        binding = 1,
-        visibility = {.Fragment},
-        texture = {sampleType = .Float, viewDimension = ._2D},
-    },
-    //normal
-    wgpu.BindGroupLayoutEntry{
-        binding = 2,
-        visibility = {.Fragment},
-        texture = {sampleType = .Float, viewDimension = ._2D},
-    },
-    //pbr
-    wgpu.BindGroupLayoutEntry{
-        binding = 3,
-        visibility = {.Fragment},
-        texture = {sampleType = .Float, viewDimension = ._2D},
-    },
-    //emissive
-    wgpu.BindGroupLayoutEntry{
-        binding = 4,
-        visibility = {.Fragment},
-        texture = {sampleType = .Float, viewDimension = ._2D},
-    },
-}
-material_layout: wgpu.BindGroupLayout
-
-Dynamic_Material :: struct {
-    clip_rect: [4]f32,
-    base_color_tint: [4]f32, //rgba
-    pbr_tint: [4]f32, //ambient, roughness, metallic
-    emissive_tint: [4]f32, //rgb
-}
 
 Material_Hash :: distinct uintptr
 
@@ -65,19 +26,63 @@ Material :: struct {
     hash: Material_Hash,
 }
 
+Material_Params :: struct {
+    clip_rect: [4]f32,
+    base_color_mul: [4]f32,
+    base_color_add: [4]f32,
+    pbr_mul: [3]f32,
+    pbr_add: [3]f32,
+    emissive_mul: [3]f32,
+    emissive_add: [3]f32,
+}
+
+Default_Material_Params :: Material_Params {0, 1, 0, 1, 0, 1, 0}
+
+//you can do so much with a material...
+mat_params :: proc(clip_rect: [4]f32 = 0, base_color_mul: [3]f32 = 1, base_color_add: [3]f32 = 0,
+                   alpha_mul: f32 = 1, alpha_add: f32 = 0,
+                   ambient_mul: f32 = 1, ambient_add: f32 = 0,
+                   roughness_mul: f32 = 1, roughness_add: f32 = 0,
+                   metallic_mul: f32 = 1, metallic_add: f32 = 0,
+                   emissive_mul: [3]f32 = 1, emissive_add: [3]f32 = 0,
+                  ) -> (params: Material_Params) {
+                      params.clip_rect = clip_rect
+                      params.base_color_mul.rgb = base_color_mul
+                      params.base_color_add.rgb = base_color_add
+                      params.base_color_mul.a = alpha_mul
+                      params.base_color_add.a = alpha_add
+                      params.pbr_mul.r = ambient_mul
+                      params.pbr_add.r = ambient_add
+                      params.pbr_mul.g = roughness_mul
+                      params.pbr_add.g = roughness_add
+                      params.pbr_mul.b = metallic_mul
+                      params.pbr_add.b = metallic_add
+                      params.emissive_mul = emissive_mul
+                      params.emissive_add = emissive_add
+                      return
+                  }
+
+@(private)
+//convert clip_rect to real uvs
+normalize_clip_rect :: proc(rect: [4]f32, tex_size: [2]f32) -> (uv: [4]f32) {
+    uv.xy = rect.xy / tex_size
+    uv.zw = rect.zw / tex_size
+    if rect[2] == 0 do uv[2] = 1
+    if rect[3] == 0 do uv[3] = 1
+    return
+}
+
 rebuild_material :: proc(mat: ^Material) {
-    bindings := []wgpu.BindGroupEntry{
-        {binding = 0, sampler = mat.sampler},
-        {binding = 1, textureView = mat.base_color_tex.view},
-        {binding = 2, textureView = mat.normal_tex.view},
-        {binding = 3, textureView = mat.pbr_tex.view},
-        {binding = 4, textureView = mat.emissive_tex.view},
+    if mat.bind_group != nil {
+        delete_material_bind_group(mat.bind_group)
     }
-    mat.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
-        layout = material_layout,
-        entryCount = len(bindings),
-        entries = raw_data(bindings),
-    })
+    mat.bind_group = make_material_bind_group(
+        mat.base_color_tex.view,
+        mat.normal_tex.view,
+        mat.pbr_tex.view,
+        mat.emissive_tex.view,
+        mat.sampler,
+    )
     mat.hash = 0 //do not hash hashes
     mat.hash = Material_Hash(hash.fnv32a(slice.bytes_from_ptr(mat, size_of(Material))))
 }
@@ -101,11 +106,7 @@ make_material :: proc(base_color: Texture=white_tex, normal: Texture=normal_tex,
     return
 }
 
-bind_material :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, mat: Material) {
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, mat.bind_group)
-}
-
 delete_material :: proc(mat: Material) {
     wgpu.SamplerRelease(mat.sampler)
-    wgpu.BindGroupRelease(mat.bind_group)
+    delete_material_bind_group(mat.bind_group)
 }

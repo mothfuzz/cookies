@@ -8,9 +8,6 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-//whoa we did it we imported another cookies package in a cookies package
-import "cookies:transform"
-
 Renderer :: struct {
     ctx: runtime.Context,
     instance: wgpu.Instance,
@@ -19,11 +16,7 @@ Renderer :: struct {
     surface: wgpu.Surface,
     msaa_tex: wgpu.Texture, //used for AA resolve on surface
     msaa_view: wgpu.TextureView,
-    depth_buffer: Texture,
-    accum: Texture,
-    accum_resolve: Texture,
-    revealage: Texture,
-    revealage_resolve: Texture,
+    main_textures: Main_Textures,
     config: wgpu.SurfaceConfiguration,
     queue: wgpu.Queue,
     shader: wgpu.ShaderModule,
@@ -39,156 +32,12 @@ Renderer :: struct {
     oit_composite_layout: wgpu.PipelineLayout,
     oit_composite_pipeline: wgpu.RenderPipeline,
     oit_composite_bind_group_layout: wgpu.BindGroupLayout,
-    oit_composite_bind_group: wgpu.BindGroup,
-    oit_composite_sampler: wgpu.Sampler,
     camera_fill_layout: wgpu.PipelineLayout,
     camera_fill_pipeline: wgpu.RenderPipeline,
     using shadows: Shadow_Renderer,
     ready: bool,
 }
 ren: Renderer
-
-with_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
-    //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
-    #partial switch format {
-    case .RGBA8Unorm:
-        return .RGBA8UnormSrgb
-    case .BGRA8Unorm:
-        return .BGRA8UnormSrgb
-    case:
-        return format
-    }
-}
-without_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
-    //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
-    #partial switch format {
-    case .RGBA8UnormSrgb:
-        return .RGBA8Unorm
-    case .BGRA8UnormSrgb:
-        return .BGRA8Unorm
-    case:
-        return format
-    }
-}
-
-wgpu_cull_mode := [Cull_Mode]wgpu.CullMode {
-        .Back_CCW = .Back,
-        .Front_CCW = .Front,
-        .None = .None,
-}
-
-wgpu_topology := [Mesh_Topology]wgpu.PrimitiveTopology {
-        .Triangles = .TriangleList,
-        .Lines = .LineList,
-        .Points = .PointList,
-}
-
-topology_constant := [Mesh_Topology]f64 {
-        .Triangles = 0,
-        .Lines = 1,
-        .Points = 2,
-}
-
-screen_resolution: [2]uint
-window_resized :: proc(size: [2]uint) {
-    configure_surface(size)
-    configure_render_targets()
-}
-
-tex_format: wgpu.TextureFormat
-view_format: wgpu.TextureFormat
-@(private)
-configure_surface :: proc(size: [2]uint = 0) {
-    if size != 0 {
-        screen_resolution = size
-    }
-    if screen_resolution.x == 0 || screen_resolution.y == 0 {
-        return
-    }
-    log.debug("reconfiguring draw surface...")
-    caps, status := wgpu.SurfaceGetCapabilities(ren.surface, ren.adapter)
-    if status == .Error {
-        log.panic("Unable to get surface capabilities!")
-    }
-    defer wgpu.SurfaceCapabilitiesFreeMembers(caps)
-    if caps.formatCount == 0 {
-        log.panic("No available surface formats!")
-    }
-    //prefer mailbox to unlink FPS from refresh rate
-    presentMode := wgpu.PresentMode.Fifo
-    for i in 0..<caps.presentModeCount {
-        if caps.presentModes[i] == .Mailbox {
-            presentMode = .Mailbox
-            log.debug("Upgrading to fast vsync.")
-            break
-        }
-    }
-    tex_format = without_srgb(caps.formats[0])
-    view_format = with_srgb(caps.formats[0])
-    ren.config = wgpu.SurfaceConfiguration {
-        device = ren.device,
-        usage = {.RenderAttachment},
-        format = tex_format,
-        viewFormatCount = 1,
-        viewFormats = &view_format,
-        width = u32(screen_resolution.x),
-        height = u32(screen_resolution.y),
-        presentMode = presentMode,
-        alphaMode = .Opaque,
-    }
-    wgpu.SurfaceConfigure(ren.surface, &ren.config)
-}
-
-@(private)
-configure_render_targets :: proc() {
-    log.debug("creating render targets:", ren.config.width, "x", ren.config.height)
-    if ren.msaa_view != nil {
-        wgpu.TextureViewRelease(ren.msaa_view)
-    }
-    if ren.msaa_tex != nil {
-        wgpu.TextureRelease(ren.msaa_tex)
-    }
-    ren.msaa_tex = wgpu.DeviceCreateTexture(ren.device, &{
-        size = {ren.config.width, ren.config.height, 1},
-        mipLevelCount = 1,
-        sampleCount = 4,
-        dimension = ._2D,
-        format = with_srgb(ren.config.format), //same as surface view
-        usage = {.RenderAttachment},
-    })
-    ren.msaa_view = wgpu.TextureCreateView(ren.msaa_tex)
-
-    if ren.depth_buffer.image != nil {
-        delete_texture(ren.depth_buffer)
-    }
-    ren.depth_buffer = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .Depth24PlusStencil8, true)
-
-    if ren.accum.image != nil {
-        delete_texture(ren.accum)
-    }
-    ren.accum = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .RGBA16Float, true)
-    ren.accum_resolve = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .RGBA16Float)
-    if ren.revealage.image != nil {
-        delete_texture(ren.revealage)
-    }
-    ren.revealage = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .R8Unorm, true)
-    ren.revealage_resolve = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .R8Unorm)
-
-    //only re-bind when those textures actually change.
-    if ren.oit_composite_bind_group != nil {
-        wgpu.BindGroupRelease(ren.oit_composite_bind_group)
-    }
-    oit_composite_bindings := []wgpu.BindGroupEntry{
-        {binding = 0, sampler=ren.oit_composite_sampler},
-        {binding = 1, textureView=ren.accum_resolve.view},
-        {binding = 2, textureView=ren.revealage_resolve.view},
-    }
-    ren.oit_composite_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
-        layout = ren.oit_composite_bind_group_layout,
-        entryCount = len(oit_composite_bindings),
-        entries = raw_data(oit_composite_bindings),
-    })
-}
 
 @(private)
 request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Adapter, message: string, userdata1, userdata2: rawptr) {
@@ -200,9 +49,20 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
     wgpu.AdapterRequestDevice(ren.adapter, nil, {callback = request_device, userdata1=userdata1})
 }
 
-uniform_alignment: int
-storage_alignment: int
+vertex_buffer_layouts := []wgpu.VertexBufferLayout{
+    //mesh
+    position_attribute,
+    normal_attribute,
+    tangent_attribute,
+    texcoord_attribute,
+    color_attribute,
+    bones_attribute,
+    weights_attribute,
+    //instance
+    instance_attribute,
+}
 
+// TODO: move this and create_shadow_pipeline into pipelines.odin
 create_pipeline :: proc(cull_mode: Cull_Mode, topology: Mesh_Topology) -> (solid, trans: wgpu.RenderPipeline) {
     constants := []wgpu.ConstantEntry{
         {key = "TOPOLOGY", value = topology_constant[topology]}
@@ -313,6 +173,9 @@ create_pipeline :: proc(cull_mode: Cull_Mode, topology: Mesh_Topology) -> (solid
     })
     return
 }
+
+uniform_alignment: int
+storage_alignment: int
 
 @(private)
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
@@ -524,8 +387,8 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     log.debug("creating shadow renderer...")
     init_shadows()
 
-    log.debug("setting up render targets...")
-    configure_render_targets()
+    log.debug("setting up screen textures...")
+    configure_screen_textures()
 
     init_defaults()
     init_ui()
@@ -594,8 +457,6 @@ quit :: proc() {
     wgpu.RenderPipelineRelease(ren.oit_composite_pipeline)
     wgpu.PipelineLayoutRelease(ren.oit_composite_layout)
     wgpu.BindGroupLayoutRelease(ren.oit_composite_bind_group_layout)
-    wgpu.BindGroupRelease(ren.oit_composite_bind_group)
-    wgpu.SamplerRelease(ren.oit_composite_sampler)
     wgpu.RenderPipelineRelease(ren.camera_fill_pipeline)
     wgpu.PipelineLayoutRelease(ren.camera_fill_layout)
     wgpu.BindGroupLayoutRelease(camera_layout)
@@ -607,9 +468,7 @@ quit :: proc() {
     wgpu.ShaderModuleRelease(ren.camera_fill_shader)
     wgpu.TextureViewRelease(ren.msaa_view)
     wgpu.TextureRelease(ren.msaa_tex)
-    delete_texture(ren.depth_buffer)
-    delete_texture(ren.accum)
-    delete_texture(ren.revealage)
+    delete_main_textures(ren.main_textures)
     delete_shadows()
     delete_mipmapping()
 
@@ -626,412 +485,31 @@ quit :: proc() {
 
 //now for the good part!
 
-Frame :: struct {
-    lights: [dynamic]Light_Draw,
-    cameras: [dynamic]Camera_Draw,
-    action: map[Batch_Hash]Mesh_Batch_Draw,
-    //resources
-    render_targets: map[Render_Target_Hash]Render_Target_Draw,
-    screen_target: Render_Target_Draw,
-    //environment probe stuff
-    environment_probes: [dynamic]Environment_Probe, //all probes drawn (might be static/1-shot)
-    environment_probe_captures: [dynamic]Environment_Probe_Draw, //probes that actually need capture
-    max_cubemap_slot: int,
-    //running extents
-    scene_extents: [2][3]f32,
+//actual GPU-side representations
+
+Render_Frame :: struct {
+    using inst: Instance_Data,
+    using lite: Light_Data,
+    using pass: Pass_Data,
+    using draw: Draw_Data,
 }
 
-Mesh_Batch_Draw :: struct {
-    mesh: Mesh,
-    material: Material,
-    instances: [Cull_Mode][dynamic]Mesh_Draw,
-}
-
-Batch_Hash :: distinct u64
-batch_hash :: proc(mesh: Mesh_Hash, material: Material_Hash) -> Batch_Hash {
-    //sort order is by highest bits, we want material-outer, mesh-inner
-    return Batch_Hash(u64(material) << 32 | u64(mesh))
-} 
-
-@(private)
-delete_frame :: proc() {
-    delete(frame.lights)
-    delete(frame.cameras)
-    for hash, &batch in frame.action {
-        for mode in Cull_Mode {
-            delete(batch.instances[mode])
-        }
-    }
-    delete(frame.action)
-    for _, render_target in frame.render_targets {
-        delete(render_target.cameras)
-    }
-    delete(frame.render_targets)
-    delete(frame.screen_target.cameras)
-    for render_target in frame.environment_probe_captures {
-        wgpu.TextureViewRelease(render_target.render_view)
-        delete(render_target.cameras)
-    }
-    delete(frame.environment_probe_captures)
-    delete(frame.environment_probes)
-}
-
-@(private)
-clear_frame :: proc() {
-    clear(&frame.lights)
-    clear(&frame.cameras)
-    clear_action(&frame)
-    for _, render_target in frame.render_targets {
-        delete(render_target.cameras)
-    }
-    clear(&frame.render_targets)
-    clear(&frame.screen_target.cameras)
-    frame.scene_extents[0] = math.INF_F32
-    frame.scene_extents[1] = math.NEG_INF_F32
-    for render_target in frame.environment_probe_captures {
-        wgpu.TextureViewRelease(render_target.render_view)
-        delete(render_target.cameras)
-    }
-    clear(&frame.environment_probe_captures)
-    clear(&frame.environment_probes)
-}
-
-@(private)
-set_screen_target :: proc(frame: ^Frame, screen: wgpu.TextureView) {
-    frame.screen_target.render_view = screen
-    frame.screen_target.output = screen
-    frame.screen_target.msaa = ren.msaa_view
-    frame.screen_target.depth = ren.depth_buffer.view
-    frame.screen_target.accum = ren.accum.view
-    frame.screen_target.accum_resolve = ren.accum_resolve.view
-    frame.screen_target.revealage = ren.revealage.view
-    frame.screen_target.revealage_resolve = ren.revealage_resolve.view
-    frame.screen_target.oit_composite_bind_group = ren.oit_composite_bind_group
-}
-
-
-//static frame so commands can be called context-free
-frame: Frame
-
-@(export)
-draw_point_light :: proc(light: Point_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    append(&frame.lights, Light_Draw{light, transform.world(trans), layers})
-}
-@(export)
-draw_directional_light :: proc(light: Directional_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    append(&frame.lights, Light_Draw{light, transform.world(trans), layers})
-}
-@(export)
-draw_spot_light :: proc(light: Spot_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    append(&frame.lights, Light_Draw{light, transform.world(trans), layers})
-}
-draw_light :: proc{draw_point_light, draw_directional_light, draw_spot_light}
-
-@(export)
-draw_camera :: proc(camera: Camera, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    camera := camera
-    if layers != All_Layers {
-        camera.layer_mask = layers
-    }
-    append(&frame.screen_target.cameras, len(frame.cameras))
-    append(&frame.cameras, calculate_camera(camera, transform.world(trans))) //compute once, don't defer
-}
-
-@(export)
-draw_render_target :: proc(camera: Camera, target: Render_Target, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    target := target
-    camera := calculate_camera(camera, transform.world(trans), &target)
-    if layers != All_Layers {
-        camera.layer_mask = layers
-    }
-    if !(target.hash in frame.render_targets) {
-        frame.render_targets[target.hash] = {
-            target.output.render_view,
-            target.output.view,
-            target.msaa.view,
-            target.depth.view,
-            target.accum.view,
-            target.accum_resolve.view,
-            target.revealage.view,
-            target.revealage_resolve.view,
-            target.sampler,
-            target.oit_composite_bind_group,
-            target.mipmapper,
-            make([dynamic]int),
-        }
-    }
-    render_target := &frame.render_targets[target.hash]
-    append(&render_target.cameras, len(frame.cameras))
-    append(&frame.cameras, camera)
-}
-
-@(export)
-draw_environment_probe :: proc(probe: Environment_Probe, layers: Layer_Mask = All_Layers) {
-    frame.max_cubemap_slot = max(frame.max_cubemap_slot, probe.cubemap_slot)
-
-    probe := probe
-    if layers != All_Layers {
-        probe.camera.layer_mask = layers
-    }
-
-    append(&frame.environment_probes, probe) //meshes need all drawn cubemaps, not just ones with capture this frame
-}
-
-
-@(private)
-draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32,
-                           dynamic_material: Dynamic_Material,
-                           sprite, billboard, double_sided, unlit: bool,
-                           bones: []matrix[4,4]f32, layers: Layer_Mask) {
-
-    //get the batch
-    if frame.action == nil {
-        frame.action = make(map[Batch_Hash]Mesh_Batch_Draw)
-    }
-    hash := batch_hash(mesh.hash, material.hash)
-    if _, batch, just_inserted, err := map_entry(&frame.action, hash); err == nil {
-        if just_inserted {
-            batch.mesh = mesh
-            batch.material = material
-            for mode in Cull_Mode {
-                batch.instances[mode] = make([dynamic]Mesh_Draw)
-            }
-        }
-
-        draw := Mesh_Draw{{trans, dynamic_material, 0}, sprite, billboard, .Back_CCW, bones, {}, 0, 0, layers}
-        if bones == nil {
-            draw.indices[0] = -1
-        }
-        calculate_mesh_local(&draw, mesh, material)
-        if double_sided || mesh.topology != .Triangles {
-            draw.cull_mode = .None
-        } else if linalg.determinant(cast(matrix[3,3]f32)(trans)) < 0 {
-                draw.cull_mode = .Front_CCW
-        }
-    
-        if unlit {
-            draw.indices[3] = 1
-        }
-        mini := &frame.scene_extents[0]
-        maxi := &frame.scene_extents[1]
-        //Arvo's method - convert transformed bounding axes to AABB using absolute values
-        e: [3]f32
-        for a in draw.bounding_axes {
-            e += [3]f32{abs(a.x), abs(a.y), abs(a.z)}
-        }
-        extents := [2][3]f32{draw.bounding_center - e, draw.bounding_center + e}
-        mini.x = min(extents[0].x, mini.x)
-        mini.y = min(extents[0].y, mini.y)
-        mini.z = min(extents[0].z, mini.z)
-        maxi.x = max(extents[1].x, maxi.x)
-        maxi.y = max(extents[1].y, maxi.y)
-        maxi.z = max(extents[1].z, maxi.z)
-
-        append(&batch.instances[draw.cull_mode], draw)
-    } else {
-        log.panic("Could not create batch for Mesh/Material:", err)
-    }
-}
-
-@(export)
-draw_mesh :: proc(mesh: Mesh, material: Material, trans: transform.Transform = nil,
-                  clip_rect: [4]f32 = 0,
-                  base_color_tint: [4]f32 = 1,
-                  ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
-                  emissive_tint: [3]f32 = 1,
-                  sprite: bool = false, billboard: bool = false, double_sided: bool = false, unlit: bool = false,
-                  bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
-    trans := transform.world(trans)
-    pbr_tint := [4]f32{ambient_tint, roughness_tint, metallic_tint, 1}
-    emissive_tint := [4]f32{emissive_tint.r, emissive_tint.g, emissive_tint.b, 1}
-    dynamic_material := Dynamic_Material{clip_rect, base_color_tint, pbr_tint, emissive_tint}
-    draw_mesh_internal(mesh, material, trans, dynamic_material, sprite, billboard, double_sided, unlit, bones, layers)
-}
-
-//sprites are just special kinds of meshes
-@(export)
-draw_sprite :: proc(material: Material, trans: transform.Transform = nil,
-                    clip_rect: [4]f32 = 0,
-                    base_color_tint: [4]f32 = 1,
-                    ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
-                    emissive_tint: [3]f32 = 1,
-                    billboard: bool = true, double_sided: bool = false, unlit: bool = false, layers: Layer_Mask = All_Layers) {
-    draw_mesh(quad_mesh, material, trans, clip_rect,
-              base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint,
-              true, billboard, double_sided, unlit, nil, layers)
-}
-
-@(export)
-draw_line :: proc(a, b: [3]f32, color: [4]f32 = 1, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    local: matrix[4,4]f32
-    ab := b - a
-    p1, p2: [3]f32
-    if ab == 0 {
-        p1, p2 = {1, 0, 0}, {0, 1, 0}
-    } else {
-        if abs(ab.x) > abs(ab.z) {
-            p1 = {-ab.y, ab.x, 0}
-        } else {
-            p1 = {0, -ab.z, ab.y}
-        }
-        p2 = linalg.cross(ab, p1)
-    }
-    local[0].xyz = p1
-    local[1].xyz = p2
-    local[2].xyz = ab
-    local[3].xyz = a
-    local[3].w = 1
-
-    draw_mesh(line_mesh, white_material, transform.world(trans) * local, base_color_tint=color, unlit=true, layers=layers)
-}
-
-@(export)
-draw_point :: proc(p: [3]f32, color: [4]f32 = 1, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    local: matrix[4,4]f32 = 1
-    local[3].xyz = p
-
-    draw_mesh(point_mesh, white_material, transform.world(trans) * local, base_color_tint=color, unlit=true, layers=layers)
-}
-
-@(private)
-Mesh_Batch :: struct {
-    mesh: Mesh,
-    material: Material,
-    hash: Batch_Hash,
-    instances: [Cull_Mode][]Mesh_Draw,
-}
-@(private)
-flatten_action :: proc(f: Frame) -> []Mesh_Batch {
-    batches := make([dynamic]Mesh_Batch)
-    for hash, batch_draw in f.action {
-        batch := Mesh_Batch{mesh=batch_draw.mesh, material=batch_draw.material, hash=hash}
-        use_batch := false
-        for mode in Cull_Mode {
-            batch.instances[mode] = batch_draw.instances[mode][:]
-            if len(batch.instances[mode]) > 0 {
-                use_batch = true
-            }
-        }
-        if use_batch {
-            append(&batches, batch)
-        }
-    }
-    slice.sort_by(batches[:], proc(a, b: Mesh_Batch) -> bool {
-        return a.hash < b.hash
-    })
-    return batches[:]
-}
-@(private)
-clear_action :: proc(f: ^Frame) {
-    if f.action == nil do return
-    for hash, &batch in f.action {
-        for mode in Cull_Mode {
-            clear(&batch.instances[mode])
-        }
-    }
-}
-
-write_skeletons :: proc(batches: []Mesh_Batch) {
-    //all the skeletons at once.
-    running_offset := 0
-    for &batch in batches {
-        for mode in Cull_Mode {
-            for &draw in batch.instances[mode] {
-                if draw.bones == nil do continue
-                draw.indices[0] = i32(running_offset)
-                running_offset += len(draw.bones)
-            }
-        }
-    }
-    realloc_skeletons_buffer(running_offset)
-    for batch in batches {
-        for mode in Cull_Mode {
-            for draw in batch.instances[mode] {
-                if draw.bones == nil do continue
-                offset := draw.indices[0] * size_of(matrix[4,4]f32)
-                size := len(draw.bones) * size_of(matrix[4,4]f32)
-                wgpu.QueueWriteBuffer(ren.queue, skeletons_buffer, u64(offset), raw_data(draw.bones), uint(size))
-            }
-        }
-    }
-}
-
-calculate_environment_probes :: proc(probes: []Environment_Probe) {
-    append_rts :: proc(probe: Environment_Probe, capture_state: ^Capture_State, faces: int) {
-        probe := probe
-        directions := cubemap_directions()
-        for i in 0..<faces {
-            face := int(capture_state.current_face)
-            cubemap_layer := u32(probe.cubemap_slot*6 + face)
-            view_descriptor := wgpu.TextureViewDescriptor{
-                dimension = ._2D,
-                mipLevelCount = 1,
-                arrayLayerCount = 1,
-                baseArrayLayer=cubemap_layer,
-            }
-            //this whole procedure needs to be separate as it depends on the cubemaps_capture.image
-            //so it should be called *after* realloc only.
-            capture_face_view := wgpu.TextureCreateView(cubemaps_capture.image, &view_descriptor)
-
-            probe_rt := Environment_Probe_Draw{
-                capture_face_view,
-                cubemaps_capture.view,
-                probe_capture.msaa.view,
-                probe_capture.depth.view,
-                probe_capture.accum.view,
-                probe_capture.accum_resolve.view,
-                probe_capture.revealage.view,
-                probe_capture.revealage_resolve.view,
-                probe_capture.sampler,
-                probe_capture.oit_composite_bind_group,
-                cubemaps_mipmappers[probe.cubemap_slot][face],
-                make([dynamic]int), //will only ever be 1...
-            }
-            look_at(&probe.camera, probe.position, probe.position + directions[face][0], directions[face][1])
-            camera := calculate_camera(probe.camera, 1, &probe_capture)
-            append(&probe_rt.cameras, len(frame.cameras))
-            append(&frame.cameras, camera)
-            append(&frame.environment_probe_captures, probe_rt)
-            capture_state.current_face += 1
-            capture_state.current_face %= 6
-        }
-    }
-
-    for probe in probes {
-        capture_state := &capture_states[probe.cubemap_slot]
-
-        if probe.faces_per_frame == 0 {
-            //render all 6 at once
-            if !capture_state.one_shot {
-                append_rts(probe, capture_state, 6)
-                capture_state.one_shot = true
-            }
-        } else {
-            //render just the ones for this frame
-            append_rts(probe, capture_state, probe.faces_per_frame)
-        }
-    }
-    
-}
-
-assign_cubemaps :: proc(batches: []Mesh_Batch) {
-    for &batch in batches {
-        for mode in Cull_Mode {
-            for &draw in batch.instances[mode] {
-                draw.indices[1] = -1
-                for probe in frame.environment_probes {
-                    mini := probe.position + probe.extents[0]
-                    maxi := probe.position + probe.extents[1]
-                    if draw.bounding_center.x > mini.x &&
-                        draw.bounding_center.x < maxi.x &&
-                        draw.bounding_center.y > mini.y &&
-                        draw.bounding_center.y < maxi.y &&
-                        draw.bounding_center.z > mini.z &&
-                        draw.bounding_center.z < maxi.z {
-                            draw.indices[1] = i32(probe.cubemap_slot)
-                        }
+assign_cubemaps :: proc(f: ^Render_Frame, probes: []Environment_Probe) {
+    for c, i in f.culls {
+        inst := &f.instances[i]
+        inst.probe_a = -1
+        inst.probe_b = -1
+        for probe in probes {
+            mini := probe.position + probe.extents[0]
+            maxi := probe.position + probe.extents[1]
+            if c.center.x > mini.x &&
+                c.center.x < maxi.x &&
+                c.center.y > mini.y &&
+                c.center.y < maxi.y &&
+                c.center.z > mini.z &&
+                c.center.z < maxi.z {
+                    inst.probe_a = i32(probe.cubemap_slot)
                 }
-            }
         }
     }
 }
@@ -1476,9 +954,15 @@ render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera
     
 }
 
+frame_arena: runtime.Arena
+
 @(export)
 render_frame :: proc() {
     if !ren.ready do return
+
+    //so we can retain the data-flow procedural style while not reallocating every frame
+    context.allocator = runtime.arena_allocator(&frame_arena)
+    defer free_all(context.allocator)
 
     /*allocator := context.allocator
     context.allocator = context.temp_allocator
@@ -1583,44 +1067,59 @@ render_frame :: proc() {
     wgpu.RenderPassEncoderEnd(trans_clear_pass)
     wgpu.RenderPassEncoderRelease(trans_clear_pass)
 
-    //if no cameras we can return early and skip everything
-    if len(frame.cameras) == 0 do return
+    // TODO: move the above clear passes into render_target_passes, clear on first, load on second et al
 
-    //master record of mesh draws this frame
-    batches := flatten_action(frame)
-    defer delete(batches)
-
-    //gather up them bones (global data)
-    write_skeletons(batches)
+    //firstly, get this frame's data
+    f: Render_Frame
+    defer clear_render_frame(&f)
+    batch_instances(&f, frame.action[:], frame.batches[:])
 
     //allocate cubemaps
-    rebind := realloc_cubemaps(command_encoder, frame.max_cubemap_slot+1)
-    assign_cubemaps(batches)
+    rebind := realloc_cubemaps(command_encoder)
+    assign_cubemaps(&f, frame.environment_probes[:])
 
-    //schedule cubemap captures...
-    calculate_environment_probes(frame.environment_probes[:])
+    //upload instances after cubemaps are assigned
+    write_instance_buffers(f.instances[:], f.skeletons[:])
 
-    //then gather up all lights
-    lights := calculate_lights(frame.lights[:], frame.cameras[:], frame.scene_extents, rebind)
-    defer delete_lights(lights)
+    //add all main passes (probes, user-RTT, screen), schedule captures
+    add_capture_passes(&f, frame.environment_probes[:])
+    add_user_passes(&f, frame.render_targets[:])
+    add_screen_pass(&f, screen, frame.cameras[:])
+
+    //then gather up all lights, cascades by main views
+    lights := calculate_lights(frame.lights[:], f.views[:], frame.scene_extents, rebind)
+    add_shadow_views(&f, lights.shadow_cameras[:])
 
     //batch all the cameras into one...
-    write_camera_buffer(lights.shadow_cameras[:], frame.cameras[:])
+    write_camera_buffer(f.views[:]) // TODO: rework this proc to use the new Views
 
     //make sure to upload + offset lights per-camera.
-    shadow_offsets := shadow_offsets(lights, frame.cameras[:])
-    write_light_buffers(lights, frame.cameras[:], shadow_offsets)
+    shadow_offsets := shadow_offsets(lights, len(f.captures)+1)
+    write_light_buffers(lights, main_views, shadow_offsets) // TODO: same as cameras, rework
 
-    //now compute all instance data for all passes (shadow maps + user RTT + final screen passes)
-    passes := compute_passes(batches, frame.cameras[:], lights.shadow_cameras)
-    defer delete_passes(passes)
+    //cull & write draw indices (move to compute shader)
+    cull_views(&f)
 
     //now on to actual drawing!
 
-    //go through lights & render shadow maps...
-    render_shadow_maps(command_encoder, passes, lights.shadow_cameras)
+    //first render shadow maps
+    for p in f.shadows {
+        render_shadow_pass(command_encoder, f, p)
+    }
+    //then render all captures, with bounces
+    for _ in 0..<CAPTURE_BOUNCES {
+        for p in f.captures {
+            render_main_pass(command_encoder, f, p)
+        }
+        //copy/mip
+        for p in f.captures {
+            resolve_capture(command_encoder, p)
+        }
+    }
+    //finally render to the screen...
+    render_main_pass(command_encoder, f, f.screen)
 
-    //now actually render the main passes
+    //everything below is stale
 
     //get number of draw calls, in case we need to skip a pass
     draw_solid: bool = false

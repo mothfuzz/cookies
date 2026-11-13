@@ -32,30 +32,10 @@ camera_bg_layout_entries :: []wgpu.BindGroupLayoutEntry{
 camera_bg_layout: wgpu.BindGroupLayout
 bg_sampler: wgpu.Sampler
 
-Camera_Uniforms :: struct {
-    view: matrix[4,4]f32,
-    inv_view: matrix[4,4]f32,
-    projection: matrix[4,4]f32,
-    inv_viewproj: matrix[4,4]f32,
-    color: [4]f32,
-    fog_distance: [2]f32,
-}
-
-Camera_View :: struct {
-    using uniforms: Camera_Uniforms,
-    buffer_index: u32,
-    viewproj: matrix[4,4]f32, //optimization
-    frustum_planes: [6][4]f32, //left, right, bottom, top, near, far
-    planes_to_check: int, //for infinite far, don't check it
-    layer_mask: Layer_Mask,
-}
-
 //everythang needed to render (to) a camera...
 Camera_Draw :: struct {
-    using camera_view: Camera_View,
-    bg_bind_group: wgpu.BindGroup,
-    viewport: [4]f32,
-    fill: bool,
+    using cam: Camera_Uniforms,
+    using raster: Camera_Raster,
 }
 
 Camera :: struct {
@@ -71,6 +51,7 @@ Camera :: struct {
     relative: bool, //auto-resize based on window width/height
     fill: bool,
     layer_mask: Layer_Mask,
+    directional_cascades: Directional_Cascades,
 }
 
 @(export)
@@ -158,12 +139,13 @@ render to HDR (i.e. floating point) target so you can do post-processing
 */
 
 @(export)
-make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = 0, fov: f32 = 0, fill: bool = true, layers: Layer_Mask = All_Layers) -> (cam: Camera) {
+make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = 0, fov: f32 = 0, fill: bool = true, directional_cascades: Directional_Cascades = .Default, layers: Layer_Mask = All_Layers) -> (cam: Camera) {
     cam.viewport = viewport
     cam.range = {fov, near, far, (far - near) / 2}
     cam.rotation = 1
     cam.fill = fill
     cam.color.a = 1.0
+    cam.directional_cascades = directional_cascades
     cam.layer_mask = layers
     if bg_sampler == nil {
         bg_sampler = wgpu.DeviceCreateSampler(ren.device, &{minFilter = .Linear, magFilter = .Linear, mipmapFilter=.Nearest, maxAnisotropy=1})
@@ -175,8 +157,8 @@ make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = 0
 }
 
 @(export)
-make_camera_relative :: proc(viewport: [4]f32, near: f32 = 0, far: f32 = 0, fov: f32 = 0, fill: bool = true) -> (cam: Camera) {
-    cam = make_camera(viewport, near, far, fov, fill)
+make_camera_relative :: proc(viewport: [4]f32, near: f32 = 0, far: f32 = 0, fov: f32 = 0, fill: bool = true, directional_cascades: Directional_Cascades = .Default, layers: Layer_Mask = All_Layers) -> (cam: Camera) {
+    cam = make_camera(viewport, near, far, fov, fill, directional_cascades, layers)
     cam.relative = true
     return
 }
@@ -199,7 +181,7 @@ inverse_view :: proc(trans: matrix[4,4]f32) -> (inv_view: matrix[4,4]f32) {
     return
 }
 
-calculate_frustum :: proc(cam: ^Camera_View) {
+calculate_frustum :: proc(cam: ^Camera_Uniforms) -> (flipped: bool) {
     cam.viewproj = cam.projection * cam.view
     cam.inv_viewproj = linalg.inverse(cam.viewproj)
     //calculate frustum planes... Gribb-Hartmann
@@ -211,24 +193,30 @@ calculate_frustum :: proc(cam: ^Camera_View) {
     cam.frustum_planes[4] = rows[2]
     cam.frustum_planes[5] = rows[3] - rows[2]
     //normalize planes
-    cam.planes_to_check = 0
-    for p in cam.frustum_planes {
+    for &p in cam.frustum_planes {
         l := linalg.length(p.xyz)
-        if l < 1e-6 do continue //don't divide by zero
-        cam.frustum_planes[cam.planes_to_check] = p/l
-        cam.planes_to_check += 1
+        if l < 1e-6 {
+            //don't divide by zero, always pass this plane
+            p = {0, 0, 0, 1}
+        } else {
+            p = p/l
+        }
     }
+    flipped = linalg.determinant(cast(matrix[4,4]f32)draw.view) < 0
+    return
 }
 
+// TODO: move this to staging
+
 FOV :: 60.0
-calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Target = nil) -> (draw: Camera_Draw) {
+calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, target_resolution: [2]uint = 0) -> (draw: Camera_Draw) {
     draw.inv_view = trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1)
     draw.view = inverse_view(draw.inv_view)
     fov := cam.range[0]
     if fov == 0 {
         fov = linalg.to_radians(f32(FOV))
     } 
-    draw.viewport = get_viewport_rect(cam, rt)
+    draw.viewport = get_viewport_rect(cam, target_resolution)
     width, height := draw.viewport[2], draw.viewport[3]
     near := cam.range[1]
     far := cam.range[2]
@@ -240,16 +228,19 @@ calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Tar
     } else {
         draw.projection = linalg.matrix4_perspective(fov, width/height, near, far)
     }
-    calculate_frustum(&draw)
+    draw.flip = calculate_frustum(&draw)
     fog_onset := cam.range[3] if cam.range[3] != 0 else (far - near)/2.0
     draw.color = cam.color
-    draw.fill = cam.fill
+    draw.cascade_count = num_directional_cascades(cam.directional_cascades)
     draw.layer_mask = cam.layer_mask
     draw.fog_distance = {fog_onset, far}
-    //wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &draw.uniforms, size_of(Camera_Uniforms))
-    draw.bg_bind_group = cam.bg_bind_group
+    if cam.fill {
+        draw.bg_bind_group = cam.bg_bind_group
+    }
     return
 }
+
+// TODO: move this to bindings
 
 Camera_Buffer :: struct {
     capacity: int,
@@ -339,25 +330,23 @@ set_viewport :: proc(cam: ^Camera, viewport: [4]f32) {
     cam.viewport = viewport
 }
 
-get_viewport_rect :: proc(cam: Camera, render_target: ^Render_Target = nil) -> [4]f32 {
+get_viewport_rect :: proc(cam: Camera, target_resolution: [2]uint = 0) -> [4]f32 {
     screen_resolution := screen_resolution
-    if render_target != nil {
-        screen_resolution.x = uint(render_target.output.width)
-        screen_resolution.y = uint(render_target.output.height)
+    if target_resolution != 0 {
+        screen_resolution = target_resolution
     }
     x, y := cam.viewport.x, cam.viewport.y
-    width, height := get_viewport_size(cam, render_target)
+    width, height := get_viewport_size(cam, screen_resolution)
     if cam.relative {
         x *= f32(screen_resolution.x)
         y *= f32(screen_resolution.y)
     }
     return {max(x, 0), max(y, 0), width, height}
 }
-get_viewport_size :: proc(cam: Camera, render_target: ^Render_Target = nil) -> (width, height: f32) {
+get_viewport_size :: proc(cam: Camera, target_resolution: [2]uint) -> (width, height: f32) {
     screen_resolution := screen_resolution
-    if render_target != nil {
-        screen_resolution.x = uint(render_target.output.width)
-        screen_resolution.y = uint(render_target.output.height)
+    if target_resolution != 0 {
+        screen_resolution = target_resolution
     }
     width = cam.viewport[2]
     height = cam.viewport[3]
@@ -416,29 +405,4 @@ z_min_step :: proc(cam: Camera, num_layers: int = MAX_Z_LAYERS) -> f32 {
 @(export)
 z_layer :: proc(cam: Camera, layer: int, num_layers: int = MAX_Z_LAYERS) -> f32 {
     return f32(layer) * z_min_step(cam, num_layers) 
-}
-
-sphere_in_frustum :: proc(cam: Camera_View, bounding_center: [3]f32, bounding_radius: f32) -> bool {
-    for i in 0..<cam.planes_to_check {
-        p := cam.frustum_planes[i]
-        if linalg.dot(p.xyz, bounding_center) + p.w < -bounding_radius {
-            return false
-        }
-    }
-    return true 
-}
-
-bounds_in_frustum :: proc(cam: Camera_View, bounding_center: [3]f32, bounding_axes: [3][3]f32) -> bool {
-    for i in 0..<cam.planes_to_check {
-        p := cam.frustum_planes[i]
-        n := p.xyz
-        //project OBB axes onto plane's normal, then it becomes roughly the same as sphere check
-        r := abs(linalg.dot(n, bounding_axes[0])) +
-            abs(linalg.dot(n, bounding_axes[1])) +
-            abs(linalg.dot(n, bounding_axes[2]))
-        if linalg.dot(n, bounding_center) + p.w < -r {
-            return false
-        }
-    }
-    return true
 }

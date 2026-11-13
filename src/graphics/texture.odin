@@ -17,8 +17,7 @@ Texture :: struct {
     render_view: wgpu.TextureView,
     //resolve: wgpu.Texture,
     //resolve_view: wgpu.TextureView,
-    is_trans: bool,
-    is_solid: bool,
+    alpha: Alpha_Set,
     width, height: f32,
 }
 
@@ -105,12 +104,20 @@ make_mips :: proc(input: []u32, size: [2]uint, include_original: bool = false) -
 }
 
 make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (tex: Texture) {
+    tex.alpha.lo = 1
+    tex.alpha.hi = 0
     for pixel in input {
-        if (pixel & 0xff000000) > 0 && (pixel & 0xff000000) < 0xff000000 {
-            tex.is_trans = true
+        a := pixel >> 24
+        if a > 0 && a < 0xff {
+            alpha := f32(a) / 255
+            tex.alpha.lo = min(alpha, tex.alpha.lo)
+            tex.alpha.hi = max(alpha, tex.alpha.hi)
         }
-        if (pixel & 0xff000000) == 0xff000000 {
-            tex.is_solid = true
+        if a == 0xff {
+            tex.alpha.one = true
+        }
+        if a == 0 {
+            tex.alpha.zero = true
         }
     }
     //create texture & write all mips, including original
@@ -386,17 +393,23 @@ make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, lay
         mipLevelCount = 1,
         arrayLayerCount = cubemap?u32(6*layers):u32(layers),
     })
-    tex.is_solid = true //I guess
-    tex.is_trans = false
+    tex.alpha = {one = true, lo = 1, hi = 0} //I guess
     tex.width = f32(size.x)
     tex.height = f32(size.y)
     return
 }
 
-make_render_texture :: proc(size: [2]uint, format: wgpu.TextureFormat, multisampled: bool = false, mip_count: int = 1) -> (tex: Texture) {
+make_render_texture :: proc(size: [2]uint, format: wgpu.TextureFormat, multisampled: bool = false, copy_dst: bool = false, copy_src: bool = false, mip_count: int = 1) -> (tex: Texture) {
     log.debug("creating render target:", size.x, "x", size.y)
+    usage := bit_set[wgpu.TextureUsage; u64]{.RenderAttachment, .TextureBinding}
+    if copy_dst {
+        usage += {.CopyDst}
+    }
+    if copy_src {
+        usage += {.CopySrc}
+    }
     tex.image = wgpu.DeviceCreateTexture(ren.device, &{
-        usage = {.RenderAttachment, .TextureBinding, .CopyDst},
+        usage = usage,
         dimension = ._2D,
         size = {
             width = u32(size.x),
@@ -409,8 +422,7 @@ make_render_texture :: proc(size: [2]uint, format: wgpu.TextureFormat, multisamp
     })
     tex.view = wgpu.TextureCreateView(tex.image, &{arrayLayerCount=1, mipLevelCount=u32(mip_count)})
     tex.render_view = wgpu.TextureCreateView(tex.image, &{arrayLayerCount=1, mipLevelCount=1})
-    tex.is_solid = true //I guess
-    tex.is_trans = false
+    tex.alpha = {one = true, lo = 1, hi = 0} // I guess
     tex.width = f32(size.x)
     tex.height = f32(size.y)
     return

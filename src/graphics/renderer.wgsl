@@ -68,6 +68,18 @@ struct EnvironmentProbeBox {
 @group(3) @binding(13) var environment_probe_sampler: sampler;
 @group(3) @binding(14) var<storage, read> environment_probe_boxes: array<EnvironmentProbeBox>;
 
+struct Instance {
+    model: mat4x4<f32>,
+    clip_rect: vec4<f32>,
+    base_color_mul: vec4<f32>,
+    base_color_add: vec4<f32>,
+    //interleaved fields to take advantage of vec3 + scalar packing
+    pbr_mul: vec3<f32>,      skeleton_offset: i32,
+    pbr_add: vec3<f32>,      probe_a: i32,
+    emissive_mul: vec3<f32>, probe_b: i32,
+    emissive_add: vec3<f32>, flags: u32,
+}
+
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -76,15 +88,7 @@ struct Vertex {
     @location(4) color: vec4<f32>,
     @location(5) bones: vec4<u32>,
     @location(6) weights: vec4<f32>,
-    @location(7) modelview_0: vec4<f32>,
-    @location(8) modelview_1: vec4<f32>,
-    @location(9) modelview_2: vec4<f32>,
-    @location(10) modelview_3: vec4<f32>,
-    @location(11) clip_rect: vec4<f32>,
-    @location(12) base_color_tint: vec4<f32>,
-    @location(13) pbr_tint: vec4<f32>, //ambient, metallic, roughness
-    @location(14) emissive_tint: vec4<f32>, //rgb
-    @location(15) indices: vec4<i32>, //the last one we have... use it wisely
+    @location(7) instance: u32,
 }
 
 struct VSOut {
@@ -94,10 +98,7 @@ struct VSOut {
     @location(2) tangent: vec4<f32>,
     @location(3) @interpolate(perspective) texcoord: vec2<f32>,
     @location(4) color: vec4<f32>,
-    @location(5) base_color_tint: vec4<f32>,
-    @location(6) pbr_tint: vec4<f32>,
-    @location(7) emissive_tint: vec4<f32>,
-    @location(8) @interpolate(flat) indices: vec4<i32>,
+    @location(5) @interpolate(flat) instance: u32,
 }
 
 fn ident() -> mat4x4<f32> {
@@ -109,8 +110,9 @@ fn ident() -> mat4x4<f32> {
     );
 }
 
-@group(2) @binding(0) var<storage, read> skeletons: array<mat4x4<f32>>;
-//@group(2) @binding(1) var<uniform> skeleton_len: u32;
+@group(2) @binding(0) var<storage, read> instances: array<Instance>;
+@group(2) @binding(1) var<storage, read> skeletons: array<mat4x4<f32>>;
+
 fn calculate_bones(vertex: Vertex, instance_index: u32) -> mat4x4<f32> {
     if(vertex.indices.x < 0) {
         return ident();
