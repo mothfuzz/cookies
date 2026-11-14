@@ -27,9 +27,10 @@ Instance_Uniforms :: struct {
 }
 
 //everything needed to determine belonging to a view
-Mesh_Cull :: struct {
+Instance_Bin_Uniforms :: struct {
     using bounds: Bounds,
     layer_mask: Layer_Mask,
+    batch: u32,
 }
 
 Mesh_Draw :: struct {

@@ -5,7 +5,7 @@ import "core:slice"
 Instance_Data :: struct {
     //sorted data
     instances: [dynamic]Instance_Uniforms, //canonical buffer, in BATCH ORDER
-    culls: [dynamic]Mesh_Cull, //same order as instances
+    instance_bins: [dynamic]Instance_Bin_Uniforms, //same order as instances
     skeletons: [dynamic]matrix[4,4]f32,
 
     batches: [dynamic]Batch, //rendering a view iterates this.
@@ -86,7 +86,7 @@ Batch_Key :: struct {
 }
 
 Batch :: struct {
-    id: u32,
+    id: u32, //unsorted
     key: Batch_Key, //so we can get pass/pipeline state
     mesh: Mesh,
     material: Material,
