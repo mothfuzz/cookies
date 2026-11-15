@@ -179,8 +179,8 @@ make_environment_probe :: proc(position: [3]f32, size: [3]f32 = 0, faces_per_fra
     probe.faces_per_frame = faces_per_frame
     probe_box := Environment_Probe_Box_Uniforms{
         center = {**position, projection_type == .Infinite?0:1},
-        mini = vecpos(probe.extents[0]),
-        maxi = vecpos(probe.extents[1]),
+        mini = [4]f32{**probe.extents[0], 1},
+        maxi = [4]f32{**probe.extents[1], 1},
     }
     if slot, ok := pop_safe(&cubemaps_free); ok {
         probe.cubemap_slot = slot

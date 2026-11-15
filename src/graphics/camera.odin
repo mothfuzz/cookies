@@ -2,16 +2,8 @@ package graphics
 
 import "vendor:wgpu"
 import "core:math/linalg"
-import "base:runtime"
 
-camera_layout_entries :: []wgpu.BindGroupLayoutEntry{
-    {
-        binding = 0,
-        visibility = {.Vertex, .Fragment},
-        buffer = {type = .Uniform, hasDynamicOffset = true}
-    },
-}
-camera_layout: wgpu.BindGroupLayout
+// TODO: move to camera_fill_bindings.odin
 camera_bg_layout_entries :: []wgpu.BindGroupLayoutEntry{
     {
         binding = 0,
@@ -32,17 +24,8 @@ camera_bg_layout_entries :: []wgpu.BindGroupLayoutEntry{
 camera_bg_layout: wgpu.BindGroupLayout
 bg_sampler: wgpu.Sampler
 
-Camera_Uniforms :: struct {
-    view: matrix[4,4]f32,
-    inv_view: matrix[4,4]f32,
-    projection: matrix[4,4]f32,
-    inv_viewproj: matrix[4,4]f32,
-    color: [4]f32,
-    fog_distance: [2]f32,
-}
-
 Camera_View :: struct {
-    using uniforms: Camera_Uniforms,
+    //using uniforms: Camera_Uniforms,
     buffer_index: u32,
     viewproj: matrix[4,4]f32, //optimization
     frustum_planes: [6][4]f32, //left, right, bottom, top, near, far
@@ -56,6 +39,29 @@ Camera_Draw :: struct {
     bg_bind_group: wgpu.BindGroup,
     viewport: [4]f32,
     fill: bool,
+}
+
+//align to 256 so we can get 512 bytes and not have to do any math
+//need all the previously CPU-only data on the GPU struct now if we want to do GPU culling
+Camera_Uniforms :: struct #align(256) {
+    view, inv_view, projection, viewproj, inv_viewproj: matrix[4,4]f32, //5x64
+    frustum_planes: [6][4]f32, //left, right, bottom, top, near, far
+    color: [4]f32, //rgb + exposure
+    fog_distance: [2]f32,
+    layer_mask: Layer_Mask, //vec2<u32>
+    cascade_splits: [4]f32,
+    cascade_offset, cascade_count: u32,
+    //will be in clusters later.
+    point_count: u32, //light_ids[light_offset:][:point_count] = points
+    spot_count: u32,  //light_ids[light_offset:][point_count:] = spots
+    light_offset: u32,
+    //padding
+}
+
+Camera_Raster :: struct {
+    viewport: [4]f32,
+    bg_bind_group: wgpu.BindGroup, //nil = no fill
+    flip: bool, //swap triangle cull mode back/front
 }
 
 Camera :: struct {
@@ -199,7 +205,7 @@ inverse_view :: proc(trans: matrix[4,4]f32) -> (inv_view: matrix[4,4]f32) {
     return
 }
 
-calculate_frustum :: proc(cam: ^Camera_View) {
+calculate_frustum :: proc(cam: ^Camera_Uniforms) -> (flipped: bool) {
     cam.viewproj = cam.projection * cam.view
     cam.inv_viewproj = linalg.inverse(cam.viewproj)
     //calculate frustum planes... Gribb-Hartmann
@@ -211,25 +217,29 @@ calculate_frustum :: proc(cam: ^Camera_View) {
     cam.frustum_planes[4] = rows[2]
     cam.frustum_planes[5] = rows[3] - rows[2]
     //normalize planes
-    cam.planes_to_check = 0
-    for p in cam.frustum_planes {
+    for &p in cam.frustum_planes {
         l := linalg.length(p.xyz)
-        if l < 1e-6 do continue //don't divide by zero
-        cam.frustum_planes[cam.planes_to_check] = p/l
-        cam.planes_to_check += 1
+        if l < 1e-6 {
+            //don't divide by zero, always pass this plane
+            p = {0, 0, 0, 1}
+        } else {
+            p = p/l
+        }
     }
+    flipped = linalg.determinant(cast(matrix[4,4]f32)cam.view) < 0
+    return
 }
 
 FOV :: 60.0
-calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Target = nil) -> (draw: Camera_Draw) {
+calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, target_resolution: [2]uint = 0) -> (draw: Camera_Uniforms, raster: Camera_Raster) {
     draw.inv_view = trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1)
     draw.view = inverse_view(draw.inv_view)
     fov := cam.range[0]
     if fov == 0 {
         fov = linalg.to_radians(f32(FOV))
     } 
-    draw.viewport = get_viewport_rect(cam, rt)
-    width, height := draw.viewport[2], draw.viewport[3]
+    raster.viewport = get_viewport_rect(cam, target_resolution)
+    width, height := raster.viewport[2], raster.viewport[3]
     near := cam.range[1]
     far := cam.range[2]
     if near == 0 {
@@ -240,124 +250,40 @@ calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Tar
     } else {
         draw.projection = linalg.matrix4_perspective(fov, width/height, near, far)
     }
-    calculate_frustum(&draw)
+    raster.flip = calculate_frustum(&draw)
     fog_onset := cam.range[3] if cam.range[3] != 0 else (far - near)/2.0
     draw.color = cam.color
-    draw.fill = cam.fill
+    //draw.cascade_count = num_directional_cascades(cam.directional_cascades)
     draw.layer_mask = cam.layer_mask
     draw.fog_distance = {fog_onset, far}
-    //wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &draw.uniforms, size_of(Camera_Uniforms))
-    draw.bg_bind_group = cam.bg_bind_group
+    if cam.fill {
+        raster.bg_bind_group = cam.bg_bind_group
+    }
     return
 }
-
-Camera_Buffer :: struct {
-    capacity: int,
-    buffer: wgpu.Buffer,
-    bind_group: wgpu.BindGroup,
-    stride: int,
-    count: int,
-}
-
-cam_buffer: Camera_Buffer
-
-realloc_camera_buffer :: proc() {
-    cam_buffer.stride = max(uniform_alignment, int(runtime.align_forward(size_of(Camera_Uniforms), uniform_alignment)))
-    new_cap := cam_buffer.count * cam_buffer.stride
-    if new_cap <= cam_buffer.capacity do return
-    cam_buffer.capacity = new_cap
-    if cam_buffer.buffer != nil do wgpu.BufferRelease(cam_buffer.buffer)
-    cam_buffer.buffer = wgpu.DeviceCreateBuffer(ren.device, &{
-        usage = {.Uniform, .CopyDst},
-        size = u64(cam_buffer.capacity)
-    })
-
-    if cam_buffer.bind_group != nil do wgpu.BindGroupRelease(cam_buffer.bind_group)
-    bindings := []wgpu.BindGroupEntry{
-        {binding = 0, buffer = cam_buffer.buffer, size = u64(cam_buffer.stride)},
-        //{binding = 1, textureView = skyboxes.view},
-        //{binding = 2, sampler = skyboxes_sampler},
-    }
-    cam_buffer.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
-        layout = camera_layout,
-        entryCount = 1,
-        entries = raw_data(bindings)
-    })
-}
-
-write_camera_buffer :: proc(shadow_cams: []Shadow_Camera_Draw, cameras: []Camera_Draw) {
-    cam_buffer.count = len(shadow_cams) + len(cameras)
-    realloc_camera_buffer()
-    
-    //stage so we can have one QueueWriteBuffer
-    staging := make([]u8, cam_buffer.count * cam_buffer.stride)
-    defer delete(staging)
-
-    for &cam, i in shadow_cams {
-        cam.buffer_index = u32(i)
-        byte_offset := cam.buffer_index * u32(cam_buffer.stride)
-        ptr := cast(^Camera_Uniforms)(raw_data(staging[byte_offset:]))
-        ptr^ = cam.uniforms
-    }
-    offset := len(shadow_cams)
-    for &cam, i in cameras {
-        cam.buffer_index = u32(i + offset)
-        byte_offset := cam.buffer_index * u32(cam_buffer.stride)
-        ptr := cast(^Camera_Uniforms)(raw_data(staging[byte_offset:]))
-        ptr^ = cam.uniforms
-    }
-
-    wgpu.QueueWriteBuffer(ren.queue, cam_buffer.buffer, 0, raw_data(staging), uint(len(staging)))
-}
-
-bind_camera_uniforms :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, buffer_index: u32) {
-    offset := buffer_index * u32(cam_buffer.stride)
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, cam_buffer.bind_group, {offset})
-}
-
-bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera_Draw) {
-    x, y, w, h := expand_values(cam.viewport)
-    wgpu.RenderPassEncoderSetViewport(render_pass, x, y, w, h, 0, 1)
-    wgpu.RenderPassEncoderSetScissorRect(render_pass, u32(x), u32(y), u32(w), u32(h))
-    bind_camera_uniforms(render_pass, slot, cam.buffer_index)
-}
-
-bind_camera_bg :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera_Draw) {
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, cam.bg_bind_group)
-}
-
-/*
-@(export)
-delete_camera :: proc(cam: Camera) {
-    wgpu.BufferRelease(cam.buffer)
-    wgpu.BindGroupRelease(cam.bind_group)
-}
-*/
 
 @(export)
 set_viewport :: proc(cam: ^Camera, viewport: [4]f32) {
     cam.viewport = viewport
 }
 
-get_viewport_rect :: proc(cam: Camera, render_target: ^Render_Target = nil) -> [4]f32 {
+get_viewport_rect :: proc(cam: Camera, target_resolution: [2]uint = 0) -> [4]f32 {
     screen_resolution := screen_resolution
-    if render_target != nil {
-        screen_resolution.x = uint(render_target.output.width)
-        screen_resolution.y = uint(render_target.output.height)
+    if target_resolution != 0 {
+        screen_resolution = target_resolution
     }
     x, y := cam.viewport.x, cam.viewport.y
-    width, height := get_viewport_size(cam, render_target)
+    width, height := get_viewport_size(cam, screen_resolution)
     if cam.relative {
         x *= f32(screen_resolution.x)
         y *= f32(screen_resolution.y)
     }
     return {max(x, 0), max(y, 0), width, height}
 }
-get_viewport_size :: proc(cam: Camera, render_target: ^Render_Target = nil) -> (width, height: f32) {
+get_viewport_size :: proc(cam: Camera, target_resolution: [2]uint = 0) -> (width, height: f32) {
     screen_resolution := screen_resolution
-    if render_target != nil {
-        screen_resolution.x = uint(render_target.output.width)
-        screen_resolution.y = uint(render_target.output.height)
+    if target_resolution != 0 {
+        screen_resolution = target_resolution
     }
     width = cam.viewport[2]
     height = cam.viewport[3]
@@ -418,9 +344,8 @@ z_layer :: proc(cam: Camera, layer: int, num_layers: int = MAX_Z_LAYERS) -> f32 
     return f32(layer) * z_min_step(cam, num_layers) 
 }
 
-sphere_in_frustum :: proc(cam: Camera_View, bounding_center: [3]f32, bounding_radius: f32) -> bool {
-    for i in 0..<cam.planes_to_check {
-        p := cam.frustum_planes[i]
+sphere_in_frustum :: proc(cam: Camera_Uniforms, bounding_center: [3]f32, bounding_radius: f32) -> bool {
+    for p in cam.frustum_planes {
         if linalg.dot(p.xyz, bounding_center) + p.w < -bounding_radius {
             return false
         }
@@ -428,9 +353,8 @@ sphere_in_frustum :: proc(cam: Camera_View, bounding_center: [3]f32, bounding_ra
     return true 
 }
 
-bounds_in_frustum :: proc(cam: Camera_View, bounding_center: [3]f32, bounding_axes: [3][3]f32) -> bool {
-    for i in 0..<cam.planes_to_check {
-        p := cam.frustum_planes[i]
+bounds_in_frustum :: proc(cam: Camera_Uniforms, bounding_center: [3]f32, bounding_axes: [3][3]f32) -> bool {
+    for p in cam.frustum_planes {
         n := p.xyz
         //project OBB axes onto plane's normal, then it becomes roughly the same as sphere check
         r := abs(linalg.dot(n, bounding_axes[0])) +

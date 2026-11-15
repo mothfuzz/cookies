@@ -17,178 +17,21 @@ Renderer :: struct {
     adapter: wgpu.Adapter,
     device: wgpu.Device,
     surface: wgpu.Surface,
-    msaa_tex: wgpu.Texture, //used for AA resolve on surface
-    msaa_view: wgpu.TextureView,
-    depth_buffer: Texture,
-    accum: Texture,
-    accum_resolve: Texture,
-    revealage: Texture,
-    revealage_resolve: Texture,
+    main_textures: Main_Textures,
     config: wgpu.SurfaceConfiguration,
     queue: wgpu.Queue,
     shader: wgpu.ShaderModule,
     oit_composite_shader: wgpu.ShaderModule,
     camera_fill_shader: wgpu.ShaderModule,
     layout: wgpu.PipelineLayout,
-    solid_pipelines: [Cull_Mode]wgpu.RenderPipeline,
-    trans_pipelines: [Cull_Mode]wgpu.RenderPipeline,
-    solid_lines_pipeline: wgpu.RenderPipeline,
-    trans_lines_pipeline: wgpu.RenderPipeline,
-    solid_points_pipeline: wgpu.RenderPipeline,
-    trans_points_pipeline: wgpu.RenderPipeline,
     oit_composite_layout: wgpu.PipelineLayout,
     oit_composite_pipeline: wgpu.RenderPipeline,
     oit_composite_bind_group_layout: wgpu.BindGroupLayout,
-    oit_composite_bind_group: wgpu.BindGroup,
-    oit_composite_sampler: wgpu.Sampler,
     camera_fill_layout: wgpu.PipelineLayout,
     camera_fill_pipeline: wgpu.RenderPipeline,
-    using shadows: Shadow_Renderer,
     ready: bool,
 }
 ren: Renderer
-
-with_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
-    //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
-    #partial switch format {
-    case .RGBA8Unorm:
-        return .RGBA8UnormSrgb
-    case .BGRA8Unorm:
-        return .BGRA8UnormSrgb
-    case:
-        return format
-    }
-}
-without_srgb :: proc(format: wgpu.TextureFormat) -> wgpu.TextureFormat {
-    //don't care about BC1, BC2, BC3, BC7, ETC2, or ASTC
-    #partial switch format {
-    case .RGBA8UnormSrgb:
-        return .RGBA8Unorm
-    case .BGRA8UnormSrgb:
-        return .BGRA8Unorm
-    case:
-        return format
-    }
-}
-
-wgpu_cull_mode := [Cull_Mode]wgpu.CullMode {
-        .Back_CCW = .Back,
-        .Front_CCW = .Front,
-        .None = .None,
-}
-
-wgpu_topology := [Mesh_Topology]wgpu.PrimitiveTopology {
-        .Triangles = .TriangleList,
-        .Lines = .LineList,
-        .Points = .PointList,
-}
-
-topology_constant := [Mesh_Topology]f64 {
-        .Triangles = 0,
-        .Lines = 1,
-        .Points = 2,
-}
-
-screen_resolution: [2]uint
-window_resized :: proc(size: [2]uint) {
-    configure_surface(size)
-    configure_render_targets()
-}
-
-tex_format: wgpu.TextureFormat
-view_format: wgpu.TextureFormat
-@(private)
-configure_surface :: proc(size: [2]uint = 0) {
-    if size != 0 {
-        screen_resolution = size
-    }
-    if screen_resolution.x == 0 || screen_resolution.y == 0 {
-        return
-    }
-    log.debug("reconfiguring draw surface...")
-    caps, status := wgpu.SurfaceGetCapabilities(ren.surface, ren.adapter)
-    if status == .Error {
-        log.panic("Unable to get surface capabilities!")
-    }
-    defer wgpu.SurfaceCapabilitiesFreeMembers(caps)
-    if caps.formatCount == 0 {
-        log.panic("No available surface formats!")
-    }
-    //prefer mailbox to unlink FPS from refresh rate
-    presentMode := wgpu.PresentMode.Fifo
-    for i in 0..<caps.presentModeCount {
-        if caps.presentModes[i] == .Mailbox {
-            presentMode = .Mailbox
-            log.debug("Upgrading to fast vsync.")
-            break
-        }
-    }
-    tex_format = without_srgb(caps.formats[0])
-    view_format = with_srgb(caps.formats[0])
-    ren.config = wgpu.SurfaceConfiguration {
-        device = ren.device,
-        usage = {.RenderAttachment},
-        format = tex_format,
-        viewFormatCount = 1,
-        viewFormats = &view_format,
-        width = u32(screen_resolution.x),
-        height = u32(screen_resolution.y),
-        presentMode = presentMode,
-        alphaMode = .Opaque,
-    }
-    wgpu.SurfaceConfigure(ren.surface, &ren.config)
-}
-
-@(private)
-configure_render_targets :: proc() {
-    log.debug("creating render targets:", ren.config.width, "x", ren.config.height)
-    if ren.msaa_view != nil {
-        wgpu.TextureViewRelease(ren.msaa_view)
-    }
-    if ren.msaa_tex != nil {
-        wgpu.TextureRelease(ren.msaa_tex)
-    }
-    ren.msaa_tex = wgpu.DeviceCreateTexture(ren.device, &{
-        size = {ren.config.width, ren.config.height, 1},
-        mipLevelCount = 1,
-        sampleCount = 4,
-        dimension = ._2D,
-        format = with_srgb(ren.config.format), //same as surface view
-        usage = {.RenderAttachment},
-    })
-    ren.msaa_view = wgpu.TextureCreateView(ren.msaa_tex)
-
-    if ren.depth_buffer.image != nil {
-        delete_texture(ren.depth_buffer)
-    }
-    ren.depth_buffer = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .Depth24PlusStencil8, true)
-
-    if ren.accum.image != nil {
-        delete_texture(ren.accum)
-    }
-    ren.accum = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .RGBA16Float, true)
-    ren.accum_resolve = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .RGBA16Float)
-    if ren.revealage.image != nil {
-        delete_texture(ren.revealage)
-    }
-    ren.revealage = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .R8Unorm, true)
-    ren.revealage_resolve = make_render_texture({uint(ren.config.width), uint(ren.config.height)}, .R8Unorm)
-
-    //only re-bind when those textures actually change.
-    if ren.oit_composite_bind_group != nil {
-        wgpu.BindGroupRelease(ren.oit_composite_bind_group)
-    }
-    oit_composite_bindings := []wgpu.BindGroupEntry{
-        {binding = 0, sampler=ren.oit_composite_sampler},
-        {binding = 1, textureView=ren.accum_resolve.view},
-        {binding = 2, textureView=ren.revealage_resolve.view},
-    }
-    ren.oit_composite_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
-        layout = ren.oit_composite_bind_group_layout,
-        entryCount = len(oit_composite_bindings),
-        entries = raw_data(oit_composite_bindings),
-    })
-}
 
 @(private)
 request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Adapter, message: string, userdata1, userdata2: rawptr) {
@@ -376,53 +219,38 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         //one entry for each texture in the material
         //binding for: base_color, normal, pbr, and environment (for now)
     })
-    skeletons_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
-        entryCount = len(skeletons_layout_entries),
-        entries = raw_data(skeletons_layout_entries),
+    instances_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
+        entryCount = len(instances_layout_entries),
+        entries = raw_data(instances_layout_entries),
     })
     lights_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(lights_layout_entries),
         entries = raw_data(lights_layout_entries),
     })
 
-    bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, skeletons_layout, lights_layout}
+    bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, instances_layout, /*lights_layout*/}
     ren.layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
         bindGroupLayoutCount = len(bind_group_layouts),
         bindGroupLayouts = raw_data(bind_group_layouts),
     })
 
-    log.debug("creating main pipelines...")
-    for cull_mode in Cull_Mode {
-        solid, trans := create_pipeline(cull_mode, .Triangles)
-        ren.solid_pipelines[cull_mode] = solid
-        ren.trans_pipelines[cull_mode] = trans
-    }
-    lines_solid, lines_trans := create_pipeline(.None, .Lines)
-    ren.solid_lines_pipeline = lines_solid
-    ren.trans_lines_pipeline = lines_trans
-    points_solid, points_trans := create_pipeline(.None, .Points)
-    ren.solid_points_pipeline = points_solid
-    ren.trans_points_pipeline = points_trans
+    log.debug("creating pipelines table...")
+    create_pipeline_table()
 
 
     log.debug("creating compositor...")
     oit_composite_layout_entries := []wgpu.BindGroupLayoutEntry{
+        //accum
         wgpu.BindGroupLayoutEntry{
             binding = 0,
             visibility = {.Fragment},
-            sampler = {type = .Filtering},
-        },
-        //accum
-        wgpu.BindGroupLayoutEntry{
-            binding = 1,
-            visibility = {.Fragment},
-            texture = {sampleType = .Float, viewDimension = ._2D},
+            texture = {sampleType = .UnfilterableFloat, viewDimension = ._2D, multisampled = true},
         },
         //revealage
         wgpu.BindGroupLayoutEntry{
-            binding = 2,
+            binding = 1,
             visibility = {.Fragment},
-            texture = {sampleType = .Float, viewDimension = ._2D},
+            texture = {sampleType = .UnfilterableFloat, viewDimension = ._2D, multisampled = true},
         },
     }
     ren.oit_composite_bind_group_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
@@ -477,14 +305,6 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
             mask = 0xffffffff,
         },
     })
-    ren.oit_composite_sampler = wgpu.DeviceCreateSampler(ren.device, &{
-        minFilter=.Linear,
-        magFilter=.Linear,
-        mipmapFilter=.Linear, //don't use mips for fullscreen, dog
-        maxAnisotropy=1,
-        addressModeU=.ClampToEdge,
-        addressModeV=.ClampToEdge,
-    })
 
     log.debug("creating camera fill pipeline...")
     camera_fill_layouts := []wgpu.BindGroupLayout{camera_layout, camera_bg_layout}
@@ -514,23 +334,22 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
             cullMode = .Back,
             frontFace = .CW,
         },
-        depthStencil = nil,
+        depthStencil = &{
+            format = .Depth24PlusStencil8,
+            depthWriteEnabled = .True,
+            depthCompare = .Always,
+        },
         multisample = {
             count = 4,
             mask = 0xffffffff,
         },
     })
 
-    log.debug("creating shadow renderer...")
-    init_shadows()
-
-    log.debug("setting up render targets...")
-    configure_render_targets()
+    log.debug("setting up screen textures...")
+    configure_screen_textures()
 
     init_defaults()
     init_ui()
-
-    realloc_skeletons_buffer(0) //need minimum size for valid bindings
 
     make_mipmapping()
 
@@ -578,39 +397,22 @@ quit :: proc() {
     delete_frame()
     delete_ui()
     delete_defaults()
-    delete_lights_buffer()
-    delete_skeletons_buffer()
     delete_probe_capture()
-    delete_instance_buffer()
-    for cull_mode in Cull_Mode {
-        wgpu.RenderPipelineRelease(ren.solid_pipelines[cull_mode])
-        wgpu.RenderPipelineRelease(ren.trans_pipelines[cull_mode])
-    }
-    wgpu.RenderPipelineRelease(ren.solid_lines_pipeline)
-    wgpu.RenderPipelineRelease(ren.trans_lines_pipeline)
-    wgpu.RenderPipelineRelease(ren.solid_points_pipeline)
-    wgpu.RenderPipelineRelease(ren.trans_points_pipeline)
+    destroy_pipeline_table()
     wgpu.PipelineLayoutRelease(ren.layout)
     wgpu.RenderPipelineRelease(ren.oit_composite_pipeline)
     wgpu.PipelineLayoutRelease(ren.oit_composite_layout)
     wgpu.BindGroupLayoutRelease(ren.oit_composite_bind_group_layout)
-    wgpu.BindGroupRelease(ren.oit_composite_bind_group)
-    wgpu.SamplerRelease(ren.oit_composite_sampler)
     wgpu.RenderPipelineRelease(ren.camera_fill_pipeline)
     wgpu.PipelineLayoutRelease(ren.camera_fill_layout)
     wgpu.BindGroupLayoutRelease(camera_layout)
     wgpu.BindGroupLayoutRelease(material_layout)
-    wgpu.BindGroupLayoutRelease(skeletons_layout)
+    wgpu.BindGroupLayoutRelease(instances_layout)
     wgpu.BindGroupLayoutRelease(lights_layout)
     wgpu.ShaderModuleRelease(ren.shader)
     wgpu.ShaderModuleRelease(ren.oit_composite_shader)
     wgpu.ShaderModuleRelease(ren.camera_fill_shader)
-    wgpu.TextureViewRelease(ren.msaa_view)
-    wgpu.TextureRelease(ren.msaa_tex)
-    delete_texture(ren.depth_buffer)
-    delete_texture(ren.accum)
-    delete_texture(ren.revealage)
-    delete_shadows()
+    delete_main_textures(ren.main_textures)
     delete_mipmapping()
 
     //safely clean up resources prior to releasing
@@ -625,856 +427,6 @@ quit :: proc() {
 }
 
 //now for the good part!
-
-Frame :: struct {
-    lights: [dynamic]Light_Draw,
-    cameras: [dynamic]Camera_Draw,
-    action: map[Batch_Hash]Mesh_Batch_Draw,
-    //resources
-    render_targets: map[Render_Target_Hash]Render_Target_Draw,
-    screen_target: Render_Target_Draw,
-    //environment probe stuff
-    environment_probes: [dynamic]Environment_Probe, //all probes drawn (might be static/1-shot)
-    environment_probe_captures: [dynamic]Environment_Probe_Draw, //probes that actually need capture
-    max_cubemap_slot: int,
-    //running extents
-    scene_extents: [2][3]f32,
-}
-
-Mesh_Batch_Draw :: struct {
-    mesh: Mesh,
-    material: Material,
-    instances: [Cull_Mode][dynamic]Mesh_Draw,
-}
-
-Batch_Hash :: distinct u64
-batch_hash :: proc(mesh: Mesh_Hash, material: Material_Hash) -> Batch_Hash {
-    //sort order is by highest bits, we want material-outer, mesh-inner
-    return Batch_Hash(u64(material) << 32 | u64(mesh))
-} 
-
-@(private)
-delete_frame :: proc() {
-    delete(frame.lights)
-    delete(frame.cameras)
-    for hash, &batch in frame.action {
-        for mode in Cull_Mode {
-            delete(batch.instances[mode])
-        }
-    }
-    delete(frame.action)
-    for _, render_target in frame.render_targets {
-        delete(render_target.cameras)
-    }
-    delete(frame.render_targets)
-    delete(frame.screen_target.cameras)
-    for render_target in frame.environment_probe_captures {
-        wgpu.TextureViewRelease(render_target.render_view)
-        delete(render_target.cameras)
-    }
-    delete(frame.environment_probe_captures)
-    delete(frame.environment_probes)
-}
-
-@(private)
-clear_frame :: proc() {
-    clear(&frame.lights)
-    clear(&frame.cameras)
-    clear_action(&frame)
-    for _, render_target in frame.render_targets {
-        delete(render_target.cameras)
-    }
-    clear(&frame.render_targets)
-    clear(&frame.screen_target.cameras)
-    frame.scene_extents[0] = math.INF_F32
-    frame.scene_extents[1] = math.NEG_INF_F32
-    for render_target in frame.environment_probe_captures {
-        wgpu.TextureViewRelease(render_target.render_view)
-        delete(render_target.cameras)
-    }
-    clear(&frame.environment_probe_captures)
-    clear(&frame.environment_probes)
-}
-
-@(private)
-set_screen_target :: proc(frame: ^Frame, screen: wgpu.TextureView) {
-    frame.screen_target.render_view = screen
-    frame.screen_target.output = screen
-    frame.screen_target.msaa = ren.msaa_view
-    frame.screen_target.depth = ren.depth_buffer.view
-    frame.screen_target.accum = ren.accum.view
-    frame.screen_target.accum_resolve = ren.accum_resolve.view
-    frame.screen_target.revealage = ren.revealage.view
-    frame.screen_target.revealage_resolve = ren.revealage_resolve.view
-    frame.screen_target.oit_composite_bind_group = ren.oit_composite_bind_group
-}
-
-
-//static frame so commands can be called context-free
-frame: Frame
-
-@(export)
-draw_point_light :: proc(light: Point_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    append(&frame.lights, Light_Draw{light, transform.world(trans), layers})
-}
-@(export)
-draw_directional_light :: proc(light: Directional_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    append(&frame.lights, Light_Draw{light, transform.world(trans), layers})
-}
-@(export)
-draw_spot_light :: proc(light: Spot_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    append(&frame.lights, Light_Draw{light, transform.world(trans), layers})
-}
-draw_light :: proc{draw_point_light, draw_directional_light, draw_spot_light}
-
-@(export)
-draw_camera :: proc(camera: Camera, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    camera := camera
-    if layers != All_Layers {
-        camera.layer_mask = layers
-    }
-    append(&frame.screen_target.cameras, len(frame.cameras))
-    append(&frame.cameras, calculate_camera(camera, transform.world(trans))) //compute once, don't defer
-}
-
-@(export)
-draw_render_target :: proc(camera: Camera, target: Render_Target, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    target := target
-    camera := calculate_camera(camera, transform.world(trans), &target)
-    if layers != All_Layers {
-        camera.layer_mask = layers
-    }
-    if !(target.hash in frame.render_targets) {
-        frame.render_targets[target.hash] = {
-            target.output.render_view,
-            target.output.view,
-            target.msaa.view,
-            target.depth.view,
-            target.accum.view,
-            target.accum_resolve.view,
-            target.revealage.view,
-            target.revealage_resolve.view,
-            target.sampler,
-            target.oit_composite_bind_group,
-            target.mipmapper,
-            make([dynamic]int),
-        }
-    }
-    render_target := &frame.render_targets[target.hash]
-    append(&render_target.cameras, len(frame.cameras))
-    append(&frame.cameras, camera)
-}
-
-@(export)
-draw_environment_probe :: proc(probe: Environment_Probe, layers: Layer_Mask = All_Layers) {
-    frame.max_cubemap_slot = max(frame.max_cubemap_slot, probe.cubemap_slot)
-
-    probe := probe
-    if layers != All_Layers {
-        probe.camera.layer_mask = layers
-    }
-
-    append(&frame.environment_probes, probe) //meshes need all drawn cubemaps, not just ones with capture this frame
-}
-
-
-@(private)
-draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32,
-                           dynamic_material: Dynamic_Material,
-                           sprite, billboard, double_sided, unlit: bool,
-                           bones: []matrix[4,4]f32, layers: Layer_Mask) {
-
-    //get the batch
-    if frame.action == nil {
-        frame.action = make(map[Batch_Hash]Mesh_Batch_Draw)
-    }
-    hash := batch_hash(mesh.hash, material.hash)
-    if _, batch, just_inserted, err := map_entry(&frame.action, hash); err == nil {
-        if just_inserted {
-            batch.mesh = mesh
-            batch.material = material
-            for mode in Cull_Mode {
-                batch.instances[mode] = make([dynamic]Mesh_Draw)
-            }
-        }
-
-        draw := Mesh_Draw{{trans, dynamic_material, 0}, sprite, billboard, .Back_CCW, bones, {}, 0, 0, layers}
-        if bones == nil {
-            draw.indices[0] = -1
-        }
-        calculate_mesh_local(&draw, mesh, material)
-        if double_sided || mesh.topology != .Triangles {
-            draw.cull_mode = .None
-        } else if linalg.determinant(cast(matrix[3,3]f32)(trans)) < 0 {
-                draw.cull_mode = .Front_CCW
-        }
-    
-        if unlit {
-            draw.indices[3] = 1
-        }
-        mini := &frame.scene_extents[0]
-        maxi := &frame.scene_extents[1]
-        //Arvo's method - convert transformed bounding axes to AABB using absolute values
-        e: [3]f32
-        for a in draw.bounding_axes {
-            e += [3]f32{abs(a.x), abs(a.y), abs(a.z)}
-        }
-        extents := [2][3]f32{draw.bounding_center - e, draw.bounding_center + e}
-        mini.x = min(extents[0].x, mini.x)
-        mini.y = min(extents[0].y, mini.y)
-        mini.z = min(extents[0].z, mini.z)
-        maxi.x = max(extents[1].x, maxi.x)
-        maxi.y = max(extents[1].y, maxi.y)
-        maxi.z = max(extents[1].z, maxi.z)
-
-        append(&batch.instances[draw.cull_mode], draw)
-    } else {
-        log.panic("Could not create batch for Mesh/Material:", err)
-    }
-}
-
-@(export)
-draw_mesh :: proc(mesh: Mesh, material: Material, trans: transform.Transform = nil,
-                  clip_rect: [4]f32 = 0,
-                  base_color_tint: [4]f32 = 1,
-                  ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
-                  emissive_tint: [3]f32 = 1,
-                  sprite: bool = false, billboard: bool = false, double_sided: bool = false, unlit: bool = false,
-                  bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
-    trans := transform.world(trans)
-    pbr_tint := [4]f32{ambient_tint, roughness_tint, metallic_tint, 1}
-    emissive_tint := [4]f32{emissive_tint.r, emissive_tint.g, emissive_tint.b, 1}
-    dynamic_material := Dynamic_Material{clip_rect, base_color_tint, pbr_tint, emissive_tint}
-    draw_mesh_internal(mesh, material, trans, dynamic_material, sprite, billboard, double_sided, unlit, bones, layers)
-}
-
-//sprites are just special kinds of meshes
-@(export)
-draw_sprite :: proc(material: Material, trans: transform.Transform = nil,
-                    clip_rect: [4]f32 = 0,
-                    base_color_tint: [4]f32 = 1,
-                    ambient_tint: f32 = 1, roughness_tint: f32 = 1, metallic_tint: f32 = 1,
-                    emissive_tint: [3]f32 = 1,
-                    billboard: bool = true, double_sided: bool = false, unlit: bool = false, layers: Layer_Mask = All_Layers) {
-    draw_mesh(quad_mesh, material, trans, clip_rect,
-              base_color_tint, ambient_tint, roughness_tint, metallic_tint, emissive_tint,
-              true, billboard, double_sided, unlit, nil, layers)
-}
-
-@(export)
-draw_line :: proc(a, b: [3]f32, color: [4]f32 = 1, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    local: matrix[4,4]f32
-    ab := b - a
-    p1, p2: [3]f32
-    if ab == 0 {
-        p1, p2 = {1, 0, 0}, {0, 1, 0}
-    } else {
-        if abs(ab.x) > abs(ab.z) {
-            p1 = {-ab.y, ab.x, 0}
-        } else {
-            p1 = {0, -ab.z, ab.y}
-        }
-        p2 = linalg.cross(ab, p1)
-    }
-    local[0].xyz = p1
-    local[1].xyz = p2
-    local[2].xyz = ab
-    local[3].xyz = a
-    local[3].w = 1
-
-    draw_mesh(line_mesh, white_material, transform.world(trans) * local, base_color_tint=color, unlit=true, layers=layers)
-}
-
-@(export)
-draw_point :: proc(p: [3]f32, color: [4]f32 = 1, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    local: matrix[4,4]f32 = 1
-    local[3].xyz = p
-
-    draw_mesh(point_mesh, white_material, transform.world(trans) * local, base_color_tint=color, unlit=true, layers=layers)
-}
-
-@(private)
-Mesh_Batch :: struct {
-    mesh: Mesh,
-    material: Material,
-    hash: Batch_Hash,
-    instances: [Cull_Mode][]Mesh_Draw,
-}
-@(private)
-flatten_action :: proc(f: Frame) -> []Mesh_Batch {
-    batches := make([dynamic]Mesh_Batch)
-    for hash, batch_draw in f.action {
-        batch := Mesh_Batch{mesh=batch_draw.mesh, material=batch_draw.material, hash=hash}
-        use_batch := false
-        for mode in Cull_Mode {
-            batch.instances[mode] = batch_draw.instances[mode][:]
-            if len(batch.instances[mode]) > 0 {
-                use_batch = true
-            }
-        }
-        if use_batch {
-            append(&batches, batch)
-        }
-    }
-    slice.sort_by(batches[:], proc(a, b: Mesh_Batch) -> bool {
-        return a.hash < b.hash
-    })
-    return batches[:]
-}
-@(private)
-clear_action :: proc(f: ^Frame) {
-    if f.action == nil do return
-    for hash, &batch in f.action {
-        for mode in Cull_Mode {
-            clear(&batch.instances[mode])
-        }
-    }
-}
-
-write_skeletons :: proc(batches: []Mesh_Batch) {
-    //all the skeletons at once.
-    running_offset := 0
-    for &batch in batches {
-        for mode in Cull_Mode {
-            for &draw in batch.instances[mode] {
-                if draw.bones == nil do continue
-                draw.indices[0] = i32(running_offset)
-                running_offset += len(draw.bones)
-            }
-        }
-    }
-    realloc_skeletons_buffer(running_offset)
-    for batch in batches {
-        for mode in Cull_Mode {
-            for draw in batch.instances[mode] {
-                if draw.bones == nil do continue
-                offset := draw.indices[0] * size_of(matrix[4,4]f32)
-                size := len(draw.bones) * size_of(matrix[4,4]f32)
-                wgpu.QueueWriteBuffer(ren.queue, skeletons_buffer, u64(offset), raw_data(draw.bones), uint(size))
-            }
-        }
-    }
-}
-
-calculate_environment_probes :: proc(probes: []Environment_Probe) {
-    append_rts :: proc(probe: Environment_Probe, capture_state: ^Capture_State, faces: int) {
-        probe := probe
-        directions := cubemap_directions()
-        for i in 0..<faces {
-            face := int(capture_state.current_face)
-            cubemap_layer := u32(probe.cubemap_slot*6 + face)
-            view_descriptor := wgpu.TextureViewDescriptor{
-                dimension = ._2D,
-                mipLevelCount = 1,
-                arrayLayerCount = 1,
-                baseArrayLayer=cubemap_layer,
-            }
-            //this whole procedure needs to be separate as it depends on the cubemaps_capture.image
-            //so it should be called *after* realloc only.
-            capture_face_view := wgpu.TextureCreateView(cubemaps_capture.image, &view_descriptor)
-
-            probe_rt := Environment_Probe_Draw{
-                capture_face_view,
-                cubemaps_capture.view,
-                probe_capture.msaa.view,
-                probe_capture.depth.view,
-                probe_capture.accum.view,
-                probe_capture.accum_resolve.view,
-                probe_capture.revealage.view,
-                probe_capture.revealage_resolve.view,
-                probe_capture.sampler,
-                probe_capture.oit_composite_bind_group,
-                cubemaps_mipmappers[probe.cubemap_slot][face],
-                make([dynamic]int), //will only ever be 1...
-            }
-            look_at(&probe.camera, probe.position, probe.position + directions[face][0], directions[face][1])
-            camera := calculate_camera(probe.camera, 1, &probe_capture)
-            append(&probe_rt.cameras, len(frame.cameras))
-            append(&frame.cameras, camera)
-            append(&frame.environment_probe_captures, probe_rt)
-            capture_state.current_face += 1
-            capture_state.current_face %= 6
-        }
-    }
-
-    for probe in probes {
-        capture_state := &capture_states[probe.cubemap_slot]
-
-        if probe.faces_per_frame == 0 {
-            //render all 6 at once
-            if !capture_state.one_shot {
-                append_rts(probe, capture_state, 6)
-                capture_state.one_shot = true
-            }
-        } else {
-            //render just the ones for this frame
-            append_rts(probe, capture_state, probe.faces_per_frame)
-        }
-    }
-    
-}
-
-assign_cubemaps :: proc(batches: []Mesh_Batch) {
-    for &batch in batches {
-        for mode in Cull_Mode {
-            for &draw in batch.instances[mode] {
-                draw.indices[1] = -1
-                for probe in frame.environment_probes {
-                    mini := probe.position + probe.extents[0]
-                    maxi := probe.position + probe.extents[1]
-                    if draw.bounding_center.x > mini.x &&
-                        draw.bounding_center.x < maxi.x &&
-                        draw.bounding_center.y > mini.y &&
-                        draw.bounding_center.y < maxi.y &&
-                        draw.bounding_center.z > mini.z &&
-                        draw.bounding_center.z < maxi.z {
-                            draw.indices[1] = i32(probe.cubemap_slot)
-                        }
-                }
-            }
-        }
-    }
-}
-
-@(private)
-Draw_Call :: struct {
-    mesh: Mesh,
-    material: Material,
-    cull_mode: Cull_Mode,
-    //offset insto pass's staging buffer
-    first_instance: u32,
-    instance_count: u32,
-    //offset into mesh's instance_buffer
-    instance_buffer_offset: u64,
-}
-
-
-@(private)
-instance_filter :: proc(mesh: Mesh, material: Material, instance: Instance) -> (is_solid, is_trans: bool) {
-    is_solid = (mesh.is_solid || material.base_color_tex.is_solid) && instance.base_color_tint.a == 1
-    is_trans = mesh.is_trans || material.base_color_tex.is_trans || (instance.base_color_tint.a > 0 && instance.base_color_tint.a < 1)
-    return
-}
-
-Pass :: struct {
-    buffer_offset: u64,
-    instances: []Instance,
-    draw_calls: []Draw_Call,
-}
-
-//passes slice into instance buffer per-camera
-Passes :: struct {
-    solid_shadows: []Pass,
-    trans_shadows: []Pass,
-    solid_main: []Pass,
-    trans_main: []Pass,
-}
-
-//need separate staging so that each pass 'knows' what slice of instances it has.
-Pass_Staging :: struct {
-    instances: [dynamic]Instance,
-    draw_calls: [dynamic]Draw_Call,
-}
-
-@(private)
-compute_pass_staging :: proc(batches: []Mesh_Batch, cam: Camera_View, solid, trans: ^Pass_Staging, skip_points_lines: bool = false) {
-    cam_flip := linalg.determinant(cast(matrix[3,3]f32)(cam.view)) < 0
-    remap := [Cull_Mode]Cull_Mode{
-            .Back_CCW = cam_flip ? .Front_CCW : .Back_CCW,
-            .Front_CCW = cam_flip ? .Back_CCW : .Front_CCW,
-            .None = .None,
-    }
-    for mode in Cull_Mode {
-        for batch in batches {
-            if batch.mesh.topology != .Triangles && skip_points_lines do continue
-            solid_start, trans_start: u32
-            if solid != nil {
-                solid_start = u32(len(solid.instances))
-            }
-            if trans != nil {
-                trans_start = u32(len(trans.instances))
-            }
-
-            for instance in batch.instances[mode] {
-                if (cam.layer_mask & instance.layer_mask) == 0 do continue
-                instance := instance
-                is_solid, is_trans := instance_filter(batch.mesh, batch.material, instance)
-                if !is_solid && !is_trans do continue
-                if !sphere_in_frustum(cam, instance.bounding_center, instance.bounding_radius) do continue
-                if !bounds_in_frustum(cam, instance.bounding_center, instance.bounding_axes) do continue
-                calculate_mesh_world(&instance, cam)
-                if is_solid && solid != nil {
-                    append(&solid.instances, instance)
-                }
-                if is_trans && trans != nil {
-                    append(&trans.instances, instance)
-                }
-            }
-
-            solid_count, trans_count: u32
-            if solid != nil {
-                solid_count = u32(len(solid.instances)) - solid_start
-            }
-            if trans != nil {
-                trans_count = u32(len(trans.instances)) - trans_start
-            }
-
-            if solid_count > 0 {
-                append(&solid.draw_calls, Draw_Call{
-                    mesh = batch.mesh, material = batch.material,
-                    cull_mode = remap[mode],
-                    first_instance = solid_start,
-                    instance_count = solid_count,
-                })
-            }
-            if trans_count > 0 {
-                append(&trans.draw_calls, Draw_Call{
-                    mesh = batch.mesh, material = batch.material,
-                    cull_mode = remap[mode],
-                    first_instance = trans_start,
-                    instance_count = trans_count,
-                })
-            }
-        }
-    }
-}
-
-//write from staging into real pass data
-@(private)
-write_pass :: proc(pass: ^Pass, staging: ^Pass_Staging, running_offset: ^u64) {
-    pass.buffer_offset = running_offset^
-    pass.instances = staging.instances[:]
-    pass.draw_calls = staging.draw_calls[:]
-    for &draw in pass.draw_calls {
-        draw.instance_buffer_offset = running_offset^ + u64(draw.first_instance) * size_of(Instance)
-    }
-    running_offset^ += u64(len(pass.instances)) * size_of(Instance)
-}
-
-//write from pass into instance buffer
-//trying to do this all at once overwhelmed temp_alloc :C
-@(private)
-write_pass_instances :: proc(pass: Pass) {
-    if len(pass.instances) == 0 do return
-    size := u64(len(pass.instances)) * size_of(Instance)
-    wgpu.QueueWriteBuffer(ren.queue, instance_buffer, pass.buffer_offset, raw_data(pass.instances), uint(size))
-}
-
-@(private)
-compute_passes :: proc(batches: []Mesh_Batch, cameras: []Camera_Draw, shadow_cameras: []Shadow_Camera_Draw) -> (passes: Passes) {
-    solid_shadows_staging := make([]Pass_Staging, len(shadow_cameras))
-    defer delete(solid_shadows_staging)
-    trans_shadows_staging := make([]Pass_Staging, len(shadow_cameras))
-    defer delete(trans_shadows_staging)
-    solid_main_staging := make([]Pass_Staging, len(cameras))
-    defer delete(solid_main_staging)
-    trans_main_staging := make([]Pass_Staging, len(cameras))
-    defer delete(trans_main_staging)
-
-    passes.solid_main = make([]Pass, len(cameras))
-    passes.trans_main = make([]Pass, len(cameras))
-    passes.solid_shadows = make([]Pass, len(shadow_cameras))
-    passes.trans_shadows = make([]Pass, len(shadow_cameras))
-
-    for cam, i in cameras {
-        compute_pass_staging(batches, cam, &solid_main_staging[i], &trans_main_staging[i])
-    }
-    for cam, i in shadow_cameras {
-        compute_pass_staging(batches, cam, &solid_shadows_staging[i], &trans_shadows_staging[i], true)
-    }
-
-    //actually pack the staging passes to the real passes
-    running_offset: u64
-    for &pass, i in passes.solid_shadows {
-        write_pass(&pass, &solid_shadows_staging[i], &running_offset)
-    }
-    for &pass, i in passes.trans_shadows {
-        write_pass(&pass, &trans_shadows_staging[i], &running_offset)
-    }
-    for &pass, i in passes.solid_main {
-        write_pass(&pass, &solid_main_staging[i], &running_offset)
-    }
-    for &pass, i in passes.trans_main {
-        write_pass(&pass, &trans_main_staging[i], &running_offset)
-    }
-
-    //the big buffer...
-    //[solid shadow cam 0][trans shadow cam 0][solid main cam 0][trans main cam 0][etc.]
-
-    realloc_instance_buffer(running_offset)
-
-    //write the vertex buffer...
-    for &pass in passes.solid_shadows {
-        write_pass_instances(pass)
-    }
-    for &pass in passes.trans_shadows {
-        write_pass_instances(pass)
-    }
-    for &pass in passes.solid_main {
-        write_pass_instances(pass)
-    }
-    for &pass in passes.trans_main {
-        write_pass_instances(pass)
-    }
-    return
-}
-
-@(private)
-delete_pass :: proc(pass: ^Pass) {
-    delete(pass.instances)
-    delete(pass.draw_calls)
-}
-
-@(private)
-delete_passes :: proc(passes: Passes) {
-    for &pass in passes.solid_shadows {
-        delete_pass(&pass)
-    }
-    for &pass in passes.trans_shadows {
-        delete_pass(&pass)
-    }
-    for &pass in passes.solid_main {
-        delete_pass(&pass)
-    }
-    for &pass in passes.trans_main {
-        delete_pass(&pass)
-    }
-    delete(passes.solid_shadows)
-    delete(passes.trans_shadows)
-    delete(passes.solid_main)
-    delete(passes.trans_main)
-}
-
-Pipelines :: struct {
-    main: [Cull_Mode]wgpu.RenderPipeline,
-    lines: wgpu.RenderPipeline,
-    points: wgpu.RenderPipeline,
-}
-
-@(private)
-execute_draw_calls :: proc(render_pass: wgpu.RenderPassEncoder, draws: []Draw_Call, pipelines: Pipelines) {
-    //lights and cameras are already bound at this point.
-    prev_material: Material_Hash
-    prev_mesh: Mesh_Hash
-    pipeline_set: bool = false
-    prev_topology: Mesh_Topology
-    prev_cull_mode: Cull_Mode
-    bind_instances(render_pass)
-    for draw in draws {
-        if prev_material == 0 || draw.material.hash != prev_material {
-            bind_material(render_pass, 1, draw.material)
-            prev_material = draw.material.hash
-        }
-        if prev_mesh == 0 || draw.mesh.hash != prev_mesh {
-            bind_mesh(render_pass, draw.mesh)
-            prev_mesh = draw.mesh.hash
-        }
-        topology := draw.mesh.topology
-        if pipeline_set == false || draw.cull_mode != prev_cull_mode || topology != prev_topology {
-            switch topology {
-            case .Triangles: wgpu.RenderPassEncoderSetPipeline(render_pass, pipelines.main[draw.cull_mode])
-            case .Lines: wgpu.RenderPassEncoderSetPipeline(render_pass, pipelines.lines)
-            case .Points: wgpu.RenderPassEncoderSetPipeline(render_pass, pipelines.points)
-            }
-            prev_cull_mode = draw.cull_mode
-            prev_topology = draw.mesh.topology
-            pipeline_set = true
-        }
-        draw_mesh_instances(render_pass, draw.mesh, draw.instance_count, draw.instance_buffer_offset)
-    }
-}
-
-@(private)
-clear_render_target :: proc(command_encoder: wgpu.CommandEncoder, target: Render_Target_Draw) {
-    clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-        label = "render_target_clear",
-        colorAttachmentCount = 1,
-        colorAttachments = &wgpu.RenderPassColorAttachment{
-            view = target.msaa,
-            resolveTarget = target.render_view,
-            loadOp = .Clear,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = {0, 0, 0, 1},
-        },
-        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-            view = target.depth,
-            depthLoadOp = .Clear,
-            depthStoreOp = .Store,
-            depthClearValue = 1.0,
-            stencilLoadOp = .Clear,
-            stencilStoreOp = .Store,
-            stencilClearValue = 1.0,
-        },
-    })
-    wgpu.RenderPassEncoderEnd(clear_pass)
-    wgpu.RenderPassEncoderRelease(clear_pass)
-
-    trans_clear_attachments := []wgpu.RenderPassColorAttachment{
-        {
-            view = target.accum,
-            resolveTarget = target.accum_resolve,
-            loadOp = .Clear,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = {0, 0, 0, 0},
-        },
-        {
-            view = target.revealage,
-            resolveTarget = target.revealage_resolve,
-            loadOp = .Clear,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = {1, 0, 0, 0},
-        },
-    }
-    trans_clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-        label = "render_target_trans_clear",
-        colorAttachmentCount = len(trans_clear_attachments),
-        colorAttachments = raw_data(trans_clear_attachments),
-        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-            view = target.depth,
-            depthLoadOp = .Load,
-            depthStoreOp = .Store,
-            stencilLoadOp = .Load,
-            stencilStoreOp = .Store,
-        },
-    })
-    wgpu.RenderPassEncoderEnd(trans_clear_pass)
-    wgpu.RenderPassEncoderRelease(trans_clear_pass)
-}
-
-render_main_pass :: proc(command_encoder: wgpu.CommandEncoder, cameras: []Camera_Draw, solid_passes, trans_passes: []Pass, target: Render_Target_Draw, draw_solid, draw_trans: bool) {
-    //start with a fill pass for each camera marked 'fill'
-    //(this is in a separate loop because cameras may have overlapping viewports)
-    camera_fill_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-        label = "camera_fill",
-        colorAttachmentCount = 1,
-        colorAttachments = &wgpu.RenderPassColorAttachment{
-            view = target.msaa,
-            resolveTarget = target.render_view,
-            loadOp = .Load,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-        },
-    })
-    wgpu.RenderPassEncoderSetPipeline(camera_fill_pass, ren.camera_fill_pipeline)
-    for i in target.cameras {
-        camera := cameras[i]
-        if !camera.fill do continue
-        bind_camera(camera_fill_pass, 0, camera)
-        bind_camera_bg(camera_fill_pass, 1, camera)
-        //wgpu.RenderPassEncoderSetBindGroup(camera_fill_pass, 0, camera.bind_group)
-        //x, y, w, h := expand_values(camera.viewport)
-        //wgpu.RenderPassEncoderSetViewport(camera_fill_pass, x, y, w, h, 0, 1)
-        //wgpu.RenderPassEncoderSetScissorRect(camera_fill_pass, u32(x), u32(y), u32(w), u32(h))
-        wgpu.RenderPassEncoderDraw(camera_fill_pass, 3, 1, 0, 0)
-    }
-    wgpu.RenderPassEncoderEnd(camera_fill_pass)
-    wgpu.RenderPassEncoderRelease(camera_fill_pass)
-
-    pipelines: Pipelines
-
-    for i in target.cameras {
-
-        camera := cameras[i]
-
-        //perform solid pass
-        if draw_solid {
-            render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-                label = "solid",
-                colorAttachmentCount = 1,
-                colorAttachments = &wgpu.RenderPassColorAttachment{
-                    view = target.msaa,
-                    resolveTarget = target.render_view,
-                    loadOp = .Load,
-                    storeOp = .Store,
-                    depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-                },
-                depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-                    view = target.depth,
-                    depthLoadOp = .Load,
-                    depthStoreOp = .Store,
-                    stencilLoadOp = .Load,
-                    stencilStoreOp = .Store,
-                },
-            })
-            bind_camera(render_pass, 0, camera)
-            bind_skeletons(render_pass, 2)
-            bind_lights(render_pass, 3, u32(i))
-            pipelines.main = ren.solid_pipelines
-            pipelines.lines = ren.solid_lines_pipeline
-            pipelines.points = ren.solid_points_pipeline
-            execute_draw_calls(render_pass, solid_passes[i].draw_calls[:], pipelines)
-            wgpu.RenderPassEncoderEnd(render_pass)
-            wgpu.RenderPassEncoderRelease(render_pass)
-        }
-
-        //then perform trans pass
-        if draw_trans {
-            trans_color_attachments := []wgpu.RenderPassColorAttachment{
-                //accum
-                {
-                    view = target.accum,
-                    resolveTarget = target.accum_resolve,
-                    loadOp = .Load,
-                    storeOp = .Store,
-                    depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-                },
-                //revealage
-                {
-                    view = target.revealage,
-                    resolveTarget = target.revealage_resolve,
-                    loadOp = .Load,
-                    storeOp = .Store,
-                    depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-                },
-            }
-            render_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-                label = "trans",
-                colorAttachmentCount = len(trans_color_attachments),
-                colorAttachments = raw_data(trans_color_attachments),
-                depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-                    view = target.depth,
-                    depthLoadOp = .Load,
-                    depthStoreOp = .Store, //remember to disable depth-store for transparent.
-                    stencilLoadOp = .Load,
-                    stencilStoreOp = .Store,
-                },
-            })
-            bind_camera(render_pass, 0, camera)
-            bind_skeletons(render_pass, 2)
-            bind_lights(render_pass, 3, u32(i))
-            pipelines.main = ren.trans_pipelines
-            pipelines.lines = ren.trans_lines_pipeline
-            pipelines.points = ren.trans_points_pipeline
-            execute_draw_calls(render_pass, trans_passes[i].draw_calls[:], pipelines)
-            wgpu.RenderPassEncoderEnd(render_pass)
-            wgpu.RenderPassEncoderRelease(render_pass)
-        }
-    }
-
-    //finally, execute the OIT composite pass for the output
-    if draw_trans {
-        oit_composite_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-            label = "OIT composite",
-            colorAttachmentCount = 1,
-            colorAttachments = &wgpu.RenderPassColorAttachment{
-                view = target.msaa,
-                resolveTarget = target.render_view,
-                loadOp = .Load,
-                storeOp = .Store,
-                depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            },
-        })
-        wgpu.RenderPassEncoderSetPipeline(oit_composite_pass, ren.oit_composite_pipeline)
-        wgpu.RenderPassEncoderSetBindGroup(oit_composite_pass, 0, target.oit_composite_bind_group)
-        wgpu.RenderPassEncoderDraw(oit_composite_pass, 3, 1, 0, 0)
-        wgpu.RenderPassEncoderEnd(oit_composite_pass)
-        wgpu.RenderPassEncoderRelease(oit_composite_pass)
-    }
-    
-}
 
 @(export)
 render_frame :: proc() {
@@ -1522,143 +474,14 @@ render_frame :: proc() {
         wgpu.SurfacePresent(ren.surface)
     }
 
-    //first things first, begin with a simple clear pass
-    clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-        label = "clear",
-        colorAttachmentCount = 1,
-        colorAttachments = &wgpu.RenderPassColorAttachment{
-            view = ren.msaa_view,
-            resolveTarget = screen,
-            loadOp = .Clear,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = {0, 0, 0, 1},
-        },
-        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-            view = ren.depth_buffer.view,
-            depthLoadOp = .Clear,
-            depthStoreOp = .Store,
-            depthClearValue = 1.0,
-            stencilLoadOp = .Clear,
-            stencilStoreOp = .Store,
-            stencilClearValue = 1.0,
-        },
-    })
-    wgpu.RenderPassEncoderEnd(clear_pass)
-    wgpu.RenderPassEncoderRelease(clear_pass)
-
-    //then execute a clear pass for the main transparent targets as well...
-    trans_clear_attachments := []wgpu.RenderPassColorAttachment{
-        //accum
-        {
-            view = ren.accum.view,
-            resolveTarget = ren.accum_resolve.view,
-            loadOp = .Clear,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = {0, 0, 0, 0},
-        },
-        //revealage
-        {
-            view = ren.revealage.view,
-            resolveTarget = ren.revealage_resolve.view,
-            loadOp = .Clear,
-            storeOp = .Store,
-            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
-            clearValue = {1, 0, 0, 0},
-        },
-    }
-    trans_clear_pass := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
-        label = "trans_clear",
-        colorAttachmentCount = len(trans_clear_attachments),
-        colorAttachments = raw_data(trans_clear_attachments),
-        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
-            view = ren.depth_buffer.view,
-            depthLoadOp = .Load,
-            depthStoreOp = .Store,
-            stencilLoadOp = .Load,
-            stencilStoreOp = .Store,
-        },
-    })
-    wgpu.RenderPassEncoderEnd(trans_clear_pass)
-    wgpu.RenderPassEncoderRelease(trans_clear_pass)
-
-    //if no cameras we can return early and skip everything
-    if len(frame.cameras) == 0 do return
-
-    //master record of mesh draws this frame
-    batches := flatten_action(frame)
-    defer delete(batches)
-
-    //gather up them bones (global data)
-    write_skeletons(batches)
-
-    //allocate cubemaps
-    rebind := realloc_cubemaps(command_encoder, frame.max_cubemap_slot+1)
-    assign_cubemaps(batches)
-
-    //schedule cubemap captures...
-    calculate_environment_probes(frame.environment_probes[:])
-
-    //then gather up all lights
-    lights := calculate_lights(frame.lights[:], frame.cameras[:], frame.scene_extents, rebind)
-    defer delete_lights(lights)
-
-    //batch all the cameras into one...
-    write_camera_buffer(lights.shadow_cameras[:], frame.cameras[:])
-
-    //make sure to upload + offset lights per-camera.
-    shadow_offsets := shadow_offsets(lights, frame.cameras[:])
-    write_light_buffers(lights, frame.cameras[:], shadow_offsets)
-
-    //now compute all instance data for all passes (shadow maps + user RTT + final screen passes)
-    passes := compute_passes(batches, frame.cameras[:], lights.shadow_cameras)
-    defer delete_passes(passes)
-
-    //now on to actual drawing!
-
-    //go through lights & render shadow maps...
-    render_shadow_maps(command_encoder, passes, lights.shadow_cameras)
-
-    //now actually render the main passes
-
-    //get number of draw calls, in case we need to skip a pass
-    draw_solid: bool = false
-    for pass in passes.solid_main {
-        if len(pass.draw_calls) > 0 {
-            draw_solid = true
-            break
-        }
-    }
-    draw_trans: bool = false
-    for pass in passes.trans_main {
-        if len(pass.draw_calls) > 0 {
-            draw_trans = true
-            break
-        }
-    }
-
-    //first render environment probes
-    for target in frame.environment_probe_captures {
-        target := Render_Target_Draw(target)
-        clear_render_target(command_encoder, target)
-        render_main_pass(command_encoder, frame.cameras[:], passes.solid_main, passes.trans_main, target, draw_solid, draw_trans)
-    }
-    copy_cubemaps(command_encoder)
-    for target in frame.environment_probe_captures {
-        render_mips(command_encoder, target.mipmapper)
-    }
-
-    //then render to custom render targets
-    for hash, target in frame.render_targets {
-        clear_render_target(command_encoder, target)
-        render_main_pass(command_encoder, frame.cameras[:], passes.solid_main, passes.trans_main, target, draw_solid, draw_trans)
-        render_mips(command_encoder, target.mipmapper)
-    }
-
-    //then finally render to screen (already cleared above)...
-    set_screen_target(&frame, screen)
-    render_main_pass(command_encoder, frame.cameras[:], passes.solid_main, passes.trans_main, frame.screen_target, draw_solid, draw_trans)
+    sort_batches()
+    add_screen_pass(screen)
+    cull_instances()
+    write_instance_buffers()
+    write_camera_buffer()
+    write_light_buffers()
+    write_instance_ids()
+    draw_main_pass(command_encoder, f.screen)
 
     //render the UI on top of everything else
     render_ui(screen, command_encoder)

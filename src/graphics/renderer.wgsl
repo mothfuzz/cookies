@@ -2,12 +2,20 @@ struct Camera {
     view: mat4x4<f32>,
     inv_view: mat4x4<f32>,
     projection: mat4x4<f32>,
+    viewproj: mat4x4<f32>,
     inv_viewproj: mat4x4<f32>,
+    frustum_planes: array<vec4<f32>, 6>,
     color: vec4<f32>, //rgb + exposure
     fog_distance: vec2<f32>, //fog onset + render distance
+    layer_mask: vec2<u32>,
+    cascade_splits: vec4<f32>,
+    cascade_offset: u32,
+    cascade_count: u32,
+    point_count: u32,
+    spot_count: u32,
+    light_offset: u32,
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
-
 
 @group(1) @binding(0) var smp: sampler;
 @group(1) @binding(1) var base_color: texture_2d<f32>;
@@ -76,16 +84,22 @@ struct Vertex {
     @location(4) color: vec4<f32>,
     @location(5) bones: vec4<u32>,
     @location(6) weights: vec4<f32>,
-    @location(7) modelview_0: vec4<f32>,
-    @location(8) modelview_1: vec4<f32>,
-    @location(9) modelview_2: vec4<f32>,
-    @location(10) modelview_3: vec4<f32>,
-    @location(11) clip_rect: vec4<f32>,
-    @location(12) base_color_tint: vec4<f32>,
-    @location(13) pbr_tint: vec4<f32>, //ambient, metallic, roughness
-    @location(14) emissive_tint: vec4<f32>, //rgb
-    @location(15) indices: vec4<i32>, //the last one we have... use it wisely
+    @location(7) instance: u32,
 }
+
+struct Instance {
+    model: mat4x4<f32>,
+    clip_rect: vec4<f32>,
+    base_color_mul: vec4<f32>,
+    base_color_add: vec4<f32>,
+    pbr_mul: vec3<f32>,      skeleton_offset: i32,
+    pbr_add: vec3<f32>,      probe_a: i32,
+    emissive_mul: vec3<f32>, probe_b: i32,
+    emissive_add: vec3<f32>, flags: u32,
+}
+const INSTANCE_BILLBOARD: u32 = 1;
+const INSTANCE_UNLIT: u32 = 2;
+@group(2) @binding(0) var<storage, read> instances: array<Instance>;
 
 struct VSOut {
     @builtin(position) out_position: vec4<f32>,
@@ -94,10 +108,7 @@ struct VSOut {
     @location(2) tangent: vec4<f32>,
     @location(3) @interpolate(perspective) texcoord: vec2<f32>,
     @location(4) color: vec4<f32>,
-    @location(5) base_color_tint: vec4<f32>,
-    @location(6) pbr_tint: vec4<f32>,
-    @location(7) emissive_tint: vec4<f32>,
-    @location(8) @interpolate(flat) indices: vec4<i32>,
+    @location(5) @interpolate(flat) instance: u32,
 }
 
 fn ident() -> mat4x4<f32> {
@@ -109,25 +120,42 @@ fn ident() -> mat4x4<f32> {
     );
 }
 
-@group(2) @binding(0) var<storage, read> skeletons: array<mat4x4<f32>>;
-//@group(2) @binding(1) var<uniform> skeleton_len: u32;
-fn calculate_bones(vertex: Vertex, instance_index: u32) -> mat4x4<f32> {
-    if(vertex.indices.x < 0) {
-        return ident();
-    }
-    let skeleton_offset = u32(vertex.indices.x);
-    let bone1 = skeletons[skeleton_offset + vertex.bones.x] * vertex.weights.x;
-    let bone2 = skeletons[skeleton_offset + vertex.bones.y] * vertex.weights.y;
-    let bone3 = skeletons[skeleton_offset + vertex.bones.z] * vertex.weights.z;
-    let bone4 = skeletons[skeleton_offset + vertex.bones.w] * vertex.weights.w;
+@group(2) @binding(1) var<storage, read> skeletons: array<mat4x4<f32>>;
+fn calculate_bones(skeleton_offset: u32, bones: vec4<u32>, weights: vec4<f32>) -> mat4x4<f32> {
+    let bone1 = skeletons[skeleton_offset + bones.x] * weights.x;
+    let bone2 = skeletons[skeleton_offset + bones.y] * weights.y;
+    let bone3 = skeletons[skeleton_offset + bones.z] * weights.z;
+    let bone4 = skeletons[skeleton_offset + bones.w] * weights.w;
     return bone1 + bone2 + bone3 + bone4;
 }
 
 @vertex
 fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VSOut {
     var v: VSOut;
-    let modelview = mat4x4<f32>(vertex.modelview_0, vertex.modelview_1, vertex.modelview_2, vertex.modelview_3);
-    let bones = calculate_bones(vertex, instance_index);
+    let instance = instances[vertex.instance];
+    var modelview: mat4x4<f32>;
+    if((instance.flags & INSTANCE_BILLBOARD) == INSTANCE_BILLBOARD) {
+        //isolate untransformed rotation/scale
+        let rotation_scale = mat3x3<f32>(
+            instance.model[0].xyz,
+            instance.model[1].xyz,
+            instance.model[2].xyz,
+        );
+        //transform to the camera but keep only the transformed translation vector
+        let translation = (camera.view * instance.model)[3];
+        modelview = mat4x4<f32>(
+            vec4<f32>(rotation_scale[0], 0),
+            vec4<f32>(rotation_scale[1], 0),
+            vec4<f32>(rotation_scale[2], 0),
+            translation,
+        );
+    } else {
+        modelview = camera.view * instance.model;
+    }
+    var bones = ident();
+    if(instance.skeleton_offset != -1) {
+        bones = calculate_bones(u32(instance.skeleton_offset), vertex.bones, vertex.weights);
+    }
     v.position = modelview * bones * vec4<f32>(vertex.position, 1.0);
     let bones3 = mat3x3<f32>(bones[0].xyz, bones[1].xyz, bones[2].xyz);
     let normal = bones3 * vertex.normal;
@@ -139,15 +167,14 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
         let v_tangent = normalize((modelview * vec4<f32>(normalize(tangent), 0.0)).xyz);
         v.tangent = vec4<f32>(v_tangent, vertex.tangent.w);
     }
-    v.out_position = camera.projection * v.position;
-    let tex_offset = vertex.clip_rect.xy;
-    let tex_factor = vertex.clip_rect.zw;
-    v.texcoord = vertex.texcoord*tex_factor+tex_offset;
     v.color = vertex.color;
-    v.base_color_tint = vertex.base_color_tint;
-    v.pbr_tint = vertex.pbr_tint;
-    v.emissive_tint = vertex.emissive_tint;
-    v.indices = vertex.indices;
+
+    let tex_offset = instance.clip_rect.xy;
+    let tex_factor = instance.clip_rect.zw;
+    
+    v.texcoord = vertex.texcoord*tex_factor+tex_offset;
+    v.out_position = camera.projection * v.position;
+    v.instance = vertex.instance;
     return v;
 }
 
@@ -447,12 +474,15 @@ fn box_project(r: vec3<f32>, position: vec3<f32>, box: EnvironmentProbeBox) -> v
 override TOPOLOGY: u32 = 0; // 0 = triangles, 1 = lines, 2 = points
 
 fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -> vec4<f32> {
+
+    let instance = instances[in.instance];
+    
     var final_color = in_color;
     var light = final_color.rgb;
 
     if(light_count.total > 0) {
 
-        let pbr = textureSample(pbr, smp, in.texcoord) * in.pbr_tint;
+        let pbr = textureSample(pbr, smp, in.texcoord).rgb * instance.pbr_mul + instance.pbr_add;
         let ambient_occlusion = pbr.r;
         let roughness = pbr.g;
         let metallic = pbr.b;
@@ -492,20 +522,21 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
             light_input = LightInput(in.position, in.normal, true, n, t, v, final_color, roughness, metallic);
         }
 
-        if(in.indices[1] != -1) {
+        let probe_a = instance.probe_a;
+        if(probe_a != -1) {
             let p_world = (camera.inv_view * vec4<f32>(in.position.xyz, 1.0)).xyz;
             let n_world = normalize((camera.inv_view * vec4<f32>(n, 0.0)).xyz);
             let v_world = normalize((camera.inv_view * vec4<f32>(v, 0.0)).xyz);
             let r = reflect(-v_world, n_world);
-            let box = environment_probe_boxes[in.indices[1]];
+            let box = environment_probe_boxes[probe_a];
             //need to flip Y because cubemaps were captured with negative-y-up
             let r_env = box_project(r, p_world, box) * vec3<f32>(1.0, -1.0, 1.0);
             let n_env = n_world * vec3<f32>(1.0, -1.0, 1.0);
 
             let max_mip = f32(textureNumLevels(environment_probes) - 1);
 
-            let env = textureSampleLevel(environment_probes, environment_probe_sampler, r_env, in.indices[1], roughness * max_mip);
-            let ambient = textureSampleLevel(environment_probes, environment_probe_sampler, n_env, in.indices[1], max_mip);
+            let env = textureSampleLevel(environment_probes, environment_probe_sampler, r_env, probe_a, roughness * max_mip);
+            let ambient = textureSampleLevel(environment_probes, environment_probe_sampler, n_env, probe_a, max_mip);
             light += calculate_environment_pbr(light_input, env.rgb, ambient.rgb);
         } else {
             light += calculate_environment_pbr(light_input, vec3<f32>(0.0), vec3<f32>(0.03));
@@ -546,16 +577,17 @@ fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
 
 @fragment
 fn solid_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
-    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint * in.color;
+    let instance = instances[in.instance];
+    let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
     var final_color = base_color;
     if final_color.a < 0.9 {
         discard;
     }
-    if(in.indices[3] == 0) {
-        final_color = apply_light_environment(in, final_color, front_facing);
-        let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
-        final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
-    }
+    //if(in.indices[3] == 0) {
+        //final_color = apply_light_environment(in, final_color, front_facing);
+        //let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
+        //final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
+    //}
     final_color = apply_fog(in.position, final_color);
 
     return final_color * camera.color.a;
@@ -569,16 +601,17 @@ struct TransOut {
 @fragment
 fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut {
     var out: TransOut;
-    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint * in.color;
+    let instance = instances[in.instance];
+    let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
     if !(base_color.a > 0 && base_color.a < 1) {
         discard;
     }
     var final_color = base_color;
-    if(in.indices[3] == 0) {
-        final_color = apply_light_environment(in, final_color, front_facing);
-        let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
-        final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
-    }
+    //if(in.indices[3] == 0) {
+        //final_color = apply_light_environment(in, final_color, front_facing);
+        //let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
+        //final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
+    //}
     final_color = apply_fog(in.position, final_color);
     //final_color.a = base_color.a;
     final_color = vec4<f32>(final_color.rgb * camera.color.a, final_color.a);
@@ -596,7 +629,8 @@ fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut 
 
 @fragment
 fn solid_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
-    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint * in.color;
+    let instance = instances[in.instance];
+    let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
     if base_color.a < 0.9 {
         discard;
     }
@@ -605,7 +639,8 @@ fn solid_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn trans_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
-    let base_color = textureSample(base_color, smp, in.texcoord) * in.base_color_tint * in.color;
+    let instance = instances[in.instance];
+    let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
     if !(base_color.a > 0 && base_color.a < 1) {
         discard;
     }

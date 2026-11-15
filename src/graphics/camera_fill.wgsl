@@ -2,9 +2,18 @@ struct Camera {
     view: mat4x4<f32>,
     inv_view: mat4x4<f32>,
     projection: mat4x4<f32>,
+    viewproj: mat4x4<f32>,
     inv_viewproj: mat4x4<f32>,
+    frustum_planes: array<vec4<f32>, 6>,
     color: vec4<f32>, //rgb + exposure
     fog_distance: vec2<f32>, //fog onset + render distance
+    layer_mask: vec2<u32>,
+    cascade_splits: vec4<f32>,
+    cascade_offset: u32,
+    cascade_count: u32,
+    point_count: u32,
+    spot_count: u32,
+    light_offset: u32,
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
 
@@ -23,7 +32,7 @@ const fullscreen_vertices = array<vec2<f32>, 3>(
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> CameraFillOut {
     var out: CameraFillOut;
     let xy = fullscreen_vertices[vertex_index];
-    out.position = vec4<f32>(xy, 0, 1);
+    out.position = vec4<f32>(xy, 1, 1);
     out.ndc = xy;
     return out;
 }

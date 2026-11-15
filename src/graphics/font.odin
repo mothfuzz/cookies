@@ -118,8 +118,10 @@ draw_text :: proc(text: string, font: Font, trans: transform.Transform = nil, co
             (quad.s1 - quad.s0)*FONT_RES,
             (quad.t1 - quad.t0)*FONT_RES,
         }
-        dynamic_material := Dynamic_Material{base_color_tint = color, pbr_tint=1, emissive_tint=1, clip_rect=clip_rect}
-        draw_mesh_internal(char_quad, font.material, trans * offset, dynamic_material, sprite, billboard, double_sided, unlit, nil, layers)
+        params := Default_Material_Params
+        params.base_color_mul = color
+        params.clip_rect = clip_rect
+        draw_mesh_internal(char_quad, font.material, trans * offset, params, sprite, billboard, double_sided, unlit, nil, layers)
     }
 
 }
