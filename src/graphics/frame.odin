@@ -316,8 +316,7 @@ cull_instances :: proc() {
             if camera.layer_mask & bin.layer_mask == 0 do continue
             if !sphere_in_frustum(camera, bin.center, bin.radius) do continue
             if !bounds_in_frustum(camera, bin.center, bin.axes) do continue
-            b := f.batches[bin.batch]
-            ids[b.first_instance + counts[bin.batch]] = u32(id)
+            ids[f.batches[bin.batch].first_instance + counts[bin.batch]] = u32(id)
             counts[bin.batch] += 1
         }
         //compact per batch
