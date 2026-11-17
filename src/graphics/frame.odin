@@ -231,6 +231,7 @@ clear_frame :: proc() {
     clear(&f.cameras)
     clear(&f.rasters)
     clear(&f.passes)
+    clear(&f.pass_order)
     clear(&f.cam_order)
     clear(&f.pass_ids)
     f.last_target = 0
@@ -501,7 +502,7 @@ draw_main_pass :: proc(command_encoder: wgpu.CommandEncoder, pass: Main_Pass, fi
             stencilStoreOp = .Store,
         },
     })
-    draw_cameras(solid, .Main, .Opaque, first_cam, cam_count, 0, f.solid_end, true)
+    draw_cameras(solid, .Main, .Opaque, first_cam, cam_count, 0, f.solid_end)
     wgpu.RenderPassEncoderEnd(solid)
     wgpu.RenderPassEncoderRelease(solid)
 
@@ -538,7 +539,7 @@ draw_main_pass :: proc(command_encoder: wgpu.CommandEncoder, pass: Main_Pass, fi
             stencilStoreOp = .Store,
         },
     })
-    draw_cameras(trans, .Main, .Blended, first_cam, cam_count, f.trans_begin, len(f.batch_order), false)
+    draw_cameras(trans, .Main, .Blended, first_cam, cam_count, f.trans_begin, len(f.batch_order))
     wgpu.RenderPassEncoderEnd(trans)
     wgpu.RenderPassEncoderRelease(trans)
 
@@ -562,7 +563,7 @@ draw_main_pass :: proc(command_encoder: wgpu.CommandEncoder, pass: Main_Pass, fi
 }
 
 @(private)
-draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blend: Blend_Key, first_cam, cam_count, begin, end: int, fill: bool) {
+draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blend: Blend_Key, first_cam, cam_count, begin, end: int) {
     n := len(f.batches)
     //instance data survives fill pipeline switches, so can be bound once
     bind_instance_data(render_pass)
@@ -574,8 +575,8 @@ draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blen
         wgpu.RenderPassEncoderSetViewport(render_pass, **raster.viewport, 0, 1)
         bind_camera_data(render_pass, u32(cam))
 
-        //execute fill only for first pass drawn to this camera (handled by outer loop)
-        if fill && raster.bg_bind_group != nil {
+        //execute fill once for main/solid before other cameras
+        if stage == .Main && blend == .Opaque && raster.bg_bind_group != nil {
             wgpu.RenderPassEncoderSetPipeline(render_pass, ren.camera_fill_pipeline)
             wgpu.RenderPassEncoderSetBindGroup(render_pass, 1, raster.bg_bind_group)
             wgpu.RenderPassEncoderDraw(render_pass, 3, 1, 0, 0)
@@ -597,7 +598,7 @@ draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blen
                     case .Triangles_Front: primitive = .Triangles_Back
                 }
             }
-            pipeline := pipelines[.Main][blend][primitive]
+            pipeline := pipelines[stage][blend][primitive]
             //skip if feature not supported for this combo
             if pipeline == nil do continue 
 
