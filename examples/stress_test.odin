@@ -73,20 +73,21 @@ init :: proc() {
 tick :: proc() {
     //transform cubes
     for &cube in cubes {
-        trans := transform.local(&cube.trans)
-        transform.rotatex(trans, 0.01)
-        transform.rotatey(trans, 0.01)
-        transform.rotatez(trans, 0.01)
+        transform.rotate(&cube.trans, 0.01)
+        //transform.rotatex(&cube.trans, 0.01)
+        //transform.rotatey(&cube.trans, 0.01)
+        //transform.rotatez(&cube.trans, 0.01)
     }
 }
 
 draw :: proc(alpha, delta: f64) {
     graphics.draw_camera(cam)
-    graphics.draw_directional_light(light)
+    //graphics.draw_directional_light(light)
     for &cube in cubes {
         graphics.draw_mesh(cubes_draw.mesh, cubes_draw.material, cube.trans)
     }
     fps := fmt.tprintf("fps: %f", 1.0/delta)
+    //window.set_title(fps)
     graphics.ui_draw_text(fps, font, {-Width/2, +Height/2}, {1, 1, 1, 1})
 }
 
@@ -103,6 +104,7 @@ main :: proc() {
         context.allocator = mem.tracking_allocator(&track)
     }
 
+    engine.set_tick_rate(60)
     engine.boot(init, tick, draw, quit)
 
     when ODIN_OS != .JS {

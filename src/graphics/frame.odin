@@ -94,11 +94,6 @@ batch_key_less :: proc(a, b: Batch_Key) -> bool {
     return a.material < b.material
 }
 
-Shadow_Pass :: struct {
-    cam: int,
-    attachments: Shadow_Attachments,
-}
-
 /*
 can reduce to one BeginRenderPass if I bind all output attachments:
 - attach all three targets (msaa, accum, revealage) plus depth to one pass
@@ -108,11 +103,59 @@ can reduce to one BeginRenderPass if I bind all output attachments:
 
 should work for both main & shadow
 */
-Main_Pass :: struct {
+
+Pass :: struct {
     first_cam, cam_count: int,
+    kind: Pass_Kind,
+    source: Pass_Source,
+    stage: Pass_Stage,
+}
+
+Pass_Kind :: enum {
+    Shadow,
+    Capture,
+    Screen,
+}
+
+Pass_Source :: union {
+    Probe_Source,
+    Shadow_Source,
+    Screen_Source,
+}
+
+Probe_Source :: struct {
+    slot, face: int,
+}
+Shadow_Source :: struct {
+    layer: int,
+}
+Screen_Source :: struct{/*it's the swapchain...*/}
+
+
+Pass_Stage :: union #no_nil {
+    Shadow_Pass,
+    Capture_Pass,
+    Screen_Pass,
+}
+
+Shadow_Pass :: struct {
+    attachments: Shadow_Attachments,
+}
+
+Shadow_Attachments :: struct {
+    color, depth: wgpu.TextureView,
+}
+
+Main_Pass :: struct {
     //resolve target varies: user-RTT is owned, cubemaps slice the cubemaps texture, screen is swapchain
     resolve: wgpu.TextureView,
     attachments: Main_Attachments,
+}
+
+Main_Attachments :: struct {
+    msaa, depth: wgpu.TextureView,
+    accum, revealage: wgpu.TextureView,
+    oit_composite_bind_group: wgpu.BindGroup,
 }
 
 Capture_Pass :: struct {
@@ -126,15 +169,10 @@ Copy_Info :: struct {
     size: wgpu.Extent3D,
 }
 
-Shadow_Attachments :: struct {
-    color, depth: wgpu.TextureView,
+Screen_Pass :: struct {
+    using main: Main_Pass,
 }
 
-Main_Attachments :: struct {
-    msaa, depth: wgpu.TextureView,
-    accum, revealage: wgpu.TextureView,
-    oit_composite_bind_group: wgpu.BindGroup,
-}
 
 Draw_Indirect :: struct {
     first_instance: u32,
@@ -159,9 +197,17 @@ Frame :: struct {
     cameras: [dynamic]Camera_Uniforms, //buffer
     rasters: [dynamic]Camera_Raster,
 
-    shadows: [dynamic]Shadow_Pass,
-    captures: [dynamic]Capture_Pass,
-    screen: Main_Pass,
+    //need grouping info ala Batch-but-for-cameras
+    //order doesn't necessarily matter, as long as we can identify the 'batch'
+
+    passes: [dynamic]Pass,
+    pass_order: [dynamic]int,
+    pass_counts: [Pass_Kind]int,
+    pass_ranges: [Pass_Kind][2]int,
+    cam_order: [dynamic]int,
+    pass_ids: map[Render_Target_Hash]int,
+    last_target: Render_Target_Hash,
+    last_target_id: int,
     
     //action!
     instances: [dynamic]Instance_Uniforms, //buffer
@@ -184,8 +230,14 @@ f: Frame
 clear_frame :: proc() {
     clear(&f.cameras)
     clear(&f.rasters)
-    clear(&f.shadows)
-    clear(&f.captures)
+    clear(&f.passes)
+    clear(&f.cam_order)
+    clear(&f.pass_ids)
+    f.last_target = 0
+    f.last_target_id = 0
+    for k in Pass_Kind {
+        f.pass_counts[k] = 0
+    }
     clear(&f.instances)
     clear(&f.skeletons)
     clear(&f.instance_bins)
@@ -204,8 +256,10 @@ clear_frame :: proc() {
 delete_frame :: proc() {
     delete(f.cameras)
     delete(f.rasters)
-    delete(f.shadows)
-    delete(f.captures)
+    delete(f.passes)
+    delete(f.pass_order)
+    delete(f.cam_order)
+    delete(f.pass_ids)
     delete(f.instances)
     delete(f.skeletons)
     delete(f.instance_bins)
@@ -216,7 +270,6 @@ delete_frame :: proc() {
     delete(f.draws)
 }
 
-//once per frame: batches sorted by key, prefix-summed -> batch.first_instance = slot base
 sort_batches :: proc() {
     //sort batches
     resize(&f.batch_order, len(f.batches))
@@ -258,7 +311,7 @@ cull_instances :: proc() {
 
     for camera, c in f.cameras {
         slice.zero(counts)
-        for bin, id in f.instance_bins { //linear, submission order
+        for bin, id in f.instance_bins {
             if camera.layer_mask & bin.layer_mask == 0 do continue
             if !sphere_in_frustum(camera, bin.center, bin.radius) do continue
             if !bounds_in_frustum(camera, bin.center, bin.axes) do continue
@@ -266,7 +319,7 @@ cull_instances :: proc() {
             ids[b.first_instance + counts[bin.batch]] = u32(id)
             counts[bin.batch] += 1
         }
-        //compact: one memcpy per batch
+        //compact per batch
         for b, i in f.batch_order {
             n := counts[b]
             f.draws[c*len(f.batches) + i] = {u32(len(f.instance_ids)), n}
@@ -275,34 +328,140 @@ cull_instances :: proc() {
     }
 }
 
-//run first...
-add_screen_pass :: proc(swapchain: wgpu.TextureView) {
-    //f.screen.first_cam = 0
-    f.screen.cam_count = len(f.cameras)
-    f.screen.resolve = swapchain
-    f.screen.attachments = {
-        msaa = ren.main_textures.msaa.view,
-        depth = ren.main_textures.depth.view,
-        accum = ren.main_textures.accum.view,
-        revealage = ren.main_textures.revealage.view,
-        oit_composite_bind_group = ren.main_textures.oit_composite_bind_group,
+@(private)
+push_pass :: proc(kind: Pass_Kind, stage: Pass_Stage) -> (id: int) {
+    id = len(f.passes)
+    append(&f.passes, Pass{kind = kind, stage = stage})
+    f.pass_counts[kind] += 1
+    return
+}
+
+@(private)
+push_camera :: proc(pass: int, camera: Camera_Uniforms, raster: Camera_Raster) {
+    raster := raster
+    raster.pass = pass
+    append(&f.cameras, camera)
+    append(&f.rasters, raster)
+    f.passes[pass].cam_count += 1
+}
+
+@(private)
+user_pass :: proc(rt: Render_Target) -> int {
+    if rt.hash == f.last_target do return f.last_target_id
+    id, ok := f.pass_ids[rt.hash]
+    if !ok {
+        pass: Capture_Pass
+        pass.attachments = {
+            msaa = rt.main.msaa.view,
+            depth = rt.main.depth.view,
+            accum = rt.main.accum.view,
+            revealage = rt.main.revealage.view,
+            oit_composite_bind_group = rt.main.oit_composite_bind_group,
+        }
+        pass.resolve = rt.msaa_resolve.view
+        pass.copy_info.src = {
+            texture = rt.msaa_resolve.image,
+            aspect = .All,
+        }
+        pass.copy_info.dst = {
+            texture = rt.output.image,
+            aspect = .All,
+        }
+        pass.copy_info.size = {u32(rt.output.width), u32(rt.output.height), 1}
+        pass.mips = rt.mipmapper
+        id = push_pass(.Capture, pass)
+    }
+    f.last_target = rt.hash
+    f.last_target_id = id
+    return id
+}
+
+@(private)
+screen_pass :: proc() -> int {
+    id, ok := f.pass_ids[0]
+    if !ok {
+        pass: Screen_Pass
+        pass.attachments = {
+            msaa = ren.main_textures.msaa.view,
+            depth = ren.main_textures.depth.view,
+            accum = ren.main_textures.accum.view,
+            revealage = ren.main_textures.revealage.view,
+            oit_composite_bind_group = ren.main_textures.oit_composite_bind_group,
+        }
+        id = push_pass(.Screen, pass)
+    }
+    return id
+}
+
+//probe_pass
+//shadow_pass
+
+sort_passes :: proc() {
+    resize(&f.pass_order, len(f.passes))
+    pass_cursor: [Pass_Kind]int
+    start := 0
+    for k in Pass_Kind {
+        f.pass_ranges[k] = {start, start + f.pass_counts[k]}
+        pass_cursor[k] = start
+        start += f.pass_counts[k]
+    }
+    for p, i in f.passes {
+        f.pass_order[pass_cursor[p.kind]] = i
+        pass_cursor[p.kind] += 1
+    }
+    //slice.sort_by(f.pass_order[:], proc(a, b: u32) -> bool {
+        //return f.passes[a].kind < f.passes[b].kind
+    //})
+
+    //prefix_sum
+    running_total := 0
+    for p, i in f.pass_order {
+        pass := &f.passes[p]
+        pass.first_cam = running_total
+        running_total += pass.cam_count
+    }
+
+    cam_cursor := make([]int, len(f.passes), context.temp_allocator)
+    resize(&f.cam_order, len(f.cameras))
+    for cam, i in f.rasters {
+        p := &f.passes[cam.pass]
+        f.cam_order[p.first_cam + cam_cursor[cam.pass]] = i
+        cam_cursor[cam.pass] += 1
     }
 }
 
-resolve_capture :: proc(command_encoder: wgpu.CommandEncoder, p: Capture_Pass) {
-    if p.copy_info != {} {
-        src, dst, ext := **p.copy_info
+pass_range :: proc(k: Pass_Kind) -> []int {
+    range := f.pass_ranges[k]
+    return f.pass_order[range[0]:range[1]]
+}
+
+resolve_passes :: proc(swapchain: wgpu.TextureView) {
+    for &pass in f.passes {
+        switch src in pass.source {
+            case nil: //user-RTT, already resolved upon submission
+            case Probe_Source:
+            //get resolve from slot+face
+            case Shadow_Source:
+            //get resolve from layer
+            case Screen_Source:
+            stage := &pass.stage.(Screen_Pass)
+            stage.resolve = swapchain
+        }
+    }
+}
+
+resolve_capture :: proc(command_encoder: wgpu.CommandEncoder, pass: Capture_Pass) {
+    if pass.copy_info != {} {
+        src, dst, ext := **pass.copy_info
         wgpu.CommandEncoderCopyTextureToTexture(command_encoder, &src, &dst, &ext)
     }
-    if p.mips != nil {
-        render_mips(command_encoder, p.mips)
+    if pass.mips != nil {
+        render_mips(command_encoder, pass.mips)
     }
 }
 
 /*
 PRESENT LOOP:
-
-clear_targets()
 
 for p in f.shadows {
     draw_shadow_pass(p)
@@ -317,17 +476,17 @@ draw_main_pass(f.screen)
 */
 
 import "core:log"
-draw_main_pass :: proc(encoder: wgpu.CommandEncoder, p: Main_Pass) {
-    a := p.attachments
+draw_main_pass :: proc(command_encoder: wgpu.CommandEncoder, pass: Main_Pass, first_cam, cam_count: int) {
+    a := pass.attachments
     has_trans := f.trans_begin < len(f.batch_order)
 
-    //solid: Solid + Mixed batches
-    solid := wgpu.CommandEncoderBeginRenderPass(encoder, &{
+    //solid batches (and mixed)
+    solid := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
         label = "main solid",
         colorAttachmentCount = 1,
         colorAttachments = &wgpu.RenderPassColorAttachment{
             view = a.msaa,
-            resolveTarget = nil if has_trans else p.resolve,
+            resolveTarget = nil if has_trans else pass.resolve,
             loadOp = .Clear,
             storeOp = .Store,
             depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
@@ -335,42 +494,61 @@ draw_main_pass :: proc(encoder: wgpu.CommandEncoder, p: Main_Pass) {
         },
         depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
             view = a.depth,
-            depthLoadOp = .Clear, depthStoreOp = .Store, depthClearValue = 1,
-            stencilLoadOp = .Clear, stencilStoreOp = .Store, //required: format has stencil
+            depthLoadOp = .Clear,
+            depthStoreOp = .Store,
+            depthClearValue = 1,
+            stencilLoadOp = .Clear,
+            stencilStoreOp = .Store,
         },
     })
-    draw_cameras(solid, p, .Opaque, 0, f.solid_end, fill = true)
+    draw_cameras(solid, .Main, .Opaque, first_cam, cam_count, 0, f.solid_end, true)
     wgpu.RenderPassEncoderEnd(solid)
     wgpu.RenderPassEncoderRelease(solid)
 
     if !has_trans do return
 
-    //trans: Mixed + Trans batches, depth test only
+    //trans batches (and mixed), depth test only
     trans_attachments := []wgpu.RenderPassColorAttachment{
-        {view = a.accum,     loadOp = .Clear, storeOp = .Store, depthSlice = wgpu.DEPTH_SLICE_UNDEFINED, clearValue = {0, 0, 0, 0}},
-        {view = a.revealage, loadOp = .Clear, storeOp = .Store, depthSlice = wgpu.DEPTH_SLICE_UNDEFINED, clearValue = {1, 0, 0, 0}},
+        //accum
+        {
+            view = a.accum,
+            loadOp = .Clear,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            clearValue = {0, 0, 0, 0}
+        },
+        //revealage
+        {
+            view = a.revealage,
+            loadOp = .Clear,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            clearValue = {1, 0, 0, 0}
+        },
     }
-    trans := wgpu.CommandEncoderBeginRenderPass(encoder, &{
+    trans := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
         label = "main trans",
         colorAttachmentCount = len(trans_attachments),
         colorAttachments = raw_data(trans_attachments),
         depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
             view = a.depth,
-            depthLoadOp = .Load, depthStoreOp = .Store,
-            stencilLoadOp = .Load, stencilStoreOp = .Store,
+            depthLoadOp = .Load,
+            depthStoreOp = .Store,
+            stencilLoadOp = .Load,
+            stencilStoreOp = .Store,
         },
     })
-    draw_cameras(trans, p, .Blended, f.trans_begin, len(f.batch_order), fill = false)
+    draw_cameras(trans, .Main, .Blended, first_cam, cam_count, f.trans_begin, len(f.batch_order), false)
     wgpu.RenderPassEncoderEnd(trans)
     wgpu.RenderPassEncoderRelease(trans)
 
-    //composite onto msaa, then resolve
-    composite := wgpu.CommandEncoderBeginRenderPass(encoder, &{
+    //composite pass
+    composite := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
         label = "main composite",
         colorAttachmentCount = 1,
         colorAttachments = &wgpu.RenderPassColorAttachment{
             view = a.msaa,
-            resolveTarget = p.resolve,
+            resolveTarget = pass.resolve,
             loadOp = .Load,
             storeOp = .Store,
             depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
@@ -384,59 +562,64 @@ draw_main_pass :: proc(encoder: wgpu.CommandEncoder, p: Main_Pass) {
 }
 
 @(private)
-draw_cameras :: proc(pass: wgpu.RenderPassEncoder, p: Main_Pass, blend: Blend_Key, begin, end: int, fill: bool) {
+draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blend: Blend_Key, first_cam, cam_count, begin, end: int, fill: bool) {
     n := len(f.batches)
-    wgpu.RenderPassEncoderSetVertexBuffer(pass, 7, instance_id_buffer.buffer, 0, instance_id_buffer.capacity)
-    bind_instance_data(pass) //group 2: survives fill pipeline switches (see below)
+    //instance data survives fill pipeline switches, so can be bound once
+    bind_instance_data(render_pass)
+    bind_instance_ids(render_pass)
 
-    for c in p.first_cam ..< p.first_cam + p.cam_count {
-        r := f.rasters[c]
-        vp := r.viewport
-        wgpu.RenderPassEncoderSetViewport(pass, vp.x, vp.y, vp.z, vp.w, 0, 1)
-        bind_camera_data(pass, u32(c))
+    for c in first_cam ..< first_cam + cam_count {
+        cam := f.cam_order[c]
+        raster := f.rasters[cam]
+        wgpu.RenderPassEncoderSetViewport(render_pass, **raster.viewport, 0, 1)
+        bind_camera_data(render_pass, u32(cam))
 
-        if fill && r.bg_bind_group != nil {
-            wgpu.RenderPassEncoderSetPipeline(pass, ren.camera_fill_pipeline)
-            wgpu.RenderPassEncoderSetBindGroup(pass, 1, r.bg_bind_group)
-            wgpu.RenderPassEncoderDraw(pass, 3, 1, 0, 0)
+        //execute fill only for first pass drawn to this camera (handled by outer loop)
+        if fill && raster.bg_bind_group != nil {
+            wgpu.RenderPassEncoderSetPipeline(render_pass, ren.camera_fill_pipeline)
+            wgpu.RenderPassEncoderSetBindGroup(render_pass, 1, raster.bg_bind_group)
+            wgpu.RenderPassEncoderDraw(render_pass, 3, 1, 0, 0)
         }
 
-        //reset per camera: the fill replaced group 1, and the pipeline changed
         prev_pipeline: wgpu.RenderPipeline
         prev_mesh, prev_material := ~Mesh_Hash(0), ~Material_Hash(0)
 
-        for i in begin ..< end {
-            d := f.draws[c*n + i]
-            if d.instance_count == 0 do continue
-            b := &f.batches[f.batch_order[i]]
+        for i in begin..<end {
+            draw := f.draws[cam*n + i]
+            if draw.instance_count == 0 do continue
+            batch := &f.batches[f.batch_order[i]]
 
-            prim := b.key.primitive
-            if r.flip {
-                #partial switch prim {
-                case .Triangles_Back:  prim = .Triangles_Front
-                case .Triangles_Front: prim = .Triangles_Back
+            //select pipeline by stage/blend/primitive
+            primitive := batch.key.primitive
+            if raster.flip {
+                #partial switch primitive {
+                    case .Triangles_Back: primitive = .Triangles_Front
+                    case .Triangles_Front: primitive = .Triangles_Back
                 }
             }
-            pipeline := pipelines[.Main][blend][prim]
-            if pipeline == nil do continue //feature not supported in this stage/blend
+            pipeline := pipelines[.Main][blend][primitive]
+            //skip if feature not supported for this combo
+            if pipeline == nil do continue 
 
+            //minimize state changes by caching
             if pipeline != prev_pipeline {
-                wgpu.RenderPassEncoderSetPipeline(pass, pipeline)
+                wgpu.RenderPassEncoderSetPipeline(render_pass, pipeline)
                 prev_pipeline = pipeline
             }
-            if b.key.mesh != prev_mesh {
-                bind_mesh(pass, b.mesh)
-                prev_mesh = b.key.mesh
+            if batch.key.mesh != prev_mesh {
+                bind_mesh(render_pass, batch.mesh)
+                prev_mesh = batch.key.mesh
             }
-            if b.key.material != prev_material {
-                bind_material(pass, b.material.bind_group)
-                prev_material = b.key.material
+            if batch.key.material != prev_material {
+                bind_material(render_pass, batch.material.bind_group)
+                prev_material = batch.key.material
             }
 
-            if b.mesh.indices != nil {
-                wgpu.RenderPassEncoderDrawIndexed(pass, b.mesh.size, d.instance_count, 0, 0, d.first_instance)
+            //draw!
+            if batch.mesh.indices != nil {
+                wgpu.RenderPassEncoderDrawIndexed(render_pass, batch.mesh.size, draw.instance_count, 0, 0, draw.first_instance)
             } else {
-                wgpu.RenderPassEncoderDraw(pass, b.mesh.size, d.instance_count, 0, d.first_instance)
+                wgpu.RenderPassEncoderDraw(render_pass, batch.mesh.size, draw.instance_count, 0, draw.first_instance)
             }
         }
     }

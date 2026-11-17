@@ -59,6 +59,7 @@ Camera_Uniforms :: struct #align(256) {
 }
 
 Camera_Raster :: struct {
+    pass: int,
     viewport: [4]f32,
     bg_bind_group: wgpu.BindGroup, //nil = no fill
     flip: bool, //swap triangle cull mode back/front

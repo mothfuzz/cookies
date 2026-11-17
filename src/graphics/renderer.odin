@@ -475,13 +475,32 @@ render_frame :: proc() {
     }
 
     sort_batches()
-    add_screen_pass(screen)
+    sort_passes()
+    resolve_passes(screen)
     cull_instances()
     write_instance_buffers()
     write_camera_buffer()
     write_light_buffers()
     write_instance_ids()
-    draw_main_pass(command_encoder, f.screen)
+
+    for p in pass_range(.Shadow) {
+        //pass := f.passes[p]
+        //draw_shadow_pass(command_encoder, pass.stage.(Shadow_Pass), pass.first_cam, pass.cam_count)
+        //or just pass.first_cam
+    }
+    CAPTURE_BOUNCE :: 1
+    for _ in 0..<CAPTURE_BOUNCE {
+        for p in pass_range(.Capture) {
+            pass := f.passes[p]
+            stage := pass.stage.(Capture_Pass)
+            draw_main_pass(command_encoder, stage, pass.first_cam, pass.cam_count)
+            resolve_capture(command_encoder, stage)
+        }
+    }
+    for p in pass_range(.Screen) {
+        pass := f.passes[p]
+        draw_main_pass(command_encoder, pass.stage.(Screen_Pass), pass.first_cam, pass.cam_count)
+    }
 
     //render the UI on top of everything else
     render_ui(screen, command_encoder)

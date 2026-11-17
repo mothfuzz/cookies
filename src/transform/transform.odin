@@ -308,14 +308,26 @@ local_transform :: proc(t: ^Transform) -> ^TRS {
 local :: proc{local_node, local_trs, local_trs_smoothed, local_transform}
 
 compute_trs :: proc(trs: TRS) -> matrix[4,4]f32 {
-    return linalg.matrix4_from_trs_f32(**trs)
+    //return linalg.matrix4_from_trs_f32(**trs)
+    m := linalg.matrix4_from_quaternion(trs.rotation)
+    m[0] *= trs.scale.x
+    m[1] *= trs.scale.y
+    m[2] *= trs.scale.z
+    m[3] = {**trs.translation, 1}
+    return m
+}
+
+lerp_quat :: proc(a, b: quaternion128, alpha: f32) -> quaternion128 {
+    b := b
+    if linalg.dot(a, b) < 0.0 do b = -b
+    return linalg.normalize(linalg.lerp(a, b, alpha))
 }
 
 lerp_trs :: proc(a, b: TRS, alpha: f64) -> TRS {
     alpha := f32(alpha)
     return {
         translation = linalg.lerp(a.translation, b.translation, alpha),
-        rotation = linalg.quaternion_slerp(a.rotation, b.rotation, alpha),
+        rotation = lerp_quat(a.rotation, b.rotation, alpha),
         scale = linalg.lerp(a.scale, b.scale, alpha),
     }
 }

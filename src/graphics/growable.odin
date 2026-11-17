@@ -29,3 +29,8 @@ write_buffer :: proc(g: ^Growable_Buffer, data: []$T) -> (rebind: bool) {
     }
     return
 }
+
+Growable_Texture_Array :: struct {
+    texture: Texture,
+    layers: []wgpu.TextureView,
+}

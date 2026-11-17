@@ -78,8 +78,10 @@ tick :: proc(s: ^Sprites_Example) {
 }
 
 draw :: proc(s: ^Sprites_Example, alpha, delta: f64) {
+    @(static) counter: f32 = 0.0
+    counter += 0.5 * f32(delta)
     graphics.draw_camera(s.camera, s.camera_trans)
-    graphics.draw_sprite(s.frasier_mat, s.frasier_trans) //draw a single frasier in the center of the screen
+    graphics.draw_sprite(s.frasier_mat, s.frasier_trans, graphics.mat_params(base_color_add=counter, alpha_mul=1-counter)) //draw a single frasier in the center of the screen
 }
 
 quit :: proc(s: ^Sprites_Example) {

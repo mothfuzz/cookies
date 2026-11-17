@@ -4,35 +4,18 @@ import "cookies:transform"
 import "core:math/linalg"
 
 @(export)
-draw_camera :: proc(camera: Camera, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    camera := camera
-    if layers != All_Layers {
-        camera.layer_mask = layers
-    }
-    cam, raster := calculate_camera(camera, transform.world(trans)) //compute once, don't defer
-    append(&f.cameras, cam)
-    append(&f.rasters, raster)
+draw_camera :: proc(camera: Camera, trans: transform.Transform = nil) {
+    push_camera(screen_pass(), calculate_camera(camera, transform.world(trans)))
 }
 
 @(export)
-draw_render_target :: proc(camera: Camera, target: Render_Target, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
-    target := target
-    camera, raster := calculate_camera(camera, transform.world(trans), {uint(target.output.width), uint(target.output.height)})
-    if layers != All_Layers {
-        camera.layer_mask = layers
-    }
-    //append(&f.render_targets, Render_Target_Draw{target, camera})
+draw_render_target :: proc(camera: Camera, target: Render_Target, trans: transform.Transform = nil) {
+    push_camera(user_pass(target), calculate_camera(camera, transform.world(trans), {uint(target.output.width), uint(target.output.height)}))
 }
 
 @(export)
-draw_environment_probe :: proc(probe: Environment_Probe, layers: Layer_Mask = All_Layers) {
+draw_environment_probe :: proc(probe: Environment_Probe) {
     //frame.max_cubemap_slot = max(frame.max_cubemap_slot, probe.cubemap_slot)
-
-    probe := probe
-    if layers != All_Layers {
-        probe.camera.layer_mask = layers
-    }
-
     //append(&f.environment_probes, probe) //meshes need all drawn cubemaps, not just ones with capture this frame
 }
 
