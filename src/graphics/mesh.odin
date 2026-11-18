@@ -433,6 +433,9 @@ Instance_Flags :: enum u32 {
 }
 
 //exact same as the struct in wgsl
+// TODO: slim this down by moving material params to their own buffer...
+// default material params get position 0 in the buffer, any instance with overrides gets a non-zero index
+// pass flags/probe_a/probe_b as varyings and the current buffer can be .Vertex and the new buffer can be .Fragment
 Instance_Uniforms :: struct {
     model: matrix[4,4]f32,
     clip_rect: [4]f32,

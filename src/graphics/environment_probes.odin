@@ -195,3 +195,20 @@ make_environment_probe :: proc(position: [3]f32, size: [3]f32 = 0, faces_per_fra
 delete_environment_probe :: proc(probe: Environment_Probe) {
     append(&cubemaps_free, probe.cubemap_slot)
 }
+
+@(private)
+schedule_faces :: proc(probe: Environment_Probe) -> (faces: bit_set[0..<6]) {
+    capture_state := &capture_states[probe.cubemap_slot]
+    n := probe.faces_per_frame
+    if n == 0 {
+        if capture_state.one_shot do return
+        //render all 6 at once
+        capture_state.one_shot = true
+        n = 6
+    }
+    for _ in 0..<min(n, 6) {
+        faces += {int(capture_state.current_face)}
+        capture_state.current_face = (capture_state.current_face + 1) % 6
+    }
+    return
+}

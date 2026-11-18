@@ -14,13 +14,13 @@ vertex -
 1. instances
 2. skeletons
 fragment - 
-1. also instances
+1. also instances (soon just material params)
 2. point lights
 3. directional lights
 4. spot lights
-5. light indices (later clusters)
-6. shadow transforms (spot + cascade in one binding)
-others...?
+5. probes
+6. cluster headers + cluster items (V * Cluster_Size(v) x vec4 + N x u32)
+7. shadow transforms (spot + cascade in one binding)
 */
 
 Bind_Groups :: enum u8 {
@@ -172,6 +172,115 @@ bind_instance_data :: proc(render_pass: wgpu.RenderPassEncoder) {
 
 // TODO: lighting
 
+lights_layout_entries := []wgpu.BindGroupLayoutEntry{
+    //point lights
+    wgpu.BindGroupLayoutEntry{
+        binding = 0,
+        visibility = {.Fragment},
+        buffer = {type=.ReadOnlyStorage},
+    },
+    //directional lights
+    wgpu.BindGroupLayoutEntry{
+        binding = 1,
+        visibility = {.Fragment},
+        buffer = {type=.ReadOnlyStorage},
+    },
+    //spot lights
+    wgpu.BindGroupLayoutEntry{
+        binding = 2,
+        visibility = {.Fragment},
+        buffer = {type=.ReadOnlyStorage},
+    },
+    //light count
+    wgpu.BindGroupLayoutEntry{
+        binding = 3,
+        visibility = {.Fragment},
+        buffer = {type=.Uniform},
+    },
+    //shadow depth sampler (must be Comparison for textureSampleCompare in WGSL)
+    wgpu.BindGroupLayoutEntry{
+        binding = 4,
+        visibility = {.Fragment},
+        sampler = {type = .Comparison}
+    },
+    //shadow color sampler
+    wgpu.BindGroupLayoutEntry{
+        binding = 5,
+        visibility = {.Fragment},
+        sampler = {type = .Filtering}
+    },
+    //point light depth shadows
+    wgpu.BindGroupLayoutEntry{
+        binding = 6,
+        visibility = {.Fragment},
+        texture = {sampleType = .Depth, viewDimension = .CubeArray, multisampled=false},
+    },
+    //point light color shadows
+    wgpu.BindGroupLayoutEntry{
+        binding = 7,
+        visibility = {.Fragment},
+        texture = {sampleType = .Float, viewDimension = .CubeArray, multisampled=false},
+    },
+    //directional light depth shadows
+    wgpu.BindGroupLayoutEntry{
+        binding = 8,
+        visibility = {.Fragment},
+        texture = {sampleType = .Depth, viewDimension = ._2DArray, multisampled=false},
+    },
+    //directional light color shadows
+    wgpu.BindGroupLayoutEntry{
+        binding = 9,
+        visibility = {.Fragment},
+        texture = {sampleType = .Float, viewDimension = ._2DArray, multisampled=false},
+    },
+    //spot light depth shadows
+    wgpu.BindGroupLayoutEntry{
+        binding = 10,
+        visibility = {.Fragment},
+        texture = {sampleType = .Depth, viewDimension = ._2DArray, multisampled=false},
+    },
+    //spot light color shadows
+    wgpu.BindGroupLayoutEntry{
+        binding = 11,
+        visibility = {.Fragment},
+        texture = {sampleType = .Float, viewDimension = ._2DArray, multisampled=false},
+    },
+    //cubemaps texture
+    wgpu.BindGroupLayoutEntry{
+        binding = 12,
+        visibility = {.Fragment},
+        texture = {sampleType = .Float, viewDimension = .CubeArray, multisampled=false},
+    },
+    //cubemaps sampler
+    wgpu.BindGroupLayoutEntry{
+        binding = 13,
+        visibility = {.Fragment},
+        sampler = {type = .Filtering}
+    },
+    //probes buffer
+    wgpu.BindGroupLayoutEntry{
+        binding = 14,
+        visibility = {.Fragment},
+        buffer = {type = .ReadOnlyStorage},
+    },
+    //clusters
+    wgpu.BindGroupLayoutEntry{
+        binding = 15,
+        visibility = {.Fragment},
+        buffer = {type = .ReadOnlyStorage},
+    },
+    //shadow transforms
+    wgpu.BindGroupLayoutEntry{
+        binding = 16,
+        visibility = {.Fragment},
+        buffer = {type = .ReadOnlyStorage},
+    }
+}
+lights_layout: wgpu.BindGroupLayout
+lights_bind_group: wgpu.BindGroup
+
+
+
 write_light_buffers :: proc() {
-    
+    //realloc, rebind...
 }

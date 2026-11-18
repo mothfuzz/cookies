@@ -131,7 +131,6 @@ Shadow_Source :: struct {
 }
 Screen_Source :: struct{/*it's the swapchain...*/}
 
-
 Pass_Stage :: union #no_nil {
     Shadow_Pass,
     Capture_Pass,
@@ -173,7 +172,6 @@ Screen_Pass :: struct {
     using main: Main_Pass,
 }
 
-
 Draw_Indirect :: struct {
     first_instance: u32,
     instance_count: u32,
@@ -181,7 +179,7 @@ Draw_Indirect :: struct {
 
 Frame :: struct {
     //lights
-    /*point_lights_unshadowed: [dynamic]Point_Light_Uniforms,
+    point_lights_unshadowed: [dynamic]Point_Light_Uniforms,
     point_lights_shadowed: [dynamic]Point_Light_Uniforms,
     spot_lights_unshadowed: [dynamic]Spot_Light_Uniforms,
     spot_lights_shadowed: [dynamic]Spot_Light_Uniforms,
@@ -189,16 +187,13 @@ Frame :: struct {
     directional_lights_shadowed: [dynamic]Directional_Light_Uniforms,
 
     spot_shadow_transforms: [dynamic]matrix[4,4]f32,
-    cascade_shadow_transforms: [dynamic]matrix[4,4]f32,*/
+    cascade_shadow_transforms: [dynamic]matrix[4,4]f32,
     
     scene_extents: [2][3]f32,
 
     //cameras
     cameras: [dynamic]Camera_Uniforms, //buffer
     rasters: [dynamic]Camera_Raster,
-
-    //need grouping info ala Batch-but-for-cameras
-    //order doesn't necessarily matter, as long as we can identify the 'batch'
 
     passes: [dynamic]Pass,
     pass_order: [dynamic]int,
@@ -208,6 +203,7 @@ Frame :: struct {
     pass_ids: map[Render_Target_Hash]int,
     last_target: Render_Target_Hash,
     last_target_id: int,
+    max_cubemap_slot: int,
     
     //action!
     instances: [dynamic]Instance_Uniforms, //buffer
@@ -236,6 +232,7 @@ clear_frame :: proc() {
     clear(&f.pass_ids)
     f.last_target = 0
     f.last_target_id = 0
+    f.max_cubemap_slot = 0
     for k in Pass_Kind {
         f.pass_counts[k] = 0
     }
@@ -329,9 +326,9 @@ cull_instances :: proc() {
 }
 
 @(private)
-push_pass :: proc(kind: Pass_Kind, stage: Pass_Stage) -> (id: int) {
+push_pass :: proc(kind: Pass_Kind, stage: Pass_Stage, source: Pass_Source = nil) -> (id: int) {
     id = len(f.passes)
-    append(&f.passes, Pass{kind = kind, stage = stage})
+    append(&f.passes, Pass{kind = kind, stage = stage, source = source})
     f.pass_counts[kind] += 1
     return
 }
@@ -344,6 +341,8 @@ push_camera :: proc(pass: int, camera: Camera_Uniforms, raster: Camera_Raster) {
     append(&f.rasters, raster)
     f.passes[pass].cam_count += 1
 }
+
+//shadow_pass
 
 @(private)
 user_pass :: proc(rt: Render_Target) -> int {
@@ -377,6 +376,12 @@ user_pass :: proc(rt: Render_Target) -> int {
 }
 
 @(private)
+probe_pass :: proc(slot, face: int) -> int {
+    //actual pass will be filled out from source during resolve
+    return push_pass(.Capture, Capture_Pass{}, Probe_Source{slot, face})
+}
+
+@(private)
 screen_pass :: proc() -> int {
     id, ok := f.pass_ids[0]
     if !ok {
@@ -388,13 +393,10 @@ screen_pass :: proc() -> int {
             revealage = ren.main_textures.revealage.view,
             oit_composite_bind_group = ren.main_textures.oit_composite_bind_group,
         }
-        id = push_pass(.Screen, pass)
+        id = push_pass(.Screen, pass, Screen_Source{})
     }
     return id
 }
-
-//probe_pass
-//shadow_pass
 
 sort_passes :: proc() {
     resize(&f.pass_order, len(f.passes))
@@ -459,21 +461,6 @@ resolve_capture :: proc(command_encoder: wgpu.CommandEncoder, pass: Capture_Pass
         render_mips(command_encoder, pass.mips)
     }
 }
-
-/*
-PRESENT LOOP:
-
-for p in f.shadows {
-    draw_shadow_pass(p)
-}
-for _ in 0..<CAPTURE_BOUNCES {
-    for p in f.captures {
-        draw_main_pass(p)
-        resolve_capture(p)
-    }
-}
-draw_main_pass(f.screen)
-*/
 
 import "core:log"
 draw_main_pass :: proc(command_encoder: wgpu.CommandEncoder, pass: Main_Pass, first_cam, cam_count: int) {
