@@ -67,14 +67,14 @@ struct LightCount {
 @group(3) @binding(10) var spot_light_shadow_depth: texture_depth_2d_array;
 @group(3) @binding(11) var spot_light_shadow_color: texture_2d_array<f32>;
 
-struct EnvironmentProbeBox {
+struct ReflectionProbeBox {
     center: vec4<f32>,
     mini: vec4<f32>,
     maxi: vec4<f32>,
 }
-@group(3) @binding(12) var environment_probes: texture_cube_array<f32>;
-@group(3) @binding(13) var environment_probe_sampler: sampler;
-@group(3) @binding(14) var<storage, read> environment_probe_boxes: array<EnvironmentProbeBox>;
+@group(3) @binding(12) var reflection_probes: texture_cube_array<f32>;
+@group(3) @binding(13) var reflection_probe_sampler: sampler;
+@group(3) @binding(14) var<storage, read> reflection_probe_boxes: array<ReflectionProbeBox>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -443,19 +443,19 @@ fn apply_spot_light(in: LightInput, light_index: u32) -> vec3<f32> {
     return vec3<f32>(0);
 }
 
-fn calculate_environment_pbr(in: LightInput, environment: vec3<f32>, ambient: vec3<f32>) -> vec3<f32> {
+fn calculate_reflection_pbr(in: LightInput, radiance: vec3<f32>, ambient: vec3<f32>) -> vec3<f32> {
     let cos_theta = max(dot(in.n, in.v), 0.0);
     var base_reflectance = vec3<f32>(0.04); //base dielectric reflectance
     base_reflectance = mix(base_reflectance, in.surface_color.rgb, in.metallic);
     let reflectance = fresnel_schlick_reflectance(cos_theta, base_reflectance);
 
-    let specular_color = reflectance * environment;
+    let specular_color = reflectance * radiance;
     let diffuse_color = (1.0 - in.metallic) * (vec3<f32>(1.0) - reflectance) * in.surface_color.rgb * ambient; //base diffuse ambient
 
     return diffuse_color * in.surface_color.a + specular_color;
 }
 
-fn box_project(r: vec3<f32>, position: vec3<f32>, box: EnvironmentProbeBox) -> vec3<f32> {
+fn box_project(r: vec3<f32>, position: vec3<f32>, box: ReflectionProbeBox) -> vec3<f32> {
     if (box.center.w < 0.5) {
         return r;
     }
@@ -528,18 +528,18 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
             let n_world = normalize((camera.inv_view * vec4<f32>(n, 0.0)).xyz);
             let v_world = normalize((camera.inv_view * vec4<f32>(v, 0.0)).xyz);
             let r = reflect(-v_world, n_world);
-            let box = environment_probe_boxes[probe_a];
+            let box = reflection_probe_boxes[probe_a];
             //need to flip Y because cubemaps were captured with negative-y-up
             let r_env = box_project(r, p_world, box) * vec3<f32>(1.0, -1.0, 1.0);
             let n_env = n_world * vec3<f32>(1.0, -1.0, 1.0);
 
-            let max_mip = f32(textureNumLevels(environment_probes) - 1);
+            let max_mip = f32(textureNumLevels(reflection_probes) - 1);
 
-            let env = textureSampleLevel(environment_probes, environment_probe_sampler, r_env, probe_a, roughness * max_mip);
-            let ambient = textureSampleLevel(environment_probes, environment_probe_sampler, n_env, probe_a, max_mip);
-            light += calculate_environment_pbr(light_input, env.rgb, ambient.rgb);
+            let radiance = textureSampleLevel(reflection_probes, reflection_probe_sampler, r_env, probe_a, roughness * max_mip);
+            let ambient = textureSampleLevel(reflection_probes, reflection_probe_sampler, n_env, probe_a, max_mip);
+            light += calculate_reflection_pbr(light_input, radiance.rgb, ambient.rgb);
         } else {
-            light += calculate_environment_pbr(light_input, vec3<f32>(0.0), vec3<f32>(0.03));
+            light += calculate_reflection_pbr(light_input, vec3<f32>(0.0), vec3<f32>(0.03));
         }
         light *= ambient_occlusion;
 

@@ -25,7 +25,7 @@ teapot_trans: transform.Transform
 light: graphics.Directional_Light
 light_trans: transform.Transform
 
-env: graphics.Environment_Probe
+ref: graphics.Reflection_Probe
 
 skybox: graphics.Texture
 
@@ -79,14 +79,14 @@ init :: proc() {
 
     teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
     fmt.println(teapot.models[0].primitives)
-    teapot.models[0].primitives[0].dyn.pbr_tint = {1, 0.2, 1, 1}
+    teapot.models[0].primitives[0].params.pbr_mul = {1, 0.2, 1}
     transform.init_node(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
 
     light = graphics.make_directional_light({0, -0.6, 0.4}, {0.4, 0.5, 1.0, 4})
     light_trans = transform.make()
 
-    env = graphics.make_environment_probe({0, 0.2, 0}, 1)
-    graphics.set_skybox(&env.camera, skybox)
+    ref = graphics.make_reflection_probe({0, 0.2, 0}, 1)
+    graphics.set_skybox(&ref.camera, skybox)
 }
 
 tick :: proc() {
@@ -121,11 +121,11 @@ tick :: proc() {
 
 draw :: proc(alpha, delta: f64) {
     graphics.draw_camera(cam, cam_trans)
-    graphics.draw_mesh(quad, quad_mat, metallic_tint=0, roughness_tint = 0.2)
-    graphics.draw_mesh(wall, stained_glass_mat, metallic_tint=0, double_sided=true)
+    graphics.draw_mesh(quad, quad_mat, material_params=graphics.mat_params(metallic_mul=0, roughness_mul = 0.2))
+    graphics.draw_mesh(wall, stained_glass_mat, material_params=graphics.mat_params(metallic_mul=0), double_sided=true)
     graphics.draw_scene(teapot)
-    graphics.draw_directional_light(light, light_trans)
-    graphics.draw_environment_probe(env)
+    //graphics.draw_directional_light(light, light_trans)
+    graphics.draw_reflection_probe(ref)
 }
 
 quit :: proc() {
@@ -136,7 +136,7 @@ quit :: proc() {
     graphics.delete_texture(stained_glass_tex)
     graphics.delete_mesh(wall)
     graphics.delete_scene(teapot)
-    graphics.delete_environment_probe(env)
+    graphics.delete_reflection_probe(ref)
     graphics.delete_texture(skybox)
 }
 

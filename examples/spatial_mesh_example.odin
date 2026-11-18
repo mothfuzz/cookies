@@ -23,7 +23,7 @@ Ball_Accel :: 0.01
 
 dir_light: graphics.Directional_Light
 spot_light: graphics.Spot_Light
-environment_probe: graphics.Environment_Probe
+reflection_probe: graphics.Reflection_Probe
 
 font: graphics.Font
 
@@ -47,8 +47,8 @@ init :: proc() {
 
     dir_light = graphics.make_directional_light({-0.1, -0.7, -0.2}, {1, 1, 1, 5})
     spot_light = graphics.make_spot_light({0, 2, 0}, {0, -1, 0}, 0.1, 0.15, {1, 1, 1, 5})
-    environment_probe = graphics.make_environment_probe({0, 0.75, 0}, faces_per_frame=0)
-    graphics.set_background_color(&environment_probe.camera, cam.color.rgb)
+    reflection_probe = graphics.make_reflection_probe({0, 0.75, 0}, faces_per_frame=0)
+    graphics.set_background_color(&reflection_probe.camera, cam.color.rgb)
 
 }
 
@@ -57,7 +57,7 @@ quit :: proc() {
     graphics.delete_scene(testmap)
     graphics.delete_scene(ball)
     graphics.delete_font(font)
-    graphics.delete_environment_probe(environment_probe)
+    graphics.delete_reflection_probe(reflection_probe)
 }
 
 import "core:math"
@@ -134,7 +134,7 @@ draw :: proc(alpha, delta: f64) {
     graphics.draw_camera(cam, transform.world(cam_trans, alpha))
     graphics.draw_directional_light(dir_light)
     graphics.draw_spot_light(spot_light)
-    graphics.draw_environment_probe(environment_probe)
+    graphics.draw_reflection_probe(reflection_probe)
     //graphics.draw_model(ball.models[0], transform.world(ball_trans, alpha))
     graphics.draw_mesh(ball.meshes[0], ball.materials[0], transform.world(ball_trans, alpha))
     graphics.draw_scene(testmap, alpha)

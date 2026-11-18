@@ -216,8 +216,6 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     material_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(material_layout_entries),
         entries = raw_data(material_layout_entries),
-        //one entry for each texture in the material
-        //binding for: base_color, normal, pbr, and environment (for now)
     })
     instances_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(instances_layout_entries),

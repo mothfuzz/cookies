@@ -14,9 +14,9 @@ draw_render_target :: proc(camera: Camera, target: Render_Target, trans: transfo
 }
 
 @(export)
-draw_environment_probe :: proc(probe: Environment_Probe, trans: transform.Transform = nil) {
+draw_reflection_probe :: proc(probe: Reflection_Probe, trans: transform.Transform = nil) {
     /* TODO:
-    don't keep environment_probe_boxes around.
+    don't keep reflection_probe_boxes around.
     have a list in Frame, like lights.
     transform probes via trans before append
     upload the list to the GPU post-submission
@@ -30,9 +30,9 @@ draw_environment_probe :: proc(probe: Environment_Probe, trans: transform.Transf
     for face in schedule_faces(probe) {
         cam := probe.camera
         look_at(&cam, probe.position, probe.position + dirs[face][0], dirs[face][1])
-        //push_camera(probe_pass(probe.cubemap_slot, face), calculate_camera(cam, 1, ENVIRONMENT_CUBEMAP_RES))
+        //push_camera(probe_pass(probe.cubemap_slot, face), calculate_camera(cam, 1, REFLECTION_CUBEMAP_RES))
     }
-    //append(&f.environment_probes, probe) //meshes need all drawn cubemaps, not just ones with capture this frame
+    //append(&f.reflection_probes, probe) //meshes need all drawn cubemaps, not just ones with capture this frame
 }
 
 
