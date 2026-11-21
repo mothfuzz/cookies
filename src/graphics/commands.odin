@@ -25,27 +25,39 @@ draw_reflection_probe :: proc(probe: Reflection_Probe, trans: transform.Transfor
     this makes probes work with lighting as part of the same general feature set
     do clustered!
     */
-    f.max_cubemap_slot = max(f.max_cubemap_slot, probe.cubemap_slot)
+    trans := transform.world(trans)
+    position := (trans * [4]f32{**probe.position, 1}).xyz
+    size := probe.size / 2 //half-extents
+    local: matrix[3,3]f32
+    local[0] = linalg.abs(trans[0].xyz)
+    local[1] = linalg.abs(trans[1].xyz)
+    local[2] = linalg.abs(trans[2].xyz)
+    size = local * size
+
+    cam := probe.camera
     dirs := cubemap_directions()
     for face in schedule_faces(probe) {
-        cam := probe.camera
-        look_at(&cam, probe.position, probe.position + dirs[face][0], dirs[face][1])
-        //push_camera(probe_pass(probe.cubemap_slot, face), calculate_camera(cam, 1, REFLECTION_CUBEMAP_RES))
+        set_draw_distance(&cam, size[dirs[face].major_axis])
+        look_at(&cam, position, position + dirs[face].forward, dirs[face].up)
+        //will uncomment once we have realloc/buffers set up
+        //push_camera(probe_pass(probe.cubemap_slot, face), calculate_camera(probe.camera, 1, REFLECTION_CUBEMAP_RES))
     }
     //append(&f.reflection_probes, probe) //meshes need all drawn cubemaps, not just ones with capture this frame
+    //will probably not be appending the whole probe, just slot+box uniforms
+    //resize buffer to cubemaps_len, iterate, boxes[slot] = probe.box
 }
 
 
 @(private)
 draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32,
                            material_params: Material_Params,
-                           sprite, billboard, double_sided, unlit: bool,
+                           pixel_scale, billboard, double_sided, unlit: bool,
                            bones: []matrix[4,4]f32, layers: Layer_Mask) {
 
     //mesh/material-local computations
     tex_size := [2]f32{material.base_color_tex.width, material.base_color_tex.height}
     uv := normalize_clip_rect(material_params.clip_rect, tex_size)
-    model := sprite ? scale_sprite(trans, uv, tex_size, billboard) : trans
+    model := pixel_scale ? scale_to_pixels(trans, uv, tex_size, billboard) : trans
     bounds := mesh_bounds(model, mesh.bounding_box, billboard)
     alpha_set := alpha_product(mesh.alpha, material.base_color_tex.alpha)
     alpha, visible := alpha_class(alpha_set, material_params.base_color_mul.a, material_params.base_color_add.a)
@@ -61,6 +73,8 @@ draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32
     inst.pbr_add = material_params.pbr_add
     inst.emissive_mul = material_params.emissive_mul
     inst.emissive_add = material_params.emissive_add
+    inst.probe_a = -1
+    inst.probe_b = -1
     if unlit do inst.flags += {.Unlit}
     if billboard do inst.flags += {.Billboard}
     if bones == nil {
@@ -130,18 +144,18 @@ draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32
 @(export)
 draw_mesh :: proc(mesh: Mesh, material: Material, trans: transform.Transform = nil,
                   material_params: Material_Params = Default_Material_Params,
-                  sprite: bool = false, billboard: bool = false, double_sided: bool = false, unlit: bool = false,
+                  pixel_scale: bool = false, billboard: bool = false, double_sided: bool = false, unlit: bool = false,
                   bones: []matrix[4,4]f32 = nil, layers: Layer_Mask = All_Layers) {
     trans := transform.world(trans)
-    draw_mesh_internal(mesh, material, trans, material_params, sprite, billboard, double_sided, unlit, bones, layers)
+    draw_mesh_internal(mesh, material, trans, material_params, pixel_scale, billboard, double_sided, unlit, bones, layers)
 }
 
 //sprites are just special kinds of meshes
 @(export)
 draw_sprite :: proc(material: Material, trans: transform.Transform = nil,
                     material_params: Material_Params = Default_Material_Params,
-                    billboard: bool = true, double_sided: bool = false, unlit: bool = false, layers: Layer_Mask = All_Layers) {
-    draw_mesh(quad_mesh, material, trans, material_params, true, billboard, double_sided, unlit, nil, layers)
+                    unlit: bool = false, layers: Layer_Mask = All_Layers) {
+    draw_mesh(quad_mesh, material, trans, material_params, true, true, false, unlit, nil, layers)
 }
 
 @(export)
@@ -181,3 +195,53 @@ draw_point :: proc(p: [3]f32, color: [4]f32 = 1, trans: transform.Transform = ni
 
     draw_mesh(point_mesh, white_material, transform.world(trans) * local, mat_params, unlit=true, layers=layers)
 }
+
+@(export)
+draw_point_light :: proc(pl: Point_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
+    plu: Point_Light_Uniforms
+    plu.color = pl.color
+    plu.layer_mask = layers
+    trans := transform.world(trans)
+    max_scale := linalg.sqrt(max(linalg.length2(trans[0].xyz), linalg.length2(trans[1].xyz), linalg.length2(trans[2].xyz)))
+    plu.position = (trans * [4]f32{**pl.position, 1}).xyz
+    plu.range = pl.range * max_scale
+    if pl.render_shadows {
+        append(&f.point_lights_shadowed, plu)
+    } else {
+        append(&f.point_lights_unshadowed, plu)
+    }
+}
+
+@(export)
+draw_directional_light :: proc(dl: Directional_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
+    dlu: Directional_Light_Uniforms
+    dlu.color = dl.color
+    dlu.layer_mask = layers
+    trans := transform.world(trans)
+    dlu.direction = trans * [4]f32{**dl.direction, 0}
+    if dl.render_shadows {
+        append(&f.directional_lights_shadowed, dlu)
+    } else {
+        append(&f.directional_lights_unshadowed, dlu)
+    }
+}
+
+@(export)
+draw_spot_light :: proc(sl: Spot_Light, trans: transform.Transform = nil, layers: Layer_Mask = All_Layers) {
+    slu: Spot_Light_Uniforms
+    slu.color = sl.color
+    slu.layer_mask = layers
+    trans := transform.world(trans)
+    max_scale := linalg.sqrt(max(linalg.length2(trans[0].xyz), linalg.length2(trans[1].xyz), linalg.length2(trans[2].xyz)))
+    slu.position = (trans * [4]f32{**sl.position, 1}).xyz
+    slu.direction = (trans * [4]f32{**sl.direction, 0}).xyz
+    slu.range = sl.range * max_scale
+    if sl.render_shadows {
+        append(&f.spot_lights_shadowed, slu)
+    } else {
+        append(&f.spot_lights_unshadowed, slu)
+    }
+}
+
+
+draw_light :: proc{draw_point_light, draw_directional_light, draw_spot_light}

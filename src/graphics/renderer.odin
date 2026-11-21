@@ -226,7 +226,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         entries = raw_data(lights_layout_entries),
     })
 
-    bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, instances_layout, /*lights_layout*/}
+    bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, instances_layout, lights_layout}
     ren.layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
         bindGroupLayoutCount = len(bind_group_layouts),
         bindGroupLayouts = raw_data(bind_group_layouts),
@@ -478,7 +478,7 @@ render_frame :: proc() {
     cull_instances()
     write_instance_buffers()
     write_camera_buffer()
-    write_light_buffers()
+    write_light_buffers(command_encoder)
     write_instance_ids()
 
     for p in pass_range(.Shadow) {

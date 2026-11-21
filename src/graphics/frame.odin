@@ -94,6 +94,13 @@ batch_key_less :: proc(a, b: Batch_Key) -> bool {
     return a.material < b.material
 }
 
+Cluster_Uniforms :: struct #packed {
+        offset: u32,
+        probe_count: u32,
+        point_count: u32,
+        spot_count: u32,
+}
+
 /*
 can reduce to one BeginRenderPass if I bind all output attachments:
 - attach all three targets (msaa, accum, revealage) plus depth to one pass
@@ -203,7 +210,6 @@ Frame :: struct {
     pass_ids: map[Render_Target_Hash]int,
     last_target: Render_Target_Hash,
     last_target_id: int,
-    max_cubemap_slot: int,
     
     //action!
     instances: [dynamic]Instance_Uniforms, //buffer
@@ -224,6 +230,14 @@ Frame :: struct {
 f: Frame
 
 clear_frame :: proc() {
+    clear(&f.point_lights_unshadowed)
+    clear(&f.point_lights_shadowed)
+    clear(&f.directional_lights_unshadowed)
+    clear(&f.directional_lights_shadowed)
+    clear(&f.spot_lights_unshadowed)
+    clear(&f.spot_lights_shadowed)
+    clear(&f.spot_shadow_transforms)
+    clear(&f.cascade_shadow_transforms)
     clear(&f.cameras)
     clear(&f.rasters)
     clear(&f.passes)
@@ -232,7 +246,6 @@ clear_frame :: proc() {
     clear(&f.pass_ids)
     f.last_target = 0
     f.last_target_id = 0
-    f.max_cubemap_slot = 0
     for k in Pass_Kind {
         f.pass_counts[k] = 0
     }
@@ -252,6 +265,14 @@ clear_frame :: proc() {
 }
 
 delete_frame :: proc() {
+    delete(f.point_lights_unshadowed)
+    delete(f.point_lights_shadowed)
+    delete(f.directional_lights_unshadowed)
+    delete(f.directional_lights_shadowed)
+    delete(f.spot_lights_unshadowed)
+    delete(f.spot_lights_shadowed)
+    delete(f.spot_shadow_transforms)
+    delete(f.cascade_shadow_transforms)
     delete(f.cameras)
     delete(f.rasters)
     delete(f.passes)
@@ -554,6 +575,7 @@ draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blen
     //instance data survives fill pipeline switches, so can be bound once
     bind_instance_data(render_pass)
     bind_instance_ids(render_pass)
+    bind_light_data(render_pass)
 
     for c in first_cam ..< first_cam + cam_count {
         cam := f.cam_order[c]

@@ -455,7 +455,7 @@ Instance_Bin_Uniforms :: struct {
 }
 
 @(private)
-scale_sprite :: proc(model: matrix[4,4]f32, uv: [4]f32, tex_size: [2]f32, billboard: bool) -> matrix[4,4]f32 {
+scale_to_pixels :: proc(model: matrix[4,4]f32, uv: [4]f32, tex_size: [2]f32, billboard: bool) -> matrix[4,4]f32 {
     size := tex_size * uv.zw
     model := model
     model[0] *= size.x

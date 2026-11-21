@@ -45,6 +45,7 @@ Growable_Texture_Array :: struct {
 
 grow_texture_array :: proc(g: ^Growable_Texture_Array, new_len: int, command_encoder: wgpu.CommandEncoder = nil) -> bool {
     new_cap := max(1, new_len)
+    mip_count := max(1, g.mip_count)
     if u32(new_cap) > g.capacity || g.texture == nil {
         prev_layers := 6*g.capacity if g.cubemap else g.capacity
         g.capacity = u32(new_cap) //g.capacity * 2
@@ -55,17 +56,19 @@ grow_texture_array :: proc(g: ^Growable_Texture_Array, new_len: int, command_enc
             depthOrArrayLayers = 6*g.capacity if g.cubemap else g.capacity
         }
 
+        usage := g.usage + {.TextureBinding}
+        if g.preserve do usage += {.CopySrc, .CopyDst}
         new_texture := wgpu.DeviceCreateTexture(ren.device, &{
-            usage = g.usage,
+            usage = usage,
             dimension = ._2D,
             size = extents,
             format = g.format,
-            mipLevelCount = g.mip_count,
+            mipLevelCount = mip_count,
             sampleCount = 1
         })
 
         if g.preserve && command_encoder != nil && g.texture != nil {
-            for i in 0..<g.mip_count {
+            for i in 0..<mip_count {
                 mip_extents := wgpu.Extent3D{
                     width = max(1, g.size.x >> i),
                     height = max(1, g.size.y >> i),
@@ -88,7 +91,7 @@ grow_texture_array :: proc(g: ^Growable_Texture_Array, new_len: int, command_enc
 
         g.texture_view = wgpu.TextureCreateView(g.texture, &{
             dimension = .CubeArray if g.cubemap else ._2DArray,
-            mipLevelCount = g.mip_count,
+            mipLevelCount = mip_count,
             arrayLayerCount = extents.depthOrArrayLayers,
         })
 
@@ -107,4 +110,14 @@ grow_texture_array :: proc(g: ^Growable_Texture_Array, new_len: int, command_enc
         return true
     }
     return false
+}
+
+delete_texture_array :: proc(g: Growable_Texture_Array) {
+    if g.texture != nil {
+        wgpu.TextureRelease(g.texture)
+    }
+    if g.texture_view != nil {
+        wgpu.TextureViewRelease(g.texture_view)
+    }
+    delete(g.layers)
 }

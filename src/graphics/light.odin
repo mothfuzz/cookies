@@ -62,15 +62,23 @@ Spot_Light :: struct {
 }
 Spot_Light_Uniforms :: struct #align(16) {
     color: [4]f32,
-    position: [3]f32, range: f32,
-    direction: [4]f32,
-    inner_angle, outer_angle: f32,
+    position: [3]f32,  inner_angle: f32,
+    direction: [3]f32, outer_angle: f32,
     layer_mask: Layer_Mask,
+    range: f32,
 }
 
 SPOT_SHADOW_RES :: #config(SPOT_SHADOW_RES, 1024)
 
 LIGHT_MINIMUM :: 0.001 //~= 0
+
+Light_Counts_Uniforms :: struct {
+    total_lights: u32,
+    num_point_shadows: u32,
+    num_directional_shadows: u32,
+    num_spot_shadows: u32,
+    cluster_items_start: u32,
+}
 
 make_point_light :: proc(position: [3]f32 = 0, color: [4]f32 = 1, range: f32 = 0, render_shadows: bool = true) -> (pl: Point_Light) {
     pl.position = position

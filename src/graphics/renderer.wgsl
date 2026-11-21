@@ -24,40 +24,36 @@ struct Camera {
 @group(1) @binding(4) var emissive: texture_2d<f32>;
 
 struct PointLight {
-    position: vec4<f32>, //view space xyz+radius
     color: vec4<f32>, //rgb+intensity
-    shadow_index: vec4<i32>,
+    position: vec3<f32>, range: f32,
+    layer_mask: vec2<u32>,
 }
 @group(3) @binding(0) var<storage, read> point_lights: array<PointLight>;
 
-const DIRECTIONAL_CASCADES = 4;
-
 struct DirectionalLight {
-    direction: vec4<f32>, //view space xyz+radius
     color: vec4<f32>, //rgb+intensity
-    view_to_shadow: array<mat4x4<f32>, DIRECTIONAL_CASCADES>,
-    cascade_splits: vec4<f32>,
-    shadow_index: vec4<i32>,
+    direction: vec4<f32>,
+    layer_mask: vec2<u32>,
 }
 @group(3) @binding(1) var<storage, read> directional_lights: array<DirectionalLight>;
 
 struct SpotLight {
-    position: vec4<f32>,//xyz+inner angle
-    direction: vec4<f32>,//xyz+outer angle
     color: vec4<f32>,
-    view_to_shadow: mat4x4<f32>,
-    shadow_index: i32,
+    position: vec3<f32>,  inner_angle: f32,
+    direction: vec3<f32>, outer_angle: f32,
+    layer_mask: vec2<u32>,
     range: f32,
 }
 @group(3) @binding(2) var<storage, read> spot_lights: array<SpotLight>;
 
-struct LightCount {
-    point: u32,
-    directional: u32,
-    spot: u32,
-    total: u32,
+struct LightCounts {
+    total_lights: u32,
+    num_point_shadows: u32,
+    num_directional_shadows: u32,
+    num_spot_shadows: u32,
+    cluster_items_start: u32,
 }
-@group(3) @binding(3) var<uniform> light_count: LightCount;
+@group(3) @binding(3) var<uniform> light_counts: LightCounts;
 @group(3) @binding(4) var shadow_depth_sampler: sampler_comparison;
 @group(3) @binding(5) var shadow_color_sampler: sampler;
 @group(3) @binding(6) var point_light_shadow_depth: texture_depth_cube_array;
@@ -67,14 +63,17 @@ struct LightCount {
 @group(3) @binding(10) var spot_light_shadow_depth: texture_depth_2d_array;
 @group(3) @binding(11) var spot_light_shadow_color: texture_2d_array<f32>;
 
-struct ReflectionProbeBox {
-    center: vec4<f32>,
-    mini: vec4<f32>,
-    maxi: vec4<f32>,
+struct ReflectionProbe {
+    position: vec4<f32>,
+    mini: vec3<f32>, slot: u32,
+    maxi: vec3<f32>,
 }
-@group(3) @binding(12) var reflection_probes: texture_cube_array<f32>;
-@group(3) @binding(13) var reflection_probe_sampler: sampler;
-@group(3) @binding(14) var<storage, read> reflection_probe_boxes: array<ReflectionProbeBox>;
+@group(3) @binding(12) var cubemaps: texture_cube_array<f32>;
+@group(3) @binding(13) var cubemaps_sampler: sampler;
+@group(3) @binding(14) var<storage, read> reflection_probes: array<ReflectionProbe>;
+
+@group(3) @binding(15) var<storage, read> clusters: array<u32>;
+@group(3) @binding(16) var<storage, read> shadow_transforms: array<mat4x4<f32>>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -275,18 +274,18 @@ fn apply_point_light(in: LightInput, light_index: u32) -> vec3<f32> {
     if(p.color.a == 0) {
         return vec3<f32>(0);
     }
-    let l = normalize(p.position.xyz - in.position.xyz);
+    let position = camera.view * vec4<f32>(p.position.xyz, 1);
+    let l = normalize(position.xyz - in.position.xyz);
     let n = effective_normal(in, l);
-    let d = distance(in.position.xyz, p.position.xyz);
-    let r = p.position.w;
+    let d = distance(in.position.xyz, position.xyz);
+    let r = p.range;
     if d < r {
         var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
-        let layer = p.shadow_index.r;
-        if(layer != -1) {
+        if(light_index < light_counts.num_point_shadows) {
             light_factor = vec3<f32>(0.0);
             let texelSize = 2.0 / f32(textureDimensions(point_light_shadow_depth).x); //cubemap faces are -1 to 1, so 2x UV space
             var up = vec3<f32>(0, 1, 0);
-            let dir_view = in.position.xyz - p.position.xyz;
+            let dir_view = in.position.xyz - position.xyz;
             let dir_world = normalize((camera.inv_view * vec4<f32>(dir_view, 0.0)).xyz); //cubemaps must be sampled in world space
             if(abs(dir_world.y) > 0.99) {
                 up = vec3<f32>(1, 0, 0);
@@ -294,7 +293,7 @@ fn apply_point_light(in: LightInput, light_index: u32) -> vec3<f32> {
             let right = normalize(cross(up, dir_world));
             up = cross(dir_world, right);
             let near = 0.1;
-            let far = p.position.w; //radius
+            let far = r; //radius
             let depth_ref = near / (far - near) * (far / d - 1.0);
             let bias = max(0.05 * (1.0 - dot(n, l)), 0.005);
             for(var x = -1; x <= 1; x++) {
@@ -302,8 +301,8 @@ fn apply_point_light(in: LightInput, light_index: u32) -> vec3<f32> {
                     let offset_x = right * f32(x) * texelSize;
                     let offset_y = up * f32(y) * texelSize;
                     let offset_dir = normalize(dir_world + offset_x + offset_y);
-                    let visibility = textureSampleCompare(point_light_shadow_depth, shadow_depth_sampler, offset_dir, layer, depth_ref + bias);
-                    let transmittance = textureSample(point_light_shadow_color, shadow_color_sampler, offset_dir, layer).rgb;
+                    let visibility = textureSampleCompare(point_light_shadow_depth, shadow_depth_sampler, offset_dir, light_index, depth_ref + bias);
+                    let transmittance = textureSample(point_light_shadow_color, shadow_color_sampler, offset_dir, light_index).rgb;
                     light_factor += visibility * transmittance;
                 }
             }
@@ -328,28 +327,30 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
     if(d.color.a == 0) {
         return vec3<f32>(0);
     }
-    let depth = -in.position.z;
-    var cascade = 0;
-    for(var i = 0; i < DIRECTIONAL_CASCADES; i++) {
-        if(depth < d.cascade_splits[i]) {
-            cascade = i;
-            break;
-        }
-    }
+    let direction = camera.view * vec4<f32>(d.direction.xyz, 0);
 
-    let l = normalize(-d.direction.xyz);
+    let l = normalize(-direction.xyz);
     let n = effective_normal(in, l);
     var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
-    let layer = d.shadow_index.r + cascade;
-    if(layer != -1) {
-        //have to do this constant-indexing chicanery because dynamically indexing by-value arrays doesn't work on web for some reason
-        var view_to_shadow: mat4x4<f32>;
-        switch cascade {
-            case 0:  { view_to_shadow = directional_lights[light_index].view_to_shadow[0]; }
-            case 1:  { view_to_shadow = directional_lights[light_index].view_to_shadow[1]; }
-            case 2:  { view_to_shadow = directional_lights[light_index].view_to_shadow[2]; }
-            default: { view_to_shadow = directional_lights[light_index].view_to_shadow[3]; }
+    if(light_index < light_counts.num_directional_shadows) {
+        let depth = -in.position.z;
+        var cascade: u32 = 0;
+        for(var i: u32 = 0; i < camera.cascade_count; i++) {
+            if(depth < camera.cascade_splits[i]) {
+                cascade = i;
+                break;
+            }
         }
+        let world_to_shadow = shadow_transforms[light_counts.num_spot_shadows + light_index + cascade];
+        let view_to_shadow = world_to_shadow * camera.inv_view;
+        //have to do this constant-indexing chicanery because dynamically indexing by-value arrays doesn't work on web for some reason
+        //var view_to_shadow: mat4x4<f32>;
+        //switch cascade {
+            //case 0:  { view_to_shadow = directional_lights[light_index].view_to_shadow[0]; }
+            //case 1:  { view_to_shadow = directional_lights[light_index].view_to_shadow[1]; }
+            //case 2:  { view_to_shadow = directional_lights[light_index].view_to_shadow[2]; }
+            //default: { view_to_shadow = directional_lights[light_index].view_to_shadow[3]; }
+        //}
         //get rough estimate of world-space texel density
         let ndc_per_world = length(vec3(view_to_shadow[0][0], view_to_shadow[1][0], view_to_shadow[2][0]));
         let texel_ndc = 2.0 / f32(textureDimensions(directional_light_shadow_depth).x);
@@ -369,8 +370,8 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
         for(var x = -1; x <= 1; x++) {
             for(var y = -1; y <= 1; y++) {
                 let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                let visibility = textureSampleCompare(directional_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref);
-                let transmittance = textureSample(directional_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
+                let visibility = textureSampleCompare(directional_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, light_index + cascade, depth_ref);
+                let transmittance = textureSample(directional_light_shadow_color, shadow_color_sampler, shadow_uv + offset, light_index + cascade).rgb;
                 light_factor += visibility * transmittance;
             }
         }
@@ -387,26 +388,29 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
 
 fn apply_spot_light(in: LightInput, light_index: u32) -> vec3<f32> {
     let s = spot_lights[light_index];
+    let position = camera.view * vec4<f32>(s.position.xyz, 1);
+    let direction = camera.view * vec4<f32>(s.direction.xyz, 0);
     if(s.color.a == 0) {
         return vec3<f32>(0);
     }
-    let l = normalize(s.position.xyz - in.position.xyz);
+    let l = normalize(position.xyz - in.position.xyz);
     let n = effective_normal(in, l);
-    let d = distance(in.position.xyz, s.position.xyz);
+    let d = distance(in.position.xyz, position.xyz);
     if(d > s.range) {
         return vec3<f32>(0);
     }
-    let theta = dot(l, normalize(-s.direction.xyz));
-    let inner_cutoff = s.position.w;
-    let outer_cutoff = s.direction.w;
+    let theta = dot(l, normalize(-direction.xyz));
+    let inner_cutoff = s.inner_angle;
+    let outer_cutoff = s.outer_angle;
     if(theta < outer_cutoff) {
         return vec3<f32>(0);
     }
     var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
-    let layer = s.shadow_index;
-    if(layer != -1) {
+    if(light_index < light_counts.num_spot_shadows) {
         //get rough estimate of world-space texel density
-        let ndc_per_world = length(vec3(s.view_to_shadow[0][0], s.view_to_shadow[1][0], s.view_to_shadow[2][0]));
+        let world_to_shadow = shadow_transforms[light_index];
+        let view_to_shadow = world_to_shadow * camera.inv_view;
+        let ndc_per_world = length(vec3(view_to_shadow[0][0], view_to_shadow[1][0], view_to_shadow[2][0]));
         let texel_ndc = 2.0 / f32(textureDimensions(spot_light_shadow_depth).x);
         let texel_world = texel_ndc / ndc_per_world;
 
@@ -415,7 +419,7 @@ fn apply_spot_light(in: LightInput, light_index: u32) -> vec3<f32> {
         let sample_position = vec4(in.position.xyz + in.surface_normal * normal_bias, 1.0);
 
         light_factor = vec3<f32>(0.0);
-        let frag_in_light = s.view_to_shadow * sample_position;
+        let frag_in_light = view_to_shadow * sample_position;
         let ndc = frag_in_light.xyz / frag_in_light.w;
         var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
         shadow_uv.y = 1.0 - shadow_uv.y;
@@ -424,8 +428,8 @@ fn apply_spot_light(in: LightInput, light_index: u32) -> vec3<f32> {
         for(var x = -1; x <= 1; x++) {
             for(var y = -1; y <= 1; y++) {
                 let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                let visibility = textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref);
-                let transmittance = textureSample(spot_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
+                let visibility = textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, light_index, depth_ref);
+                let transmittance = textureSample(spot_light_shadow_color, shadow_color_sampler, shadow_uv + offset, light_index).rgb;
                 light_factor += visibility * transmittance;
             }
         }
@@ -455,12 +459,12 @@ fn calculate_reflection_pbr(in: LightInput, radiance: vec3<f32>, ambient: vec3<f
     return diffuse_color * in.surface_color.a + specular_color;
 }
 
-fn box_project(r: vec3<f32>, position: vec3<f32>, box: ReflectionProbeBox) -> vec3<f32> {
-    if (box.center.w < 0.5) {
+fn box_project(r: vec3<f32>, position: vec3<f32>, probe: ReflectionProbe) -> vec3<f32> {
+    if (probe.position.w < 0.5) {
         return r;
     }
-    let bmin = box.center.xyz + box.mini.xyz;
-    let bmax = box.center.xyz + box.maxi.xyz;
+    let bmin = probe.position.xyz + probe.mini.xyz;
+    let bmax = probe.position.xyz + probe.maxi.xyz;
     //distance along r to each plane
     let t1 = (bmin - position) / r;
     let t2 = (bmax - position) / r;
@@ -468,7 +472,7 @@ fn box_project(r: vec3<f32>, position: vec3<f32>, box: ReflectionProbeBox) -> ve
     let tmax = max(t1, t2);
     let t = min(min(tmax.x, tmax.y), tmax.z);
     let hit = position + r * t;
-    return hit - box.center.xyz;
+    return hit - probe.position.xyz;
 }
 
 override TOPOLOGY: u32 = 0; // 0 = triangles, 1 = lines, 2 = points
@@ -480,7 +484,7 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
     var final_color = in_color;
     var light = final_color.rgb;
 
-    if(light_count.total > 0) {
+    if(light_counts.total_lights > 0) {
 
         let pbr = textureSample(pbr, smp, in.texcoord).rgb * instance.pbr_mul + instance.pbr_add;
         let ambient_occlusion = pbr.r;
@@ -528,28 +532,28 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
             let n_world = normalize((camera.inv_view * vec4<f32>(n, 0.0)).xyz);
             let v_world = normalize((camera.inv_view * vec4<f32>(v, 0.0)).xyz);
             let r = reflect(-v_world, n_world);
-            let box = reflection_probe_boxes[probe_a];
+            let probe = reflection_probes[probe_a];
             //need to flip Y because cubemaps were captured with negative-y-up
-            let r_env = box_project(r, p_world, box) * vec3<f32>(1.0, -1.0, 1.0);
+            let r_env = box_project(r, p_world, probe) * vec3<f32>(1.0, -1.0, 1.0);
             let n_env = n_world * vec3<f32>(1.0, -1.0, 1.0);
 
-            let max_mip = f32(textureNumLevels(reflection_probes) - 1);
+            let max_mip = f32(textureNumLevels(cubemaps) - 1);
 
-            let radiance = textureSampleLevel(reflection_probes, reflection_probe_sampler, r_env, probe_a, roughness * max_mip);
-            let ambient = textureSampleLevel(reflection_probes, reflection_probe_sampler, n_env, probe_a, max_mip);
+            let radiance = textureSampleLevel(cubemaps, cubemaps_sampler, r_env, probe_a, roughness * max_mip);
+            let ambient = textureSampleLevel(cubemaps, cubemaps_sampler, n_env, probe_a, max_mip);
             light += calculate_reflection_pbr(light_input, radiance.rgb, ambient.rgb);
         } else {
             light += calculate_reflection_pbr(light_input, vec3<f32>(0.0), vec3<f32>(0.03));
         }
         light *= ambient_occlusion;
 
-        for (var i: u32 = 0; i < light_count.point; i++) {
+        for (var i: u32 = 0; i < arrayLength(&point_lights); i++) {
             light += apply_point_light(light_input, i);
         }
-        for (var i: u32 = 0; i < light_count.directional; i++) {
+        for (var i: u32 = 0; i < arrayLength(&directional_lights); i++) {
             light += apply_directional_light(light_input, i);
         }
-        for (var i: u32 = 0; i < light_count.spot; i++) {
+        for (var i: u32 = 0; i < arrayLength(&spot_lights); i++) {
             light += apply_spot_light(light_input, i);
         }
     }
@@ -583,11 +587,11 @@ fn solid_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> @location
     if final_color.a < 0.9 {
         discard;
     }
-    //if(in.indices[3] == 0) {
-        //final_color = apply_light_environment(in, final_color, front_facing);
-        //let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
-        //final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
-    //}
+    if((instance.flags & INSTANCE_UNLIT) == 0) {
+        final_color = apply_light_environment(in, final_color, front_facing);
+        let emissive_color = textureSample(emissive, smp, in.texcoord).rgb * instance.emissive_mul + instance.emissive_add;
+        final_color = vec4<f32>(final_color.rgb + emissive_color, final_color.a);
+    }
     final_color = apply_fog(in.position, final_color);
 
     return final_color * camera.color.a;
@@ -607,11 +611,11 @@ fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut 
         discard;
     }
     var final_color = base_color;
-    //if(in.indices[3] == 0) {
-        //final_color = apply_light_environment(in, final_color, front_facing);
-        //let emissive_color = textureSample(emissive, smp, in.texcoord) * in.emissive_tint;
-        //final_color = vec4<f32>(final_color.rgb + emissive_color.rgb, final_color.a);
-    //}
+    if((instance.flags & INSTANCE_UNLIT) == 0) {
+        final_color = apply_light_environment(in, final_color, front_facing);
+        let emissive_color = textureSample(emissive, smp, in.texcoord).rgb * instance.emissive_mul + instance.emissive_add;
+        final_color = vec4<f32>(final_color.rgb + emissive_color, final_color.a);
+    }
     final_color = apply_fog(in.position, final_color);
     //final_color.a = base_color.a;
     final_color = vec4<f32>(final_color.rgb * camera.color.a, final_color.a);

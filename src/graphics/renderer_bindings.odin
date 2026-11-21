@@ -1,6 +1,7 @@
 package graphics
 
 import "vendor:wgpu"
+import "core:slice"
 
 //0 - view data
 //1 - material data
@@ -279,8 +280,115 @@ lights_layout_entries := []wgpu.BindGroupLayoutEntry{
 lights_layout: wgpu.BindGroupLayout
 lights_bind_group: wgpu.BindGroup
 
+point_lights_buffer := Growable_Buffer{usage = {.Storage, .CopyDst}}
+directional_lights_buffer := Growable_Buffer{usage = {.Storage, .CopyDst}}
+spot_lights_buffer := Growable_Buffer{usage = {.Storage, .CopyDst}}
+light_counts_buffer: wgpu.Buffer
+shadow_depth_sampler: wgpu.Sampler
+shadow_color_sampler: wgpu.Sampler
+point_light_depth_shadows := Growable_Texture_Array{size = POINT_SHADOW_RES, format=.Depth32Float, usage={.RenderAttachment}, cubemap=true}
+point_light_color_shadows := Growable_Texture_Array{size = POINT_SHADOW_RES, format=.RGBA8Unorm, usage={.RenderAttachment}, cubemap=true}
+directional_light_depth_shadows := Growable_Texture_Array{size = DIRECTIONAL_SHADOW_RES, format=.Depth32Float, usage={.RenderAttachment}}
+directional_light_color_shadows := Growable_Texture_Array{size = DIRECTIONAL_SHADOW_RES, format=.RGBA8Unorm, usage={.RenderAttachment}}
+spot_light_depth_shadows := Growable_Texture_Array{size = SPOT_SHADOW_RES, format=.Depth32Float, usage={.RenderAttachment}}
+spot_light_color_shadows := Growable_Texture_Array{size = SPOT_SHADOW_RES, format=.RGBA8Unorm, usage={.RenderAttachment}}
+probes_buffer := Growable_Buffer{usage = {.Storage, .CopyDst}}
+clusters_buffer := Growable_Buffer{usage = {.Storage, .CopyDst}}
+shadow_transforms_buffer := Growable_Buffer{usage = {.Storage, .CopyDst}}
 
-
-write_light_buffers :: proc() {
+import "core:log"
+write_light_buffers :: proc(command_encoder: wgpu.CommandEncoder) {
     //realloc, rebind...
+    rebind := lights_bind_group == nil
+    point_lights := slice.concatenate([][]Point_Light_Uniforms{f.point_lights_shadowed[:], f.point_lights_unshadowed[:]}, context.temp_allocator)
+    rebind |= write_buffer(&point_lights_buffer, point_lights)
+    directional_lights := slice.concatenate([][]Directional_Light_Uniforms{f.directional_lights_shadowed[:], f.directional_lights_unshadowed[:]}, context.temp_allocator)
+    rebind |= write_buffer(&directional_lights_buffer, directional_lights)
+    spot_lights := slice.concatenate([][]Spot_Light_Uniforms{f.spot_lights_shadowed[:], f.spot_lights_unshadowed[:]}, context.temp_allocator)
+    rebind |= write_buffer(&spot_lights_buffer, spot_lights)
+    light_counts := Light_Counts_Uniforms{
+        total_lights = u32(len(point_lights) + len(directional_lights) + len(spot_lights)),
+        num_point_shadows = u32(len(f.point_lights_shadowed)),
+        num_directional_shadows = u32(len(f.directional_lights_shadowed)),
+        num_spot_shadows = u32(len(f.spot_lights_shadowed)),
+        cluster_items_start = 0,
+    }
+    if light_counts_buffer == nil {
+        light_counts_buffer = wgpu.DeviceCreateBufferWithDataTyped(ren.device, &{usage={.Uniform, .CopyDst}}, light_counts)
+        rebind = true
+    } else {
+        wgpu.QueueWriteBuffer(ren.queue, light_counts_buffer, 0, &light_counts, size_of(Light_Counts_Uniforms))
+    }
+    if shadow_depth_sampler == nil {
+        shadow_depth_sampler = wgpu.DeviceCreateSampler(ren.device, &{
+            minFilter = .Linear,
+            magFilter = .Linear,
+            mipmapFilter = .Nearest,
+            addressModeU = .ClampToEdge,
+            addressModeV = .ClampToEdge,
+            addressModeW = .ClampToEdge,
+            compare = .GreaterEqual,
+            maxAnisotropy = 1,
+        })
+        rebind = true
+    }
+    if shadow_color_sampler == nil {
+        shadow_color_sampler = wgpu.DeviceCreateSampler(ren.device, &{
+            minFilter = .Linear,
+            magFilter = .Linear,
+            mipmapFilter = .Nearest,
+            addressModeU = .ClampToEdge,
+            addressModeV = .ClampToEdge,
+            addressModeW = .ClampToEdge,
+            maxAnisotropy = 1,
+        })
+        rebind = true
+    }
+    rebind |= grow_texture_array(&point_light_depth_shadows, len(f.point_lights_shadowed))
+    rebind |= grow_texture_array(&point_light_color_shadows, len(f.point_lights_shadowed))
+    rebind |= grow_texture_array(&directional_light_depth_shadows, len(f.cascade_shadow_transforms))
+    rebind |= grow_texture_array(&directional_light_color_shadows, len(f.cascade_shadow_transforms))
+    rebind |= grow_texture_array(&spot_light_depth_shadows, len(f.spot_lights_shadowed))
+    rebind |= grow_texture_array(&spot_light_color_shadows, len(f.spot_lights_shadowed))
+    rebind |= realloc_cubemaps(command_encoder)
+    //need to fill out
+    rebind |= write_buffer(&probes_buffer, []Reflection_Probe_Uniforms{})
+    rebind |= write_buffer(&clusters_buffer, []Cluster_Uniforms{})
+    rebind |= write_buffer(&shadow_transforms_buffer, []matrix[4,4]f32{})
+    
+    if rebind {
+        if lights_bind_group != nil {
+            wgpu.BindGroupRelease(lights_bind_group)
+        }
+        //holy shit
+        bindings := []wgpu.BindGroupEntry{
+            {binding = 0, buffer = point_lights_buffer.buffer, size = u64(point_lights_buffer.capacity)},
+            {binding = 1, buffer = directional_lights_buffer.buffer, size = u64(directional_lights_buffer.capacity)},
+            {binding = 2, buffer = spot_lights_buffer.buffer, size = u64(spot_lights_buffer.capacity)},
+            {binding = 3, buffer = light_counts_buffer, size = size_of(Light_Counts_Uniforms)},
+            {binding = 4, sampler = shadow_depth_sampler},
+            {binding = 5, sampler = shadow_color_sampler},
+            {binding = 6, textureView = point_light_depth_shadows.texture_view},
+            {binding = 7, textureView = point_light_color_shadows.texture_view},
+            {binding = 8, textureView = directional_light_depth_shadows.texture_view},
+            {binding = 9, textureView = directional_light_color_shadows.texture_view},
+            {binding = 10, textureView = spot_light_depth_shadows.texture_view},
+            {binding = 11, textureView = spot_light_color_shadows.texture_view},
+            {binding = 12, textureView = cubemaps.texture_view},
+            {binding = 13, sampler = cubemaps_sampler},
+            {binding = 14, buffer = probes_buffer.buffer, size = u64(probes_buffer.capacity)},
+            {binding = 15, buffer = clusters_buffer.buffer, size = u64(clusters_buffer.capacity)},
+            {binding = 16, buffer = shadow_transforms_buffer.buffer, size = u64(shadow_transforms_buffer.capacity)},
+        }
+        lights_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+            label = "lights",
+            layout = lights_layout,
+            entryCount = len(bindings),
+            entries = raw_data(bindings),
+        })
+    }
+}
+
+bind_light_data :: proc(render_pass: wgpu.RenderPassEncoder) {
+    wgpu.RenderPassEncoderSetBindGroup(render_pass, u32(Bind_Groups.Lighting), lights_bind_group)
 }
