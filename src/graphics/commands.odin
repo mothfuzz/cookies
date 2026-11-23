@@ -205,11 +205,7 @@ draw_point_light :: proc(pl: Point_Light, trans: transform.Transform = nil, laye
     max_scale := linalg.sqrt(max(linalg.length2(trans[0].xyz), linalg.length2(trans[1].xyz), linalg.length2(trans[2].xyz)))
     plu.position = (trans * [4]f32{**pl.position, 1}).xyz
     plu.range = pl.range * max_scale
-    if pl.render_shadows {
-        append(&f.point_lights_shadowed, plu)
-    } else {
-        append(&f.point_lights_unshadowed, plu)
-    }
+    push_light(&f.point_lights, plu, pl.render_shadows)
 }
 
 @(export)
@@ -219,11 +215,7 @@ draw_directional_light :: proc(dl: Directional_Light, trans: transform.Transform
     dlu.layer_mask = layers
     trans := transform.world(trans)
     dlu.direction = trans * [4]f32{**dl.direction, 0}
-    if dl.render_shadows {
-        append(&f.directional_lights_shadowed, dlu)
-    } else {
-        append(&f.directional_lights_unshadowed, dlu)
-    }
+    push_light(&f.directional_lights, dlu, dl.render_shadows)
 }
 
 @(export)
@@ -236,11 +228,9 @@ draw_spot_light :: proc(sl: Spot_Light, trans: transform.Transform = nil, layers
     slu.position = (trans * [4]f32{**sl.position, 1}).xyz
     slu.direction = (trans * [4]f32{**sl.direction, 0}).xyz
     slu.range = sl.range * max_scale
-    if sl.render_shadows {
-        append(&f.spot_lights_shadowed, slu)
-    } else {
-        append(&f.spot_lights_unshadowed, slu)
-    }
+    slu.inner_angle = linalg.cos(sl.inner_angle)
+    slu.outer_angle = linalg.cos(sl.outer_angle)
+    push_light(&f.spot_lights, slu, sl.render_shadows)
 }
 
 

@@ -24,43 +24,27 @@ camera_bg_layout_entries :: []wgpu.BindGroupLayoutEntry{
 camera_bg_layout: wgpu.BindGroupLayout
 bg_sampler: wgpu.Sampler
 
-Camera_View :: struct {
-    //using uniforms: Camera_Uniforms,
-    buffer_index: u32,
-    viewproj: matrix[4,4]f32, //optimization
-    frustum_planes: [6][4]f32, //left, right, bottom, top, near, far
-    planes_to_check: int, //for infinite far, don't check it
-    layer_mask: Layer_Mask,
-}
-
-//everythang needed to render (to) a camera...
-Camera_Draw :: struct {
-    using camera_view: Camera_View,
-    bg_bind_group: wgpu.BindGroup,
-    viewport: [4]f32,
-    fill: bool,
-}
-
 //align to 256 so we can get 512 bytes and not have to do any math
 //need all the previously CPU-only data on the GPU struct now if we want to do GPU culling
 Camera_Uniforms :: struct #align(256) {
-    view, inv_view, projection, viewproj, inv_viewproj: matrix[4,4]f32, //5x64
+    view, world, projection, viewproj, inv_viewproj: matrix[4,4]f32, //5x64
     frustum_planes: [6][4]f32, //left, right, bottom, top, near, far
     color: [4]f32, //rgb + exposure
     fog_distance: [2]f32,
     layer_mask: Layer_Mask, //vec2<u32>
     cascade_splits: [4]f32,
     cascade_offset, cascade_count: u32,
-    //will be in clusters later.
-    point_count: u32, //light_ids[light_offset:][:point_count] = points
-    spot_count: u32,  //light_ids[light_offset:][point_count:] = spots
-    light_offset: u32,
+    //cluster info
+    xy_scale: [2]f32, xy_bias: [2]f32, //derived from viewport
+    z_scale: f32, z_bias: f32,
+    grid_size: [3]u32, header_offset: u32,
     //padding
 }
 
 Camera_Raster :: struct {
     pass: int,
     viewport: [4]f32,
+    near, far: f32,
     bg_bind_group: wgpu.BindGroup, //nil = no fill
     flip: bool, //swap triangle cull mode back/front
 }
@@ -194,15 +178,15 @@ look_at :: proc(cam: ^Camera, eye, center: [3]f32, up: [3]f32 = {0, 1, 0}) {
     cam.rotation = linalg.quaternion_from_forward_and_up(center - eye, up)
 }
 
-inverse_view :: proc(trans: matrix[4,4]f32) -> (inv_view: matrix[4,4]f32) {
+rigid_inverse :: proc(trans: matrix[4,4]f32) -> (inv: matrix[4,4]f32) {
     translation := trans[3].xyz
     rotation := cast(matrix[3,3]f32)(trans)
     inv_r := linalg.transpose(rotation) //can use transpose instead of inverse as it's orthonormal
     inv_t := -(inv_r * translation)
-    inv_view[0] = {expand_values(inv_r[0]), 0}
-    inv_view[1] = {expand_values(inv_r[1]), 0}
-    inv_view[2] = {expand_values(inv_r[2]), 0}
-    inv_view[3] = {expand_values(inv_t), 1}
+    inv[0] = {expand_values(inv_r[0]), 0}
+    inv[1] = {expand_values(inv_r[1]), 0}
+    inv[2] = {expand_values(inv_r[2]), 0}
+    inv[3] = {expand_values(inv_t), 1}
     return
 }
 
@@ -233,8 +217,8 @@ calculate_frustum :: proc(cam: ^Camera_Uniforms) -> (flipped: bool) {
 
 FOV :: 60.0
 calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, target_resolution: [2]uint = 0) -> (draw: Camera_Uniforms, raster: Camera_Raster) {
-    draw.inv_view = trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1)
-    draw.view = inverse_view(draw.inv_view)
+    draw.world = trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1)
+    draw.view = rigid_inverse(draw.world)
     fov := cam.range[0]
     if fov == 0 {
         fov = linalg.to_radians(f32(FOV))
@@ -251,6 +235,8 @@ calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, target_resoluti
     } else {
         draw.projection = linalg.matrix4_perspective(fov, width/height, near, far)
     }
+    raster.near = near
+    raster.far = far
     raster.flip = calculate_frustum(&draw)
     fog_onset := cam.range[3] if cam.range[3] != 0 else (far - near)/2.0
     draw.color = cam.color

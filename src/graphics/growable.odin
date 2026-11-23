@@ -30,6 +30,20 @@ write_buffer :: proc(g: ^Growable_Buffer, data: []$T) -> (rebind: bool) {
     return
 }
 
+//concats
+write_buffer2 :: proc(g: ^Growable_Buffer, data1: []$T, data2: []$U) -> (rebind: bool) {
+    size1 := len(data1) * size_of(T)
+    size2 := len(data2) * size_of(U)
+    rebind = grow_buffer(g, size1 + size2, u8)
+    if size1 > 0 {
+        wgpu.QueueWriteBuffer(ren.queue, g.buffer, 0, raw_data(data1), uint(size1))
+    }
+    if size2 > 0 {
+        wgpu.QueueWriteBuffer(ren.queue, g.buffer, u64(size1), raw_data(data2), uint(size2))
+    }
+    return
+}
+
 Growable_Texture_Array :: struct {
     texture: wgpu.Texture,
     texture_view: wgpu.TextureView,

@@ -296,22 +296,24 @@ probes_buffer := Growable_Buffer{usage = {.Storage, .CopyDst}}
 clusters_buffer := Growable_Buffer{usage = {.Storage, .CopyDst}}
 shadow_transforms_buffer := Growable_Buffer{usage = {.Storage, .CopyDst}}
 
-import "core:log"
+visualize_clusters: bool = false
 write_light_buffers :: proc(command_encoder: wgpu.CommandEncoder) {
     //realloc, rebind...
     rebind := lights_bind_group == nil
-    point_lights := slice.concatenate([][]Point_Light_Uniforms{f.point_lights_shadowed[:], f.point_lights_unshadowed[:]}, context.temp_allocator)
-    rebind |= write_buffer(&point_lights_buffer, point_lights)
-    directional_lights := slice.concatenate([][]Directional_Light_Uniforms{f.directional_lights_shadowed[:], f.directional_lights_unshadowed[:]}, context.temp_allocator)
-    rebind |= write_buffer(&directional_lights_buffer, directional_lights)
-    spot_lights := slice.concatenate([][]Spot_Light_Uniforms{f.spot_lights_shadowed[:], f.spot_lights_unshadowed[:]}, context.temp_allocator)
-    rebind |= write_buffer(&spot_lights_buffer, spot_lights)
+    rebind |= write_buffer(&point_lights_buffer, f.point_lights.entries[:])
+    rebind |= write_buffer(&directional_lights_buffer, f.directional_lights.entries[:])
+    rebind |= write_buffer(&spot_lights_buffer, f.spot_lights.entries[:])
     light_counts := Light_Counts_Uniforms{
-        total_lights = u32(len(point_lights) + len(directional_lights) + len(spot_lights)),
-        num_point_shadows = u32(len(f.point_lights_shadowed)),
-        num_directional_shadows = u32(len(f.directional_lights_shadowed)),
-        num_spot_shadows = u32(len(f.spot_lights_shadowed)),
-        cluster_items_start = 0,
+        total_lights = u32(
+            len(f.point_lights.entries) +
+            len(f.directional_lights.entries) +
+            len(f.spot_lights.entries)
+        ),
+        directional_lights = u32(len(f.directional_lights.entries)),
+        point_shadows = 0,//u32(f.point_lights.num_shadowed),
+        directional_shadows = 0,//u32(f.directional_lights.num_shadowed)),
+        spot_shadows = 0,//u32(f.spot_lights.num_shadowed),
+        visualize_clusters = 1 if visualize_clusters else 0,
     }
     if light_counts_buffer == nil {
         light_counts_buffer = wgpu.DeviceCreateBufferWithDataTyped(ren.device, &{usage={.Uniform, .CopyDst}}, light_counts)
@@ -344,16 +346,16 @@ write_light_buffers :: proc(command_encoder: wgpu.CommandEncoder) {
         })
         rebind = true
     }
-    rebind |= grow_texture_array(&point_light_depth_shadows, len(f.point_lights_shadowed))
-    rebind |= grow_texture_array(&point_light_color_shadows, len(f.point_lights_shadowed))
+    rebind |= grow_texture_array(&point_light_depth_shadows, f.point_lights.num_shadowed)
+    rebind |= grow_texture_array(&point_light_color_shadows, f.point_lights.num_shadowed)
     rebind |= grow_texture_array(&directional_light_depth_shadows, len(f.cascade_shadow_transforms))
     rebind |= grow_texture_array(&directional_light_color_shadows, len(f.cascade_shadow_transforms))
-    rebind |= grow_texture_array(&spot_light_depth_shadows, len(f.spot_lights_shadowed))
-    rebind |= grow_texture_array(&spot_light_color_shadows, len(f.spot_lights_shadowed))
+    rebind |= grow_texture_array(&spot_light_depth_shadows, f.spot_lights.num_shadowed)
+    rebind |= grow_texture_array(&spot_light_color_shadows, f.spot_lights.num_shadowed)
     rebind |= realloc_cubemaps(command_encoder)
     //need to fill out
     rebind |= write_buffer(&probes_buffer, []Reflection_Probe_Uniforms{})
-    rebind |= write_buffer(&clusters_buffer, []Cluster_Uniforms{})
+    rebind |= write_buffer2(&clusters_buffer, f.cluster_headers[:], f.cluster_items[:])
     rebind |= write_buffer(&shadow_transforms_buffer, []matrix[4,4]f32{})
     
     if rebind {

@@ -475,6 +475,7 @@ render_frame :: proc() {
     sort_batches()
     sort_passes()
     resolve_passes(screen)
+    bin_lights()
     cull_instances()
     write_instance_buffers()
     write_camera_buffer()

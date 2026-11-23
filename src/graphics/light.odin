@@ -74,10 +74,11 @@ LIGHT_MINIMUM :: 0.001 //~= 0
 
 Light_Counts_Uniforms :: struct {
     total_lights: u32,
-    num_point_shadows: u32,
-    num_directional_shadows: u32,
-    num_spot_shadows: u32,
-    cluster_items_start: u32,
+    directional_lights: u32,
+    point_shadows: u32,
+    directional_shadows: u32,
+    spot_shadows: u32,
+    visualize_clusters: u32, //0 = off, 1 = on
 }
 
 make_point_light :: proc(position: [3]f32 = 0, color: [4]f32 = 1, range: f32 = 0, render_shadows: bool = true) -> (pl: Point_Light) {

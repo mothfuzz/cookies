@@ -2,6 +2,7 @@ package graphics
 
 import "core:slice"
 import "core:math"
+import "core:math/linalg"
 import "vendor:wgpu"
 
 Alpha_Set :: struct {
@@ -92,6 +93,28 @@ batch_key_less :: proc(a, b: Batch_Key) -> bool {
     if a.primitive != b.primitive do return a.primitive < b.primitive //fewest pipeline switches
     if a.mesh != b.mesh do return a.mesh < b.mesh //mesh-outer since mesh is more bindings
     return a.material < b.material
+}
+
+Light_List :: struct($T: typeid) {
+    entries: [dynamic]T,
+    num_shadowed: int,
+}
+
+push_light :: proc(l: ^Light_List($T), light: T, render_shadows: bool) {
+    append(&l.entries, light)
+    if render_shadows {
+        last := len(l.entries) - 1
+        //swap
+        l.entries[l.num_shadowed], l.entries[last] = l.entries[last], l.entries[l.num_shadowed]
+        l.num_shadowed += 1
+    }
+}
+clear_lights :: proc(l: ^Light_List($T)) {
+    clear(&l.entries)
+    l.num_shadowed = 0
+}
+delete_lights :: proc(l: Light_List($T)) {
+    delete(l.entries)
 }
 
 Cluster_Uniforms :: struct #packed {
@@ -186,17 +209,17 @@ Draw_Indirect :: struct {
 
 Frame :: struct {
     //lights
-    point_lights_unshadowed: [dynamic]Point_Light_Uniforms,
-    point_lights_shadowed: [dynamic]Point_Light_Uniforms,
-    spot_lights_unshadowed: [dynamic]Spot_Light_Uniforms,
-    spot_lights_shadowed: [dynamic]Spot_Light_Uniforms,
-    directional_lights_unshadowed: [dynamic]Directional_Light_Uniforms,
-    directional_lights_shadowed: [dynamic]Directional_Light_Uniforms,
+    point_lights: Light_List(Point_Light_Uniforms),
+    directional_lights: Light_List(Directional_Light_Uniforms),
+    spot_lights: Light_List(Spot_Light_Uniforms),
 
     spot_shadow_transforms: [dynamic]matrix[4,4]f32,
     cascade_shadow_transforms: [dynamic]matrix[4,4]f32,
     
     scene_extents: [2][3]f32,
+
+    cluster_headers: [dynamic]Cluster_Uniforms,
+    cluster_items: [dynamic]u32,
 
     //cameras
     cameras: [dynamic]Camera_Uniforms, //buffer
@@ -230,14 +253,13 @@ Frame :: struct {
 f: Frame
 
 clear_frame :: proc() {
-    clear(&f.point_lights_unshadowed)
-    clear(&f.point_lights_shadowed)
-    clear(&f.directional_lights_unshadowed)
-    clear(&f.directional_lights_shadowed)
-    clear(&f.spot_lights_unshadowed)
-    clear(&f.spot_lights_shadowed)
+    clear_lights(&f.point_lights)
+    clear_lights(&f.directional_lights)
+    clear_lights(&f.spot_lights)
     clear(&f.spot_shadow_transforms)
     clear(&f.cascade_shadow_transforms)
+    clear(&f.cluster_headers)
+    clear(&f.cluster_items)
     clear(&f.cameras)
     clear(&f.rasters)
     clear(&f.passes)
@@ -265,14 +287,13 @@ clear_frame :: proc() {
 }
 
 delete_frame :: proc() {
-    delete(f.point_lights_unshadowed)
-    delete(f.point_lights_shadowed)
-    delete(f.directional_lights_unshadowed)
-    delete(f.directional_lights_shadowed)
-    delete(f.spot_lights_unshadowed)
-    delete(f.spot_lights_shadowed)
+    delete_lights(f.point_lights)
+    delete_lights(f.directional_lights)
+    delete_lights(f.spot_lights)
     delete(f.spot_shadow_transforms)
     delete(f.cascade_shadow_transforms)
+    delete(f.cluster_headers)
+    delete(f.cluster_items)
     delete(f.cameras)
     delete(f.rasters)
     delete(f.passes)
@@ -358,6 +379,17 @@ push_pass :: proc(kind: Pass_Kind, stage: Pass_Stage, source: Pass_Source = nil)
 push_camera :: proc(pass: int, camera: Camera_Uniforms, raster: Camera_Raster) {
     raster := raster
     raster.pass = pass
+    camera := camera
+    // TODO: size these dynamically using viewport + a tile size (small for Screen, large for Capture)
+    switch f.passes[pass].kind {
+    case .Shadow: camera.grid_size = {0, 0, 0}
+    case .Capture: camera.grid_size = {4, 4, 8}
+    case .Screen: camera.grid_size = {16, 9, 24}
+    }
+    //1
+    camera.header_offset = u32(len(f.cluster_headers))
+    resize(&f.cluster_headers, camera.header_offset + math.prod(camera.grid_size[:]))
+    //can scale/bias also be calculated here?
     append(&f.cameras, camera)
     append(&f.rasters, raster)
     f.passes[pass].cam_count += 1
@@ -469,6 +501,153 @@ resolve_passes :: proc(swapchain: wgpu.TextureView) {
             case Screen_Source:
             stage := &pass.stage.(Screen_Pass)
             stage.resolve = swapchain
+        }
+    }
+}
+
+@(private)
+//bounds of c/d covered by a sphere
+//d - r must be >0
+tangent_bounds :: proc(c, d, r: f32) -> (lo, hi: f32) {
+    l := math.sqrt(c*c + d*d - r*r)
+    lo = (c*l - r*d) / (d*l + r*c)
+    hi = (c*l + r*d) / (d*l - r*c)
+    return
+}
+
+@(private)
+sphere_clusters :: proc(camera: Camera_Uniforms, near, far: f32, center: [3]f32, radius: f32) -> [2][3]u8 {
+    pos := (camera.view * [4]f32{**center, 1}).xyz
+    d := -pos.z
+    //z: project z exactly
+    min_pos_z := max(d - radius, near) //might be negative if sphere intersects near
+    max_pos_z := d + radius //always positive if sphere survived culling
+    z_min := int(math.floor(math.log2(min_pos_z) * camera.z_scale + camera.z_bias))
+    z_max := int(math.floor(math.log2(max_pos_z) * camera.z_scale + camera.z_bias))
+    z_min = clamp(z_min, 0, int(camera.grid_size.z-1))
+    z_max = clamp(z_max, 0, int(camera.grid_size.z-1))
+    //xy: projected to screen space
+    x_min, x_max, y_min, y_max: int
+    if d - radius < near {
+        x_min = 0
+        y_min = 0
+        x_max = int(camera.grid_size.x-1)
+        y_max = int(camera.grid_size.y-1)
+    } else {
+        p00 := camera.projection[0, 0]
+        p02 := camera.projection[0, 2]
+        p11 := camera.projection[1, 1]
+        p12 := camera.projection[1, 2]
+        xl, xh := tangent_bounds(pos.x, d, radius)
+        yl, yh := tangent_bounds(pos.y, d, radius)
+        xl_ndc := xl*p00 - p02
+        xh_ndc := xh*p00 - p02
+        yl_ndc := yl*p11 - p12
+        yh_ndc := yh*p11 - p12
+        x_min = int(math.floor(((xl_ndc+1)/2) * f32(camera.grid_size.x)))
+        x_max = int(math.floor(((xh_ndc+1)/2) * f32(camera.grid_size.x)))
+        //high NDC y is a low cluster tile
+        y_min = int(math.floor(((1-yh_ndc)/2) * f32(camera.grid_size.y)))
+        y_max = int(math.floor(((1-yl_ndc)/2) * f32(camera.grid_size.y)))
+    }
+    x_min = clamp(x_min, 0, int(camera.grid_size.x-1))
+    y_min = clamp(y_min, 0, int(camera.grid_size.y-1))
+    x_max = clamp(x_max, 0, int(camera.grid_size.x-1))
+    y_max = clamp(y_max, 0, int(camera.grid_size.y-1))
+    return {
+        {u8(x_min), u8(y_min), u8(z_min)},
+        {u8(x_max), u8(y_max), u8(z_max)},
+    }
+}
+
+//bins lights *and* reflection probes.
+bin_lights :: proc() {
+    for cam in 0..<len(f.cameras) {
+        camera := &f.cameras[cam]
+        raster := &f.rasters[cam]
+        if camera.grid_size == 0 do continue
+
+        //near/far from scene_extents
+        scene_center := (f.scene_extents[0] + f.scene_extents[1])/2
+        scene_half := (f.scene_extents[1] - f.scene_extents[0])/2
+        fwd := linalg.normalize(-camera.world[2].xyz)
+        cam_pos := camera.world[3].xyz
+        far := linalg.dot(scene_center - cam_pos, fwd) + linalg.dot(linalg.abs(fwd), scene_half)
+        far = max(far, raster.near+1e-6) //clamp to near plane
+        far = min(far, raster.far) //camera far or scene far, whichever is smaller
+        near := raster.near
+        //screen-space xy-scaling
+        camera.xy_scale = ([2]f32)(camera.grid_size.xy)/raster.viewport.zw
+        camera.xy_bias = -raster.viewport.xy * camera.xy_scale
+        //logarithmic z-scaling
+        camera.z_scale = f32(camera.grid_size.z) / math.log2(far/near)
+        camera.z_bias = -math.log2(near) * camera.z_scale
+
+        //tile = floor(frag_coord.xy * xy_scale + xy_bias)
+        //slice = floor(log(view_z) * z_scale + z_bias)
+        //very nice
+        
+        header_count := math.prod(camera.grid_size[:])
+        headers := f.cluster_headers[camera.header_offset:][:header_count]
+
+        item_sizes := make([]u32, len(headers), context.temp_allocator)
+
+        EMPTY_RANGE :: [2][3]u8{{1, 0, 0}, {0, 0, 0}} //so that range loops run 0 times with <=
+        cluster_index :: #force_inline proc(g: [3]u32, x, y, z: u8) -> u32 {
+            return (u32(x) * g.y * g.z) + (u32(y) * g.z) + u32(z)
+        }
+        
+        point_light_ranges := make([][2][3]u8, len(f.point_lights.entries), context.temp_allocator)
+        for &pl, i in f.point_lights.entries {
+            point_light_ranges[i] = EMPTY_RANGE
+            if !sphere_in_frustum(camera^, pl.position, pl.range) do continue
+            r := sphere_clusters(camera^, near, far, pl.position, pl.range)
+            point_light_ranges[i] = r
+            for x in r[0].x..=r[1].x do for y in r[0].y..=r[1].y do for z in r[0].z..=r[1].z {
+                item_sizes[cluster_index(camera.grid_size, x, y, z)] += 1
+            }
+        }
+        spot_light_ranges := make([][2][3]u8, len(f.spot_lights.entries), context.temp_allocator)
+        for &sl, i in f.spot_lights.entries {
+            spot_light_ranges[i] = EMPTY_RANGE
+            if !sphere_in_frustum(camera^, sl.position, sl.range) do continue
+            r := sphere_clusters(camera^, near, far, sl.position, sl.range)
+            spot_light_ranges[i] = r
+            for x in r[0].x..=r[1].x do for y in r[0].y..=r[1].y do for z in r[0].z..=r[1].z {
+                item_sizes[cluster_index(camera.grid_size, x, y, z)] += 1
+            }
+        }
+
+        //since headers & items are stored in the same buffer, we need to offset by the number of u32s in a header, times the number of headers already there.
+        running := u32(len(f.cluster_items))
+        header_words := u32(len(f.cluster_headers))*(size_of(Cluster_Uniforms)/size_of(u32))
+        //prefix sum + offset
+        for i in 0..<header_count {
+            size := item_sizes[i]
+            item_sizes[i] = running
+            headers[i].offset = running + header_words
+            running += size
+        }
+        resize(&f.cluster_items, running)
+
+        //must be in shader read order (that is, add probes prior to points & spots)
+        for r, i in point_light_ranges {
+            for x in r[0].x..=r[1].x do for y in r[0].y..=r[1].y do for z in r[0].z..=r[1].z {
+                c := cluster_index(camera.grid_size, x, y, z)
+                //optional narrowphase goes here later (sphere/froxel)
+                f.cluster_items[item_sizes[c]] = u32(i)
+                item_sizes[c] += 1
+                headers[c].point_count += 1
+            }
+        }
+        for r, i in spot_light_ranges {
+            for x in r[0].x..=r[1].x do for y in r[0].y..=r[1].y do for z in r[0].z..=r[1].z {
+                c := cluster_index(camera.grid_size, x, y, z)
+                //optional narrowphase goes here later (cone/froxel)
+                f.cluster_items[item_sizes[c]] = u32(i)
+                item_sizes[c] += 1
+                headers[c].spot_count += 1
+            }
         }
     }
 }

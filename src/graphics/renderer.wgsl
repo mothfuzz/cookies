@@ -1,6 +1,6 @@
 struct Camera {
     view: mat4x4<f32>,
-    inv_view: mat4x4<f32>,
+    world: mat4x4<f32>,
     projection: mat4x4<f32>,
     viewproj: mat4x4<f32>,
     inv_viewproj: mat4x4<f32>,
@@ -11,9 +11,12 @@ struct Camera {
     cascade_splits: vec4<f32>,
     cascade_offset: u32,
     cascade_count: u32,
-    point_count: u32,
-    spot_count: u32,
-    light_offset: u32,
+    xy_scale: vec2<f32>,
+    xy_bias: vec2<f32>,
+    z_scale: f32,
+    z_bias: f32,
+    grid_size: vec3<u32>,
+    header_offset: u32,
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
 
@@ -48,10 +51,11 @@ struct SpotLight {
 
 struct LightCounts {
     total_lights: u32,
-    num_point_shadows: u32,
-    num_directional_shadows: u32,
-    num_spot_shadows: u32,
-    cluster_items_start: u32,
+    directional_lights: u32,
+    point_shadows: u32,
+    directional_shadows: u32,
+    spot_shadows: u32,
+    visualize_clusters: u32,
 }
 @group(3) @binding(3) var<uniform> light_counts: LightCounts;
 @group(3) @binding(4) var shadow_depth_sampler: sampler_comparison;
@@ -102,7 +106,7 @@ const INSTANCE_UNLIT: u32 = 2;
 
 struct VSOut {
     @builtin(position) out_position: vec4<f32>,
-    @location(0) position: vec4<f32>,
+    @location(0) position: vec4<f32>, //xyz in world space, w = view space z
     @location(1) normal: vec3<f32>,
     @location(2) tangent: vec4<f32>,
     @location(3) @interpolate(perspective) texcoord: vec2<f32>,
@@ -131,50 +135,75 @@ fn calculate_bones(skeleton_offset: u32, bones: vec4<u32>, weights: vec4<f32>) -
 @vertex
 fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VSOut {
     var v: VSOut;
-    let instance = instances[vertex.instance];
-    var modelview: mat4x4<f32>;
+
+    v.instance = vertex.instance;
+    let instance = instances[v.instance];
+
+    var model: mat4x4<f32>;
     if((instance.flags & INSTANCE_BILLBOARD) == INSTANCE_BILLBOARD) {
-        //isolate untransformed rotation/scale
-        let rotation_scale = mat3x3<f32>(
+        let cam_rot = mat3x3<f32>(
+            camera.world[0].xyz,
+            camera.world[1].xyz,
+            camera.world[2].xyz,
+        );
+        let rotation_scale = cam_rot * mat3x3<f32>(
             instance.model[0].xyz,
             instance.model[1].xyz,
             instance.model[2].xyz,
         );
-        //transform to the camera but keep only the transformed translation vector
-        let translation = (camera.view * instance.model)[3];
-        modelview = mat4x4<f32>(
+        model = mat4x4<f32>(
             vec4<f32>(rotation_scale[0], 0),
             vec4<f32>(rotation_scale[1], 0),
             vec4<f32>(rotation_scale[2], 0),
-            translation,
+            instance.model[3],
         );
     } else {
-        modelview = camera.view * instance.model;
+        model = instance.model;
     }
     var bones = ident();
     if(instance.skeleton_offset != -1) {
         bones = calculate_bones(u32(instance.skeleton_offset), vertex.bones, vertex.weights);
     }
-    v.position = modelview * bones * vec4<f32>(vertex.position, 1.0);
+    v.position = model * bones * vec4<f32>(vertex.position, 1.0);
+    v.out_position = camera.viewproj * v.position;
+    let camera_z = vec4<f32>(
+        camera.view[0].z,
+        camera.view[1].z,
+        camera.view[2].z,
+        camera.view[3].z,
+    );
+    v.position.w = dot(camera_z, v.position);
+    
     let bones3 = mat3x3<f32>(bones[0].xyz, bones[1].xyz, bones[2].xyz);
     let normal = bones3 * vertex.normal;
     if(dot(normal, normal) > 0.0) {
-        v.normal = normalize((modelview * vec4<f32>(normalize(normal), 0.0)).xyz);
+        v.normal = normalize((model * vec4<f32>(normalize(normal), 0.0)).xyz);
     }
     let tangent = bones3 * vertex.tangent.xyz;
     if(dot(tangent, tangent) > 0.0) {
-        let v_tangent = normalize((modelview * vec4<f32>(normalize(tangent), 0.0)).xyz);
+        let v_tangent = normalize((model * vec4<f32>(normalize(tangent), 0.0)).xyz);
         v.tangent = vec4<f32>(v_tangent, vertex.tangent.w);
     }
-    v.color = vertex.color;
 
     let tex_offset = instance.clip_rect.xy;
     let tex_factor = instance.clip_rect.zw;
-    
     v.texcoord = vertex.texcoord*tex_factor+tex_offset;
-    v.out_position = camera.projection * v.position;
-    v.instance = vertex.instance;
+
+    v.color = vertex.color;
+
     return v;
+}
+
+fn cluster_header(frag_coord: vec2<f32>, view_z: f32) -> vec4<u32> {
+    let g = camera.grid_size;
+    var tile = floor(frag_coord * camera.xy_scale + camera.xy_bias);
+    tile = clamp(tile, vec2<f32>(0.0), vec2<f32>(g.xy - 1));
+    var slice = floor(log2(-view_z) * camera.z_scale + camera.z_bias);
+    slice = clamp(slice, 0.0, f32(g.z - 1));
+    //must match formula in cluster_index
+    let c = (u32(tile.x) * g.y * g.z) + (u32(tile.y) * g.z) + u32(slice);
+    let h = (camera.header_offset + c) * 4; //4 u32s per header, change if header changes
+    return vec4<u32>(clusters[h], clusters[h+1], clusters[h+2], clusters[h+3]);
 }
 
 fn calculate_influence_phong(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, radiance: vec3<f32>) -> vec4<f32> {
@@ -274,19 +303,17 @@ fn apply_point_light(in: LightInput, light_index: u32) -> vec3<f32> {
     if(p.color.a == 0) {
         return vec3<f32>(0);
     }
-    let position = camera.view * vec4<f32>(p.position.xyz, 1);
-    let l = normalize(position.xyz - in.position.xyz);
+    let l = normalize(p.position.xyz - in.position.xyz);
     let n = effective_normal(in, l);
-    let d = distance(in.position.xyz, position.xyz);
+    let d = distance(in.position.xyz, p.position.xyz);
     let r = p.range;
     if d < r {
         var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
-        if(light_index < light_counts.num_point_shadows) {
+        if(light_index < light_counts.point_shadows) {
             light_factor = vec3<f32>(0.0);
             let texelSize = 2.0 / f32(textureDimensions(point_light_shadow_depth).x); //cubemap faces are -1 to 1, so 2x UV space
             var up = vec3<f32>(0, 1, 0);
-            let dir_view = in.position.xyz - position.xyz;
-            let dir_world = normalize((camera.inv_view * vec4<f32>(dir_view, 0.0)).xyz); //cubemaps must be sampled in world space
+            let dir_world = normalize(in.position.xyz - p.position.xyz);
             if(abs(dir_world.y) > 0.99) {
                 up = vec3<f32>(1, 0, 0);
             }
@@ -327,13 +354,12 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
     if(d.color.a == 0) {
         return vec3<f32>(0);
     }
-    let direction = camera.view * vec4<f32>(d.direction.xyz, 0);
 
-    let l = normalize(-direction.xyz);
+    let l = normalize(-d.direction.xyz);
     let n = effective_normal(in, l);
     var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
-    if(light_index < light_counts.num_directional_shadows) {
-        let depth = -in.position.z;
+    if(light_index < light_counts.directional_shadows) {
+        let depth = -in.position.w;
         var cascade: u32 = 0;
         for(var i: u32 = 0; i < camera.cascade_count; i++) {
             if(depth < camera.cascade_splits[i]) {
@@ -341,18 +367,9 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
                 break;
             }
         }
-        let world_to_shadow = shadow_transforms[light_counts.num_spot_shadows + light_index + cascade];
-        let view_to_shadow = world_to_shadow * camera.inv_view;
-        //have to do this constant-indexing chicanery because dynamically indexing by-value arrays doesn't work on web for some reason
-        //var view_to_shadow: mat4x4<f32>;
-        //switch cascade {
-            //case 0:  { view_to_shadow = directional_lights[light_index].view_to_shadow[0]; }
-            //case 1:  { view_to_shadow = directional_lights[light_index].view_to_shadow[1]; }
-            //case 2:  { view_to_shadow = directional_lights[light_index].view_to_shadow[2]; }
-            //default: { view_to_shadow = directional_lights[light_index].view_to_shadow[3]; }
-        //}
+        let world_to_shadow = shadow_transforms[light_counts.spot_shadows + light_index + cascade];
         //get rough estimate of world-space texel density
-        let ndc_per_world = length(vec3(view_to_shadow[0][0], view_to_shadow[1][0], view_to_shadow[2][0]));
+        let ndc_per_world = length(vec3(world_to_shadow[0][0], world_to_shadow[1][0], world_to_shadow[2][0]));
         let texel_ndc = 2.0 / f32(textureDimensions(directional_light_shadow_depth).x);
         let texel_world = texel_ndc / ndc_per_world;
 
@@ -361,7 +378,7 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
         let sample_position = vec4(in.position.xyz + in.surface_normal * normal_bias, 1.0);
 
         light_factor = vec3<f32>(0.0);
-        let frag_in_light = view_to_shadow * sample_position;
+        let frag_in_light = world_to_shadow * sample_position;
         let ndc = frag_in_light.xyz / frag_in_light.w;
         var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
         shadow_uv.y = 1.0 - shadow_uv.y;
@@ -388,29 +405,26 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
 
 fn apply_spot_light(in: LightInput, light_index: u32) -> vec3<f32> {
     let s = spot_lights[light_index];
-    let position = camera.view * vec4<f32>(s.position.xyz, 1);
-    let direction = camera.view * vec4<f32>(s.direction.xyz, 0);
     if(s.color.a == 0) {
         return vec3<f32>(0);
     }
-    let l = normalize(position.xyz - in.position.xyz);
+    let l = normalize(s.position.xyz - in.position.xyz);
     let n = effective_normal(in, l);
-    let d = distance(in.position.xyz, position.xyz);
+    let d = distance(in.position.xyz, s.position.xyz);
     if(d > s.range) {
         return vec3<f32>(0);
     }
-    let theta = dot(l, normalize(-direction.xyz));
+    let theta = dot(l, normalize(-s.direction.xyz));
     let inner_cutoff = s.inner_angle;
     let outer_cutoff = s.outer_angle;
     if(theta < outer_cutoff) {
         return vec3<f32>(0);
     }
     var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
-    if(light_index < light_counts.num_spot_shadows) {
+    if(light_index < light_counts.spot_shadows) {
         //get rough estimate of world-space texel density
         let world_to_shadow = shadow_transforms[light_index];
-        let view_to_shadow = world_to_shadow * camera.inv_view;
-        let ndc_per_world = length(vec3(view_to_shadow[0][0], view_to_shadow[1][0], view_to_shadow[2][0]));
+        let ndc_per_world = length(vec3(world_to_shadow[0][0], world_to_shadow[1][0], world_to_shadow[2][0]));
         let texel_ndc = 2.0 / f32(textureDimensions(spot_light_shadow_depth).x);
         let texel_world = texel_ndc / ndc_per_world;
 
@@ -419,7 +433,7 @@ fn apply_spot_light(in: LightInput, light_index: u32) -> vec3<f32> {
         let sample_position = vec4(in.position.xyz + in.surface_normal * normal_bias, 1.0);
 
         light_factor = vec3<f32>(0.0);
-        let frag_in_light = view_to_shadow * sample_position;
+        let frag_in_light = world_to_shadow * sample_position;
         let ndc = frag_in_light.xyz / frag_in_light.w;
         var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
         shadow_uv.y = 1.0 - shadow_uv.y;
@@ -495,7 +509,7 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
 
         var light_input: LightInput;
 
-        let v = normalize(-in.position.xyz); //already in view space
+        let v = normalize(camera.world[3].xyz - in.position.xyz);
 
         var n = in.normal;
         var t = in.tangent.xyz;
@@ -518,9 +532,9 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
                 //if we have tangents, do extra calculations & use the normal map
                 //let tangent = normalize(v.tangent - dot(v.tangent, v.normal) * v.normal); //re-orthogonalize
                 let binormal = normalize(cross(in.normal, in.tangent.xyz) * in.tangent.w);
-                let tangent_to_view = mat3x3<f32>(in.tangent.xyz, binormal, in.normal);
+                let tangent_to_world = mat3x3<f32>(in.tangent.xyz, binormal, in.normal);
                 //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
-                n = normalize(tangent_to_view * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
+                n = normalize(tangent_to_world * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
             }
             n = select(-n, n, front_facing);
             light_input = LightInput(in.position, in.normal, true, n, t, v, final_color, roughness, metallic);
@@ -528,14 +542,11 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
 
         let probe_a = instance.probe_a;
         if(probe_a != -1) {
-            let p_world = (camera.inv_view * vec4<f32>(in.position.xyz, 1.0)).xyz;
-            let n_world = normalize((camera.inv_view * vec4<f32>(n, 0.0)).xyz);
-            let v_world = normalize((camera.inv_view * vec4<f32>(v, 0.0)).xyz);
-            let r = reflect(-v_world, n_world);
+            let r = reflect(-v, n);
             let probe = reflection_probes[probe_a];
             //need to flip Y because cubemaps were captured with negative-y-up
-            let r_env = box_project(r, p_world, probe) * vec3<f32>(1.0, -1.0, 1.0);
-            let n_env = n_world * vec3<f32>(1.0, -1.0, 1.0);
+            let r_env = box_project(r, in.position.xyz, probe) * vec3<f32>(1.0, -1.0, 1.0);
+            let n_env = n * vec3<f32>(1.0, -1.0, 1.0);
 
             let max_mip = f32(textureNumLevels(cubemaps) - 1);
 
@@ -547,14 +558,29 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
         }
         light *= ambient_occlusion;
 
-        for (var i: u32 = 0; i < arrayLength(&point_lights); i++) {
-            light += apply_point_light(light_input, i);
-        }
-        for (var i: u32 = 0; i < arrayLength(&directional_lights); i++) {
+        for(var i: u32 = 0; i < light_counts.directional_lights; i++) {
             light += apply_directional_light(light_input, i);
         }
-        for (var i: u32 = 0; i < arrayLength(&spot_lights); i++) {
-            light += apply_spot_light(light_input, i);
+        if(all(camera.grid_size != vec3<u32>(0))) {
+            let header = cluster_header(in.out_position.xy, in.position.w);
+
+            if(light_counts.visualize_clusters == 1) {
+                return vec4<f32>(f32(header.z)/64.0, f32(header.w)/64.0, 1.0, 1.0);
+            }
+            
+            let offset = header.x;
+            let probe_count = header.y;
+            let point_count = header.z;
+            let spot_count = header.w;
+            let probe_offset = offset;
+            let point_offset = offset+probe_count;
+            let spot_offset = offset+probe_count+point_count;
+            for(var i = 0u; i < point_count; i++) {
+                light += apply_point_light(light_input, clusters[point_offset+i]);
+            }
+            for(var i = 0u; i < spot_count; i++) {
+                light += apply_spot_light(light_input, clusters[spot_offset+i]);
+            }
         }
     }
 
@@ -572,7 +598,7 @@ fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
     var final_color = in_color;
     let fog_max = camera.fog_distance[1];
     var fog_min = camera.fog_distance[0];
-    let dist = abs(in_position.z / in_position.w);
+    let dist = abs(in_position.w);
     let fog_factor = clamp((fog_max - dist) / (fog_max - fog_min), 0, 1);
     var fog_color = vec4<f32>(camera.color.rgb, final_color.a);
     final_color = mix(fog_color, final_color, fog_factor);
@@ -622,7 +648,7 @@ fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut 
 
     let most_color = max(max(final_color.r, final_color.g), final_color.b);
     let weight = max(min(1.0, most_color * final_color.a), final_color.a) *
-        clamp(0.03 / (1e-5 + pow(in.position.z / 200, 4.0)), 1e-2, 3e3);
+        clamp(0.03 / (1e-5 + pow(in.position.w / 200, 4.0)), 1e-2, 3e3);
 
     out.accum = vec4<f32>(final_color.rgb * final_color.a, final_color.a) * weight;
     out.accum = clamp(out.accum, vec4<f32>(-1e4), vec4<f32>(1e4)); //prevent accum saturation

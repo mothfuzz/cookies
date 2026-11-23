@@ -18,11 +18,6 @@ Render_Target :: struct {
     hash: Render_Target_Hash,
 }
 
-Render_Target_Draw :: struct {
-    target: Render_Target,
-    camera: Camera_Draw,
-}
-
 make_render_target :: proc(size: [2]uint, filtering: bool = true, mipmapping: bool = true) -> (target: Render_Target) {
 
     target.output = make_render_texture(size, with_srgb(ren.config.format), false, copy_dst = true, mip_count=mipmapping?mip_count(size):1) //don't juggle formats, use same format as screen

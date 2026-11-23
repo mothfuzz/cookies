@@ -42,8 +42,6 @@ Reflection_Probe_Uniforms :: struct #align(16) {
       maxi: [3]f32, //padding
 }
 
-Reflection_Probe_Draw :: distinct Render_Target_Draw
-
 make_probe_capture :: proc() {
     probe_capture = make_render_target(REFLECTION_CUBEMAP_RES, mipmapping=false)
     cubemaps_sampler = wgpu.DeviceCreateSampler(ren.device, &{

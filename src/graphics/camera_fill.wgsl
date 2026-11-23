@@ -1,6 +1,6 @@
 struct Camera {
     view: mat4x4<f32>,
-    inv_view: mat4x4<f32>,
+    world: mat4x4<f32>,
     projection: mat4x4<f32>,
     viewproj: mat4x4<f32>,
     inv_viewproj: mat4x4<f32>,
@@ -46,7 +46,7 @@ fn fs_main(in: CameraFillOut) -> @location(0) vec4<f32> {
 
     //need to use an arbitrary point bc camera might be infinite
     let world_pos = camera.inv_viewproj * vec4<f32>(in.ndc, 1.0, 1.0);
-    let camera_pos = camera.inv_view[3].xyz;
+    let camera_pos = camera.world[3].xyz;
     let sample_ray = normalize(world_pos.xyz - camera_pos * world_pos.w);
     let skybox_color = textureSample(skybox, smp, sample_ray);
     color = mix(color, skybox_color.rgb, skybox_color.a);
