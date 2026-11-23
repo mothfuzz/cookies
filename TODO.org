@@ -1,6 +1,10 @@
 #+title: Todo
 
-- once instances and lights are both canonicalized, GPU-driven compute culling->drawIndirect becomes obvious. Canonicalized lights are already basically clustered forward with a 1x1x1 froxel grid, so real clustered forward comes out with little work. 2026 renderer babey.
+- GPUize the now-2026 renderer
+  - CPU instance binning becomes compute culling -> drawIndirect
+  - CPU light binning becomes GPU light binning
+- environment probe selection from clustered (accumulate til weight=1 with per-camera global fallback)
+  - with one per-camera fallback and set_background(&camera, probe), we can do the SotC thing by rendering to a chain of skybox->terrain probe->main camera
 
 - more window toggles (fullscreen, logical resolution with letterboxing/pillarboxing, vsync options, show/hide cursor, etc)
   - borderless fullscreen working, now needs separate logical resolution + framebuffer + output pass. Also do HDR/LDR + color grading here, at a later point
@@ -18,16 +22,14 @@
   - raycasts!!! for each shape. ...Analytical or GJK?
 
 - clean up ui_draw_* functions to be more architecturally similar to the rest of the renderer (might have to rethink coordinate systems...)
-- actually, scratch that. Get rid of UI. add a depth_clear flag to Camera. 
+- actually, scratch that. Get rid of UI. add a depth_clear flag to Camera. (what about ordering?? another sort?)
 - render to a UI camera with depth clear and its own layer_mask, draw_rect unlit, use z_2d/z_layer, boom.
-
-- World structure (do not incorporate Actors, requires user-knowledge of multithreading) that associates a single transform.Node with all subsystems that require the concept of 'where an entity is' (spatial grid/collision/spatial audio/etc.), fan-out to those modules in one call instead of user calling a bunch of update_/transform_* in a row
-  - maybe move actors into its own library, and don't include *any* game-level architectural abstractions in cookies
+- font improvements go here, too. Move actual rendering out of font.odin and into commands.odin, have font.odin expose iterators (and coloring, markup, wobble, user char procs, whatever)
 
 - rewrite main.odin to be a better testbed/demo program to showcase engine's capabilities
 
 - gamepad support via SDL's gamepad facilities (possibly need another API for Web, or limit to desktop-only)
-- also on that note, typing text, mouse wheel, etc
+- also on that note, typing text, mouse wheel, more keys, etc
 
 - more simple rendering primitives - lines are done, so we need '3d' - fill-boxes, procedural spheres, collider shapes, etc.
 
@@ -36,10 +38,6 @@
 - this should be done AFTER logical resolution, as it should simply operate on the output buffer
 
 - audio settings (mainly just be able to set volume & pitch dynamically)
-
-- some kind of heuristic-based environment probe selection so that multiple probes work & background probe fallback comes naturally
-- probably do this per-pixel once clustered is in
-- planar reflections using existing environment probe machinery
 
 post-1.0 features:
 
