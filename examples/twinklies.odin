@@ -145,13 +145,11 @@ draw :: proc(t: ^Twinklies, alpha, delta: f64) {
         graphics.draw_light(l)
     }
 
-    fps := fmt.tprintf("fps: %f", 1.0/delta)
-    window.set_title(fps)
+    ui_txt := fmt.tprintf("fps: %f\nlights: %d", 1.0/delta, t.lights_resolution * t.lights_resolution)
+    //window.set_title(fps)
     width := f32(graphics.screen_resolution.x)
     height := f32(graphics.screen_resolution.y)
-    graphics.ui_draw_text(fps, t.font, {-width/2, +height/2}, {1, 1, 1, 1})
-    num_lights := fmt.tprintf("lights: %d", t.lights_resolution * t.lights_resolution)
-    graphics.ui_draw_text(num_lights, t.font, {-width/2, +height/2-32}, {1, 1, 1, 1})
+    graphics.ui_draw_text(ui_txt, t.font, {-width/2, +height/2}, {1, 1, 1, 1})
 }
 
 quit :: proc(t: ^Twinklies) {
