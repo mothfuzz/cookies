@@ -11,9 +11,12 @@ struct Camera {
     cascade_splits: vec4<f32>,
     cascade_offset: u32,
     cascade_count: u32,
-    point_count: u32,
-    spot_count: u32,
-    light_offset: u32,
+    xy_scale: vec2<f32>,
+    xy_bias: vec2<f32>,
+    z_scale: f32,
+    z_bias: f32,
+    grid_size: vec3<u32>,
+    header_offset: u32,
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
 
