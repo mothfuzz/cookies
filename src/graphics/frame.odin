@@ -202,9 +202,13 @@ Screen_Pass :: struct {
     using main: Main_Pass,
 }
 
+//4 u32s vs 5 u32s chicanery
 Draw_Indirect :: struct {
-    first_instance: u32,
+    count: u32, //vertex or index
     instance_count: u32,
+    first: u32, //vertex or index
+    base_vertex: u32, //read as first_instance in drawindirect
+    first_instance: u32, //0 either way
 }
 
 Frame :: struct {
@@ -246,6 +250,7 @@ Frame :: struct {
     solid_end, trans_begin: int,
 
     instance_ids: [dynamic]u32, //vertex buffer
+    instance_offsets: [dynamic]u64,
     draws: [dynamic]Draw_Indirect, //buffer (later)
 }
 
@@ -278,6 +283,7 @@ clear_frame :: proc() {
     clear(&f.batch_order)
     clear(&f.batch_ids)
     clear(&f.instance_ids)
+    clear(&f.instance_offsets)
     clear(&f.draws)
     f.last_key = {}
     f.last_batch_id = 0
@@ -307,6 +313,7 @@ delete_frame :: proc() {
     delete(f.batch_order)
     delete(f.batch_ids)
     delete(f.instance_ids)
+    delete(f.instance_offsets)
     delete(f.draws)
 }
 
@@ -343,11 +350,13 @@ sort_batches :: proc() {
 
 }
 
+draw_buffer := Growable_Buffer{usage={.Storage, .Indirect, .CopyDst}}
 cull_instances :: proc() {
     ids := make([]u32, len(f.instance_bins), context.temp_allocator)
     counts  := make([]u32, len(f.batches), context.temp_allocator) //indexed by dense batch id
 
     resize(&f.draws, len(f.cameras)*len(f.batches))
+    resize(&f.instance_offsets, len(f.draws))
 
     for camera, c in f.cameras {
         slice.zero(counts)
@@ -361,10 +370,14 @@ cull_instances :: proc() {
         //compact per batch
         for b, i in f.batch_order {
             n := counts[b]
-            f.draws[c*len(f.batches) + i] = {u32(len(f.instance_ids)), n}
+            draw_index := c * len(f.batches) + i
+            draw := Draw_Indirect{instance_count=n, count=f.batches[b].mesh.size} //first_instance not universally supported
+            f.draws[draw_index] = draw
+            f.instance_offsets[draw_index] = u64(len(f.instance_ids)) * size_of(u32)
             append(&f.instance_ids, ..ids[f.batches[b].first_instance:][:n])
         }
     }
+    write_buffer(&draw_buffer, f.draws[:])
 }
 
 @(private)
@@ -574,7 +587,7 @@ bin_lights :: proc() {
         cam_pos := camera.world[3].xyz
         far := linalg.dot(scene_center - cam_pos, fwd) + linalg.dot(linalg.abs(fwd), scene_half)
         far = max(far, raster.near+1e-6) //clamp to near plane
-        far = min(far, raster.far) //camera far or scene far, whichever is smaller
+        if raster.far != 0 do far = min(far, raster.far) //camera far or scene far, whichever is smaller
         near := raster.near
         //screen-space xy-scaling
         camera.xy_scale = ([2]f32)(camera.grid_size.xy)/raster.viewport.zw
@@ -753,7 +766,6 @@ draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blen
     n := len(f.batches)
     //instance data survives fill pipeline switches, so can be bound once
     bind_instance_data(render_pass)
-    bind_instance_ids(render_pass)
     bind_light_data(render_pass)
 
     for c in first_cam ..< first_cam + cam_count {
@@ -773,8 +785,11 @@ draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blen
         prev_mesh, prev_material := ~Mesh_Hash(0), ~Material_Hash(0)
 
         for i in begin..<end {
-            draw := f.draws[cam*n + i]
-            if draw.instance_count == 0 do continue
+            draw_index := cam*n + i
+            draw := f.draws[draw_index]
+            offset := f.instance_offsets[draw_index]
+            
+            //if draw.instance_count == 0 do continue
             batch := &f.batches[f.batch_order[i]]
 
             //select pipeline by stage/blend/primitive
@@ -804,10 +819,14 @@ draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blen
             }
 
             //draw!
+            bind_instance_ids(render_pass, offset)
+            indirect_offset := u64(draw_index * size_of(Draw_Indirect))
             if batch.mesh.indices != nil {
-                wgpu.RenderPassEncoderDrawIndexed(render_pass, batch.mesh.size, draw.instance_count, 0, 0, draw.first_instance)
+                //wgpu.RenderPassEncoderDrawIndexed(render_pass, batch.mesh.size, draw.instance_count, 0, 0, 0)
+                wgpu.RenderPassEncoderDrawIndexedIndirect(render_pass, draw_buffer.buffer, indirect_offset)
             } else {
-                wgpu.RenderPassEncoderDraw(render_pass, batch.mesh.size, draw.instance_count, 0, draw.first_instance)
+                //wgpu.RenderPassEncoderDraw(render_pass, batch.mesh.size, draw.instance_count, 0, 0)
+                wgpu.RenderPassEncoderDrawIndirect(render_pass, draw_buffer.buffer, indirect_offset)
             }
         }
     }

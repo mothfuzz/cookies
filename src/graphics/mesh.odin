@@ -546,7 +546,7 @@ write_instance_ids :: proc() {
     write_buffer(&instance_id_buffer, f.instance_ids[:])
 }
 
-bind_instance_ids :: proc(render_pass: wgpu.RenderPassEncoder) {
+bind_instance_ids :: proc(render_pass: wgpu.RenderPassEncoder, offset: u64) {
     size := wgpu.BufferGetSize(instance_id_buffer.buffer)
-    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 7, instance_id_buffer.buffer, 0, size)
+    wgpu.RenderPassEncoderSetVertexBuffer(render_pass, 7, instance_id_buffer.buffer, offset, size - offset)
 }
