@@ -43,7 +43,7 @@ camera_layout_entries := []wgpu.BindGroupLayoutEntry{
 camera_layout: wgpu.BindGroupLayout
 camera_bind_group: wgpu.BindGroup
 
-camera_buffer := Growable_Buffer{usage={.Uniform, .CopyDst}}
+camera_buffer := Growable_Buffer{usage={.Uniform, .Storage, .CopyDst}}
 
 write_camera_buffer :: proc() {
     rebind := camera_bind_group == nil

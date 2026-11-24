@@ -476,11 +476,11 @@ render_frame :: proc() {
     sort_passes()
     resolve_passes(screen)
     bin_lights()
-    cull_instances()
     write_instance_buffers()
     write_camera_buffer()
     write_light_buffers(command_encoder)
-    write_instance_ids()
+    //cull_instances_cpu()
+    cull_instances_gpu(command_encoder)
 
     for p in pass_range(.Shadow) {
         //pass := f.passes[p]

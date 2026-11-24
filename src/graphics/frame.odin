@@ -350,12 +350,12 @@ sort_batches :: proc() {
 
 }
 
-draw_buffer := Growable_Buffer{usage={.Storage, .Indirect, .CopyDst}}
-cull_instances :: proc() {
+draws_buffer := Growable_Buffer{usage={.Storage, .Indirect, .CopyDst}}
+cull_instances_cpu :: proc() {
     ids := make([]u32, len(f.instance_bins), context.temp_allocator)
     counts  := make([]u32, len(f.batches), context.temp_allocator) //indexed by dense batch id
 
-    resize(&f.draws, len(f.cameras)*len(f.batches))
+    resize(&f.draws, len(f.cameras) * len(f.batches))
     resize(&f.instance_offsets, len(f.draws))
 
     for camera, c in f.cameras {
@@ -368,16 +368,145 @@ cull_instances :: proc() {
             counts[bin.batch] += 1
         }
         //compact per batch
-        for b, i in f.batch_order {
+        for b in f.batch_order {
             n := counts[b]
-            draw_index := c * len(f.batches) + i
-            draw := Draw_Indirect{instance_count=n, count=f.batches[b].mesh.size} //first_instance not universally supported
+            batch := f.batches[b]
+            draw_index := c * len(f.batches) + int(b)
+            draw := Draw_Indirect{instance_count=n, count=batch.mesh.size} //first_instance not universally supported
             f.draws[draw_index] = draw
             f.instance_offsets[draw_index] = u64(len(f.instance_ids)) * size_of(u32)
-            append(&f.instance_ids, ..ids[f.batches[b].first_instance:][:n])
+            append(&f.instance_ids, ..ids[batch.first_instance:][:n])
         }
     }
-    write_buffer(&draw_buffer, f.draws[:])
+    write_buffer(&draws_buffer, f.draws[:])
+    write_instance_ids()
+}
+
+Cull_Counts_Uniforms :: struct {
+    num_bins: u32,
+    num_batches: u32,
+}
+
+cull_bind_group: wgpu.BindGroup
+cull_pipeline: wgpu.ComputePipeline
+cull_shader: wgpu.ShaderModule
+cull_pipeline_layout: wgpu.PipelineLayout
+cull_layout: wgpu.BindGroupLayout
+cull_layout_entries :: []wgpu.BindGroupLayoutEntry{
+    //draws
+    {binding = 0, visibility = {.Compute}, buffer = {type=.Storage}},
+    //instance ids
+    {binding = 1, visibility = {.Compute}, buffer = {type=.Storage}},
+    //cameras
+    {binding = 2, visibility = {.Compute}, buffer = {type=.ReadOnlyStorage}},
+    //cull counts
+    {binding = 3, visibility = {.Compute}, buffer = {type=.Uniform}},
+    //bins
+    {binding = 4, visibility = {.Compute}, buffer = {type=.ReadOnlyStorage}},
+    //batch offsets
+    {binding = 5, visibility = {.Compute}, buffer = {type=.ReadOnlyStorage}},
+}
+batch_offsets_buffer := Growable_Buffer{usage={.Storage, .CopyDst}}
+instance_bins_buffer := Growable_Buffer{usage={.Storage, .CopyDst}}
+cull_counts_buffer: wgpu.Buffer
+cull_instances_gpu :: proc(command_encoder: wgpu.CommandEncoder) {
+    rebind := cull_bind_group == nil
+
+    if cull_layout == nil {
+        cull_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
+            entries = raw_data(cull_layout_entries),
+            entryCount = len(cull_layout_entries),
+        })
+    }
+    if cull_pipeline_layout == nil {
+        cull_pipeline_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
+            bindGroupLayoutCount = 1,
+            bindGroupLayouts = &cull_layout,
+        })
+    }
+    if cull_shader == nil {
+        cull_shader = wgpu.DeviceCreateShaderModule(ren.device, &{
+            nextInChain = &wgpu.ShaderSourceWGSL{
+                sType = .ShaderSourceWGSL,
+                code = #load("cull_instances.wgsl"),
+            }
+        })
+    }
+    if cull_pipeline == nil {
+        cull_pipeline = wgpu.DeviceCreateComputePipeline(ren.device, &{
+            layout = cull_pipeline_layout,
+            compute = {
+                module = cull_shader,
+                entryPoint = "cull_instances",
+            }
+        })
+    }
+
+    cull_counts := Cull_Counts_Uniforms{
+        num_batches = u32(len(f.batches)),
+        num_bins = u32(len(f.instance_bins))
+    }
+    if cull_counts_buffer == nil {
+        cull_counts_buffer = wgpu.DeviceCreateBufferWithData(ren.device, &{usage={.Uniform, .CopyDst}}, cull_counts)
+        rebind = true
+    } else {
+        wgpu.QueueWriteBuffer(ren.queue, cull_counts_buffer, 0, &cull_counts, size_of(Cull_Counts_Uniforms))
+    }
+
+    batch_offsets := make([]u32, len(f.batches), context.temp_allocator)
+    for b, i in f.batches {
+        batch_offsets[i] = b.first_instance
+    }
+    rebind |= write_buffer(&batch_offsets_buffer, batch_offsets)
+    rebind |= write_buffer(&instance_bins_buffer, f.instance_bins[:])
+
+    resize(&f.draws, len(f.cameras) * len(f.batches))
+    resize(&f.instance_offsets, len(f.draws))
+
+    for camera, c in f.cameras {
+        for b in f.batch_order {
+            batch := f.batches[b]
+            draw_index := c * len(f.batches) + int(b)
+            draw := Draw_Indirect{instance_count=0, count=batch.mesh.size}
+            f.draws[draw_index] = draw
+            f.instance_offsets[draw_index] = u64(c * len(f.instance_bins) + int(batch.first_instance)) * size_of(u32)
+        } 
+    }
+    rebind |= write_buffer(&draws_buffer, f.draws[:])
+    rebind |= grow_instance_ids()
+
+    //build bind group & execute compute pass
+    if rebind {
+        if cull_bind_group != nil {
+            wgpu.BindGroupRelease(cull_bind_group)
+        }
+        bindings := []wgpu.BindGroupEntry{
+            {binding = 0, buffer = draws_buffer.buffer, size = u64(draws_buffer.capacity)},
+            {binding = 1, buffer = instance_id_buffer.buffer, size = u64(instance_id_buffer.capacity)},
+            {binding = 2, buffer = camera_buffer.buffer, size = u64(camera_buffer.capacity)},
+            {binding = 3, buffer = cull_counts_buffer, size = size_of(Cull_Counts_Uniforms)},
+            {binding = 4, buffer = instance_bins_buffer.buffer, size = u64(instance_bins_buffer.capacity)},
+            {binding = 5, buffer = batch_offsets_buffer.buffer, size = u64(batch_offsets_buffer.capacity)},
+        }
+        cull_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+            label = "instance culling",
+            layout = cull_layout,
+            entryCount = len(bindings),
+            entries = raw_data(bindings),
+        })
+    }
+
+    compute_pass := wgpu.CommandEncoderBeginComputePass(command_encoder, nil)
+    wgpu.ComputePassEncoderSetPipeline(compute_pass, cull_pipeline)
+    wgpu.ComputePassEncoderSetBindGroup(compute_pass, 0, cull_bind_group)
+    num_instances := len(f.instance_bins)
+    num_cameras := len(f.cameras)
+    workgroup_size :: 64
+    x := u32(math.ceil(f32(num_instances) / f32(workgroup_size)))
+    y := u32(num_cameras)
+    z := u32(1)
+    wgpu.ComputePassEncoderDispatchWorkgroups(compute_pass, x, y, z)
+    wgpu.ComputePassEncoderEnd(compute_pass)
 }
 
 @(private)
@@ -785,12 +914,12 @@ draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blen
         prev_mesh, prev_material := ~Mesh_Hash(0), ~Material_Hash(0)
 
         for i in begin..<end {
-            draw_index := cam*n + i
-            draw := f.draws[draw_index]
+            b := f.batch_order[i]
+            draw_index := cam*n + int(b)
             offset := f.instance_offsets[draw_index]
             
             //if draw.instance_count == 0 do continue
-            batch := &f.batches[f.batch_order[i]]
+            batch := &f.batches[b]
 
             //select pipeline by stage/blend/primitive
             primitive := batch.key.primitive
@@ -819,14 +948,15 @@ draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blen
             }
 
             //draw!
+            //draw := f.draws[draw_index]
             bind_instance_ids(render_pass, offset)
             indirect_offset := u64(draw_index * size_of(Draw_Indirect))
             if batch.mesh.indices != nil {
                 //wgpu.RenderPassEncoderDrawIndexed(render_pass, batch.mesh.size, draw.instance_count, 0, 0, 0)
-                wgpu.RenderPassEncoderDrawIndexedIndirect(render_pass, draw_buffer.buffer, indirect_offset)
+                wgpu.RenderPassEncoderDrawIndexedIndirect(render_pass, draws_buffer.buffer, indirect_offset)
             } else {
                 //wgpu.RenderPassEncoderDraw(render_pass, batch.mesh.size, draw.instance_count, 0, 0)
-                wgpu.RenderPassEncoderDrawIndirect(render_pass, draw_buffer.buffer, indirect_offset)
+                wgpu.RenderPassEncoderDrawIndirect(render_pass, draws_buffer.buffer, indirect_offset)
             }
         }
     }

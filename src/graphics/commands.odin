@@ -118,7 +118,7 @@ draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32
     f.batches[id].instance_count += 1
 
     //gather binning data & expand scene bounds
-    bin := Instance_Bin_Uniforms{bounds, layers, id}
+    bin := Instance_Bin_Uniforms{bounds, id, layers}
 
     mini := &f.scene_extents[0]
     maxi := &f.scene_extents[1]

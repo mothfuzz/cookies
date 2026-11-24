@@ -450,8 +450,8 @@ Instance_Uniforms :: struct {
 //everything needed to determine belonging to a view's batches
 Instance_Bin_Uniforms :: struct {
     using bounds: Bounds,
-    layer_mask: Layer_Mask,
     batch: u32,
+    layer_mask: Layer_Mask,
 }
 
 @(private)
@@ -540,10 +540,16 @@ bind_mesh :: proc(render_pass: wgpu.RenderPassEncoder, mesh: Mesh) {
     }
 }
 
-instance_id_buffer := Growable_Buffer{usage={.Vertex, .CopyDst}}
+instance_id_buffer := Growable_Buffer{usage={.Vertex, .Storage, .CopyDst}}
 
+//written directly from f.instance_ids (CPU path)
 write_instance_ids :: proc() {
     write_buffer(&instance_id_buffer, f.instance_ids[:])
+}
+
+//allocated in fixed regions of C*N (GPU path)
+grow_instance_ids :: proc() -> bool {
+    return grow_buffer(&instance_id_buffer, len(f.cameras) * len(f.instance_bins), u32)
 }
 
 bind_instance_ids :: proc(render_pass: wgpu.RenderPassEncoder, offset: u64) {

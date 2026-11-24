@@ -38,7 +38,7 @@ rebuild_lights :: proc(t: ^Twinklies) {
             color.g = rand.float32()
             color.b = rand.float32()
             color.a = 1
-            append(&t.lights, graphics.make_point_light(position={x, 0.02, z}, color=color, range=0.15, render_shadows=false))
+            append(&t.lights, graphics.make_point_light(position={x, 0.02, z}, color=color, range=0.15*8.0/f32(t.lights_resolution), render_shadows=false))
         }
     }
 }
