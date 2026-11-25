@@ -8,14 +8,12 @@ struct Camera {
     color: vec4<f32>, //rgb + exposure
     fog_distance: vec2<f32>, //fog onset + render distance
     layer_mask: vec2<u32>,
+    mirrored: u32, reserved: u32,
+    cascade_offset: u32, cascade_count: u32,
     cascade_splits: vec4<f32>,
-    cascade_offset: u32,
-    cascade_count: u32,
-    xy_scale: vec2<f32>,
-    xy_bias: vec2<f32>,
-    z_scale: f32,
-    z_bias: f32,
-    grid_size: vec3<u32>,
+    xy_scale: vec2<f32>, xy_bias: vec2<f32>,
+    z_scale: f32, z_bias: f32,
+    grid_size: u32, //4xu8s
     header_offset: u32,
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -54,7 +52,7 @@ fn fs_main(in: CameraFillOut) -> @location(0) vec4<f32> {
     let skybox_color = textureSample(skybox, smp, sample_ray);
     color = mix(color, skybox_color.rgb, skybox_color.a);
 
-    let background_color = textureSample(background, smp, in.ndc * 0.5 + 0.5);
+    let background_color = textureSample(background, smp, in.ndc * vec2<f32>(0.5, -0.5) + 0.5);
     color = mix(color, background_color.rgb, background_color.a);
 
     return vec4<f32>(color, 1.0);

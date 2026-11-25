@@ -8,14 +8,12 @@ struct Camera {
     color: vec4<f32>, //rgb + exposure
     fog_distance: vec2<f32>, //fog onset + render distance
     layer_mask: vec2<u32>,
+    mirrored: u32, reserved: u32,
+    cascade_offset: u32, cascade_count: u32,
     cascade_splits: vec4<f32>,
-    cascade_offset: u32,
-    cascade_count: u32,
-    xy_scale: vec2<f32>,
-    xy_bias: vec2<f32>,
-    z_scale: f32,
-    z_bias: f32,
-    grid_size: vec3<u32>,
+    xy_scale: vec2<f32>, xy_bias: vec2<f32>,
+    z_scale: f32, z_bias: f32,
+    grid_size: u32, //4xu8s
     header_offset: u32,
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -68,9 +66,9 @@ struct LightCounts {
 @group(3) @binding(11) var spot_light_shadow_color: texture_2d_array<f32>;
 
 struct ReflectionProbe {
-    position: vec4<f32>,
-    mini: vec3<f32>, slot: u32,
-    maxi: vec3<f32>,
+    position: vec3<f32>, slot: u32,
+    half_extents: vec3<f32>, flags: u32,
+    capture_offset: vec3<f32>, edge_blend: f32,
 }
 @group(3) @binding(12) var cubemaps: texture_cube_array<f32>;
 @group(3) @binding(13) var cubemaps_sampler: sampler;
@@ -195,7 +193,7 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
 }
 
 fn cluster_header(frag_coord: vec2<f32>, view_z: f32) -> vec4<u32> {
-    let g = camera.grid_size;
+    let g = unpack4xU8(camera.grid_size).xyz;
     var tile = floor(frag_coord * camera.xy_scale + camera.xy_bias);
     tile = clamp(tile, vec2<f32>(0.0), vec2<f32>(g.xy - 1));
     var slice = floor(log2(-view_z) * camera.z_scale + camera.z_bias);
@@ -474,19 +472,14 @@ fn calculate_reflection_pbr(in: LightInput, radiance: vec3<f32>, ambient: vec3<f
 }
 
 fn box_project(r: vec3<f32>, position: vec3<f32>, probe: ReflectionProbe) -> vec3<f32> {
-    if (probe.position.w < 0.5) {
+    if (probe.flags == 0) {
         return r;
     }
-    let bmin = probe.position.xyz + probe.mini.xyz;
-    let bmax = probe.position.xyz + probe.maxi.xyz;
-    //distance along r to each plane
-    let t1 = (bmin - position) / r;
-    let t2 = (bmax - position) / r;
-    //get exit plane per axis (larger t), then nearest of those
-    let tmax = max(t1, t2);
+    let local = clamp(position - probe.position, -probe.half_extents, probe.half_extents);
+    let tmax = (probe.half_extents - sign(r) * local) / abs(r); //nearest exit plane per axis
     let t = min(min(tmax.x, tmax.y), tmax.z);
-    let hit = position + r * t;
-    return hit - probe.position.xyz;
+    let hit = probe.position + local + r * t;
+    return hit - (probe.position + probe.capture_offset);
 }
 
 override TOPOLOGY: u32 = 0; // 0 = triangles, 1 = lines, 2 = points
@@ -536,32 +529,11 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
                 //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
                 n = normalize(tangent_to_world * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
             }
-            n = select(-n, n, front_facing);
+            n = select(-n, n, front_facing || camera.mirrored != 0u);
             light_input = LightInput(in.position, in.normal, true, n, t, v, final_color, roughness, metallic);
         }
 
-        let probe_a = instance.probe_a;
-        if(probe_a != -1) {
-            let r = reflect(-v, n);
-            let probe = reflection_probes[probe_a];
-            //need to flip Y because cubemaps were captured with negative-y-up
-            let r_env = box_project(r, in.position.xyz, probe) * vec3<f32>(1.0, -1.0, 1.0);
-            let n_env = n * vec3<f32>(1.0, -1.0, 1.0);
-
-            let max_mip = f32(textureNumLevels(cubemaps) - 1);
-
-            let radiance = textureSampleLevel(cubemaps, cubemaps_sampler, r_env, probe_a, roughness * max_mip);
-            let ambient = textureSampleLevel(cubemaps, cubemaps_sampler, n_env, probe_a, max_mip);
-            light += calculate_reflection_pbr(light_input, radiance.rgb, ambient.rgb);
-        } else {
-            light += calculate_reflection_pbr(light_input, vec3<f32>(0.0), vec3<f32>(0.03));
-        }
-        light *= ambient_occlusion;
-
-        for(var i: u32 = 0; i < light_counts.directional_lights; i++) {
-            light += apply_directional_light(light_input, i);
-        }
-        if(all(camera.grid_size != vec3<u32>(0))) {
+        if(camera.grid_size != 0) {
             let header = cluster_header(in.out_position.xy, in.position.w);
 
             if(light_counts.visualize_clusters == 1) {
@@ -575,12 +547,51 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
             let probe_offset = offset;
             let point_offset = offset+probe_count;
             let spot_offset = offset+probe_count+point_count;
+
+            var radiance = vec3<f32>(0.0);
+            var ambient = vec3<f32>(0.0);
+            var weight_accum = 0.0;
+            for(var i = 0u; i < probe_count && weight_accum < 0.999; i++) {
+                let r = reflect(-v, n);
+                let probe = reflection_probes[clusters[probe_offset+i]];
+                let r_env = box_project(r, in.position.xyz, probe);
+                let n_env = n;
+
+                let d = probe.half_extents - abs(in.position.xyz - probe.position);
+                let edge = min(d.x, min(d.y, d.z));
+                if(edge <= -probe.edge_blend) {
+                    continue;
+                }
+                //1 inside the box to the box edge, 0 at edge_blend units outside
+                let weight = saturate(1.0 + edge / probe.edge_blend);
+
+                if(weight > 0) {
+                    let k = (1.0 - weight_accum) * weight; //prefer higher priority probes
+                    weight_accum += k;
+                    let max_mip = f32(textureNumLevels(cubemaps) - 1);
+                    radiance += textureSampleLevel(cubemaps, cubemaps_sampler, r_env, probe.slot, roughness * max_mip).rgb * k;
+                    ambient += textureSampleLevel(cubemaps, cubemaps_sampler, n_env, probe.slot, max_mip).rgb * k;
+                }
+            }
+            let remaining_weight = 1.0 - weight_accum;
+            if(remaining_weight > 0) {
+                //do global probe/background here
+                ambient += remaining_weight * vec3<f32>(0.03);
+            }
+            radiance *= ambient_occlusion;
+            ambient *= ambient_occlusion;
+            light += calculate_reflection_pbr(light_input, radiance, ambient);
+            
             for(var i = 0u; i < point_count; i++) {
                 light += apply_point_light(light_input, clusters[point_offset+i]);
             }
+
             for(var i = 0u; i < spot_count; i++) {
                 light += apply_spot_light(light_input, clusters[spot_offset+i]);
             }
+        }
+        for(var i: u32 = 0; i < light_counts.directional_lights; i++) {
+            light += apply_directional_light(light_input, i);
         }
     }
 
@@ -598,7 +609,8 @@ fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
     var final_color = in_color;
     let fog_max = camera.fog_distance[1];
     var fog_min = camera.fog_distance[0];
-    let dist = abs(in_position.w);
+    //let dist = abs(in_position.w); //depth fog
+    let dist = distance(in_position.xyz, camera.world[3].xyz); //radial fog
     let fog_factor = clamp((fog_max - dist) / (fog_max - fog_min), 0, 1);
     var fog_color = vec4<f32>(camera.color.rgb, final_color.a);
     final_color = mix(fog_color, final_color, fog_factor);

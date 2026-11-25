@@ -32,13 +32,13 @@ Camera_Uniforms :: struct #align(256) {
     color: [4]f32, //rgb + exposure
     fog_distance: [2]f32,
     layer_mask: Layer_Mask, //vec2<u32>
-    cascade_splits: [4]f32,
+    mirrored: b32, reserved: u32,
     cascade_offset, cascade_count: u32,
+    cascade_splits: [4]f32,
     //cluster info
     xy_scale: [2]f32, xy_bias: [2]f32, //derived from viewport
     z_scale: f32, z_bias: f32,
-    grid_size: [3]u32, header_offset: u32,
-    //padding
+    grid_size: [4]u8, header_offset: u32,
 }
 
 Camera_Raster :: struct {
@@ -61,6 +61,7 @@ Camera :: struct {
     range: [4]f32, //fov, near, far, fog onset
     relative: bool, //auto-resize based on window width/height
     fill: bool,
+    cubemap: bool, //flips view x
     layer_mask: Layer_Mask,
 }
 
@@ -151,7 +152,11 @@ render to HDR (i.e. floating point) target so you can do post-processing
 @(export)
 make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = 0, fov: f32 = 0, fill: bool = true, layers: Layer_Mask = All_Layers) -> (cam: Camera) {
     cam.viewport = viewport
-    cam.range = {fov, near, far, (far - near) / 2}
+    fog_onset := f32(0)
+    if far != 0 {
+        fog_onset = (far - near) / 2
+    }
+    cam.range = {fov, near, far, fog_onset}
     cam.rotation = 1
     cam.fill = fill
     cam.color.a = 1.0
@@ -219,6 +224,15 @@ FOV :: 60.0
 calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, target_resolution: [2]uint = 0) -> (draw: Camera_Uniforms, raster: Camera_Raster) {
     draw.world = trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1)
     draw.view = rigid_inverse(draw.world)
+    if cam.cubemap {
+        xflip: matrix[4,4]f32
+        xflip[0,0] = -1
+        xflip[1,1] = 1
+        xflip[2,2] = 1
+        xflip[3,3] = 1
+        draw.view = xflip * draw.view
+        draw.mirrored = true
+    }
     fov := cam.range[0]
     if fov == 0 {
         fov = linalg.to_radians(f32(FOV))

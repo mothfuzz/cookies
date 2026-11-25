@@ -15,36 +15,38 @@ draw_render_target :: proc(camera: Camera, target: Render_Target, trans: transfo
 
 @(export)
 draw_reflection_probe :: proc(probe: Reflection_Probe, trans: transform.Transform = nil) {
-    /* TODO:
-    don't keep reflection_probe_boxes around.
-    have a list in Frame, like lights.
-    transform probes via trans before append
-    upload the list to the GPU post-submission
-    do clustered.
-    do probe assignment in the fragment shader via clustering, not on the CPU.
-    this makes probes work with lighting as part of the same general feature set
-    do clustered!
-    */
+    uniforms: Reflection_Probe_Uniforms
+    uniforms.slot = u32(probe.cubemap_slot)
+    uniforms.flags = 0 if probe.projection_type == .Infinite else 1
+    uniforms.edge_blend = probe.edge_blend
+    uniforms.capture_offset = probe.capture_offset
+    
     trans := transform.world(trans)
-    position := (trans * [4]f32{**probe.position, 1}).xyz
-    size := probe.size / 2 //half-extents
-    local: matrix[3,3]f32
+    uniforms.position = (trans * [4]f32{**probe.position, 1}).xyz
+    uniforms.half_extents = probe.size / 2 //half-extents
+    //orientation gives incorrect parallax for box-projection, so just use scale...
+    /*local: matrix[3,3]f32
     local[0] = linalg.abs(trans[0].xyz)
     local[1] = linalg.abs(trans[1].xyz)
     local[2] = linalg.abs(trans[2].xyz)
-    size = local * size
+    half_extents = local * half_extents*/
+    scale: [3]f32
+    scale.x = linalg.length(trans[0].xyz)
+    scale.y = linalg.length(trans[1].xyz)
+    scale.z = linalg.length(trans[2].xyz)
+    uniforms.half_extents = scale * uniforms.half_extents
+    append(&f.reflection_probes, uniforms)
 
     cam := probe.camera
+    far := linalg.length(probe.size) //max distance to corner * 2
+    set_draw_distance(&cam, far)
+    set_fog_onset(&cam, far/2) //fog starts roughly at face edge
     dirs := cubemap_directions()
     for face in schedule_faces(probe) {
-        set_draw_distance(&cam, size[dirs[face].major_axis])
-        look_at(&cam, position, position + dirs[face].forward, dirs[face].up)
-        //will uncomment once we have realloc/buffers set up
-        //push_camera(probe_pass(probe.cubemap_slot, face), calculate_camera(probe.camera, 1, REFLECTION_CUBEMAP_RES))
+        capture_position := uniforms.position + probe.capture_offset
+        look_at(&cam, capture_position, capture_position + dirs[face].forward, dirs[face].up)
+        push_camera(probe_pass(probe.cubemap_slot, face), calculate_camera(cam, 1, REFLECTION_CUBEMAP_RES))
     }
-    //append(&f.reflection_probes, probe) //meshes need all drawn cubemaps, not just ones with capture this frame
-    //will probably not be appending the whole probe, just slot+box uniforms
-    //resize buffer to cubemaps_len, iterate, boxes[slot] = probe.box
 }
 
 

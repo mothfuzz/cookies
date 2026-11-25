@@ -408,7 +408,7 @@ quit :: proc() {
     wgpu.ShaderModuleRelease(ren.camera_fill_shader)
     delete_main_textures(ren.main_textures)
     delete_mipmapping()
-    delete_cull_bindings()
+    delete_culling()
     delete_renderer_bindings()
 
     //safely clean up resources prior to releasing
@@ -471,14 +471,15 @@ render_frame :: proc() {
     }
 
     sort_batches()
-    sort_passes()
-    resolve_passes(screen)
     bin_lights()
     write_instance_buffers()
     write_camera_buffer()
     write_light_buffers(command_encoder)
     //cull_instances_cpu()
     cull_instances_gpu(command_encoder)
+
+    sort_passes()
+    resolve_passes(screen)
 
     for p in pass_range(.Shadow) {
         //pass := f.passes[p]

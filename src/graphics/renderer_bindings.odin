@@ -363,8 +363,7 @@ write_light_buffers :: proc(command_encoder: wgpu.CommandEncoder) {
     rebind |= grow_texture_array(&spot_light_depth_shadows, f.spot_lights.num_shadowed)
     rebind |= grow_texture_array(&spot_light_color_shadows, f.spot_lights.num_shadowed)
     rebind |= realloc_cubemaps(command_encoder)
-    //need to fill out
-    rebind |= write_buffer(&probes_buffer, []Reflection_Probe_Uniforms{})
+    rebind |= write_buffer(&probes_buffer, f.reflection_probes[:])
     rebind |= write_buffer2(&clusters_buffer, f.cluster_headers[:], f.cluster_items[:])
     rebind |= write_buffer(&shadow_transforms_buffer, []matrix[4,4]f32{})
     

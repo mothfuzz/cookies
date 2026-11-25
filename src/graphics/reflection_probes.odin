@@ -15,7 +15,6 @@ Capture_State :: struct {
 
 capture_states: [dynamic]Capture_State
 
-cubemaps_capture: Texture
 cubemaps: Growable_Texture_Array
 cubemaps_sampler: wgpu.Sampler
 cubemaps_len: int
@@ -32,14 +31,17 @@ Reflection_Probe :: struct {
     cubemap_slot: int,
     position: [3]f32,
     size: [3]f32, //0 = infinite
+    projection_type: Projection_Type,
+    edge_blend: f32,
+    capture_offset: [3]f32,
     faces_per_frame: int, //0 = one shot
     camera: Camera, //so that probes can have individual bg/exposure/layer_mask
 }
 
 Reflection_Probe_Uniforms :: struct #align(16) {
-      position: [4]f32, //w = 0/1 inf/box perspective
-      mini: [3]f32, slot: u32,
-      maxi: [3]f32, //padding
+    position: [3]f32, slot: u32,
+    half_extents: [3]f32, flags: u32, //currently 0=infinite 1=box-projected
+    capture_offset: [3]f32, edge_blend: f32,
 }
 
 make_probe_capture :: proc() {
@@ -95,7 +97,7 @@ make_cubemaps_mipmappers :: proc(new_size: int) {
     }
 }
 
-make_reflection_probe :: proc(position: [3]f32, size: [3]f32 = 0, faces_per_frame: int = 6, projection_type: Projection_Type = .Default, layers: Layer_Mask = All_Layers) -> (probe: Reflection_Probe) {
+make_reflection_probe :: proc(position: [3]f32, size: [3]f32 = 0, faces_per_frame: int = 6, projection_type: Projection_Type = .Default, edge_blend: f32 = 0.1, capture_offset: [3]f32 = 0, layers: Layer_Mask = All_Layers) -> (probe: Reflection_Probe) {
     probe.position = position
     probe.size = size
     projection_type := projection_type
@@ -106,7 +108,11 @@ make_reflection_probe :: proc(position: [3]f32, size: [3]f32 = 0, faces_per_fram
             projection_type = .Box_Projected
         }
     }
+    probe.projection_type = projection_type
+    probe.edge_blend = edge_blend
+    probe.capture_offset = capture_offset
     probe.camera = make_camera({0, 0, REFLECTION_CUBEMAP_RES, REFLECTION_CUBEMAP_RES}, 0.1, 0, math.PI/2, true, layers)
+    probe.camera.cubemap = true
     probe.faces_per_frame = faces_per_frame
     if slot, ok := pop_safe(&cubemaps_free); ok {
         probe.cubemap_slot = slot
@@ -145,6 +151,8 @@ schedule_faces :: proc(probe: Reflection_Probe) -> (faces: bit_set[0..<6]) {
 }
 
 @(private)
-realloc_cubemaps :: proc(command_encoder: wgpu.CommandEncoder) -> bool {
-    return grow_texture_array(&cubemaps, cubemaps_len, command_encoder)
+realloc_cubemaps :: proc(command_encoder: wgpu.CommandEncoder) -> (rebind: bool) {
+    rebind = grow_texture_array(&cubemaps, cubemaps_len, command_encoder)
+    make_cubemaps_mipmappers(cubemaps_len)
+    return
 }

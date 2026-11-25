@@ -349,18 +349,18 @@ Cubemap_Direction :: struct {
     forward: [3]f32,
     up: [3]f32,
     major_axis: Axis,
+    sign: f32,
 }
 
 cubemap_directions :: proc() -> (directions: [6]Cubemap_Direction) {
     // +X, -X, +Y, -Y, +Z, -Z - forward, up
-    //need to use -Y-up here due to cubemap face conventions
     return {
-        {{+1, 0, 0}, {0, -1, 0}, .X},
-        {{-1, 0, 0}, {0, -1, 0}, .X},
-        {{0, +1, 0}, {0, 0, +1}, .Y},
-        {{0, -1, 0}, {0, 0, -1}, .Y},
-        {{0, 0, +1}, {0, -1, 0}, .Z},
-        {{0, 0, -1}, {0, -1, 0}, .Z},
+        {{+1, 0, 0}, {0, +1, 0}, .X, +1},
+        {{-1, 0, 0}, {0, +1, 0}, .X, -1},
+        {{0, +1, 0}, {0, 0, -1}, .Y, +1},
+        {{0, -1, 0}, {0, 0, +1}, .Y, -1},
+        {{0, 0, +1}, {0, +1, 0}, .Z, +1},
+        {{0, 0, -1}, {0, +1, 0}, .Z, -1},
     }
 }
 

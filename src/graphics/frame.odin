@@ -219,6 +219,8 @@ Frame :: struct {
 
     spot_shadow_transforms: [dynamic]matrix[4,4]f32,
     cascade_shadow_transforms: [dynamic]matrix[4,4]f32,
+
+    reflection_probes: [dynamic]Reflection_Probe_Uniforms,
     
     scene_extents: [2][3]f32,
 
@@ -263,6 +265,7 @@ clear_frame :: proc() {
     clear_lights(&f.spot_lights)
     clear(&f.spot_shadow_transforms)
     clear(&f.cascade_shadow_transforms)
+    clear(&f.reflection_probes)
     clear(&f.cluster_headers)
     clear(&f.cluster_items)
     clear(&f.cameras)
@@ -298,6 +301,7 @@ delete_frame :: proc() {
     delete_lights(f.spot_lights)
     delete(f.spot_shadow_transforms)
     delete(f.cascade_shadow_transforms)
+    delete(f.reflection_probes)
     delete(f.cluster_headers)
     delete(f.cluster_items)
     delete(f.cameras)
@@ -485,13 +489,14 @@ push_camera :: proc(pass: int, camera: Camera_Uniforms, raster: Camera_Raster) {
     camera := camera
     // TODO: size these dynamically using viewport + a tile size (small for Screen, large for Capture)
     switch f.passes[pass].kind {
-    case .Shadow: camera.grid_size = {0, 0, 0}
-    case .Capture: camera.grid_size = {4, 4, 8}
-    case .Screen: camera.grid_size = {16, 9, 24}
+    case .Shadow: camera.grid_size.xyz = {0, 0, 0}
+    case .Capture: camera.grid_size.xyz = {4, 4, 8}
+    case .Screen: camera.grid_size.xyz = {16, 9, 24}
     }
     //1
     camera.header_offset = u32(len(f.cluster_headers))
-    resize(&f.cluster_headers, camera.header_offset + math.prod(camera.grid_size[:]))
+    grid_size := u32(camera.grid_size.x) * u32(camera.grid_size.y) * u32(camera.grid_size.z)
+    resize(&f.cluster_headers, camera.header_offset + grid_size)
     //can scale/bias also be calculated here?
     append(&f.cameras, camera)
     append(&f.rasters, raster)
@@ -599,6 +604,27 @@ resolve_passes :: proc(swapchain: wgpu.TextureView) {
             case nil: //user-RTT, already resolved upon submission
             case Probe_Source:
             //get resolve from slot+face
+            stage := &pass.stage.(Capture_Pass)
+            stage.attachments = {
+                msaa = probe_capture.main.msaa.view,
+                depth = probe_capture.main.depth.view,
+                accum = probe_capture.main.accum.view,
+                revealage = probe_capture.main.revealage.view,
+                oit_composite_bind_group = probe_capture.main.oit_composite_bind_group,
+            }
+            stage.resolve = probe_capture.msaa_resolve.view
+            stage.copy_info.src = {
+                texture = probe_capture.msaa_resolve.image,
+                aspect = .All,
+            }
+            stage.copy_info.dst = {
+                texture = cubemaps.texture,
+                mipLevel = 0,
+                origin = {0, 0, u32(src.slot * 6 + src.face)},
+                aspect = .All,
+            }
+            stage.copy_info.size = {REFLECTION_CUBEMAP_RES, REFLECTION_CUBEMAP_RES, 1}
+            stage.mips = cubemaps_mipmappers[src.slot][src.face]
             case Shadow_Source:
             //get resolve from layer
             case Screen_Source:
@@ -690,16 +716,28 @@ bin_lights :: proc() {
         //slice = floor(log(view_z) * z_scale + z_bias)
         //very nice
         
-        header_count := math.prod(camera.grid_size[:])
+        header_count := u32(camera.grid_size.x) * u32(camera.grid_size.y) * u32(camera.grid_size.z)
         headers := f.cluster_headers[camera.header_offset:][:header_count]
 
         item_sizes := make([]u32, len(headers), context.temp_allocator)
 
         EMPTY_RANGE :: [2][3]u8{{1, 0, 0}, {0, 0, 0}} //so that range loops run 0 times with <=
-        cluster_index :: #force_inline proc(g: [3]u32, x, y, z: u8) -> u32 {
-            return (u32(x) * g.y * g.z) + (u32(y) * g.z) + u32(z)
+        cluster_index :: #force_inline proc(g: [4]u8, x, y, z: u8) -> u32 {
+            return (u32(x) * u32(g.y) * u32(g.z)) + (u32(y) * u32(g.z)) + u32(z)
         }
-        
+
+        probe_ranges := make([][2][3]u8, len(f.reflection_probes), context.temp_allocator)
+        for &probe, i in f.reflection_probes {
+            probe_ranges[i] = EMPTY_RANGE
+            //use loose sphere test for MVP
+            radius := linalg.length(probe.half_extents) + probe.edge_blend
+            if !sphere_in_frustum(camera^, probe.position, radius) do continue
+            r := sphere_clusters(camera^, near, far, probe.position, radius)
+            probe_ranges[i] = r
+            for x in r[0].x..=r[1].x do for y in r[0].y..=r[1].y do for z in r[0].z..=r[1].z {
+                item_sizes[cluster_index(camera.grid_size, x, y, z)] += 1
+            }
+        }
         point_light_ranges := make([][2][3]u8, len(f.point_lights.entries), context.temp_allocator)
         for &pl, i in f.point_lights.entries {
             point_light_ranges[i] = EMPTY_RANGE
@@ -734,6 +772,15 @@ bin_lights :: proc() {
         resize(&f.cluster_items, running)
 
         //must be in shader read order (that is, add probes prior to points & spots)
+        for r, i in probe_ranges {
+            for x in r[0].x..=r[1].x do for y in r[0].y..=r[1].y do for z in r[0].z..=r[1].z {
+                c := cluster_index(camera.grid_size, x, y, z)
+                //optional narrowphase goes here later (box/froxel)
+                f.cluster_items[item_sizes[c]] = u32(i)
+                item_sizes[c] += 1
+                headers[c].probe_count += 1
+            }
+        }
         for r, i in point_light_ranges {
             for x in r[0].x..=r[1].x do for y in r[0].y..=r[1].y do for z in r[0].z..=r[1].z {
                 c := cluster_index(camera.grid_size, x, y, z)

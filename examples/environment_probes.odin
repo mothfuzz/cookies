@@ -52,7 +52,7 @@ init :: proc() {
         {position={-0.5, 0.0, +0.5}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
     }, {2, 1, 0, 3, 2, 0})
     img := []u32{
-        0xffffffff, 0xff000000, 0xffffffff, 0xff000000,
+        0xffffffff, 0xffff0000, 0xffffffff, 0xff000000,
         0xff000000, 0xffffffff, 0xff000000, 0xffffffff,
         0xffffffff, 0xff000000, 0xffffffff, 0xff000000,
         0xff000000, 0xffffffff, 0xff000000, 0xffffffff,
@@ -80,12 +80,13 @@ init :: proc() {
     teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
     fmt.println(teapot.models[0].primitives)
     teapot.models[0].primitives[0].params.pbr_mul = {1, 0.2, 1}
+    teapot.models[0].primitives[0].params.pbr_add = {0, 0, 1}
     transform.init_node(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
 
     light = graphics.make_directional_light({0, -0.6, 0.4}, {0.4, 0.5, 1.0, 4})
     light_trans = transform.make()
 
-    ref = graphics.make_reflection_probe({0, 0.2, 0}, 1)
+    ref = graphics.make_reflection_probe({0, 0.5, 0}, 1, capture_offset = {0, -0.3, 0}, layers = graphics.Layer_Mask(~u64(1)))
     graphics.set_skybox(&ref.camera, skybox)
 }
 
@@ -123,8 +124,8 @@ draw :: proc(alpha, delta: f64) {
     graphics.draw_camera(cam, cam_trans)
     graphics.draw_mesh(quad, quad_mat, material_params=graphics.mat_params(metallic_mul=0, roughness_mul = 0.2))
     graphics.draw_mesh(wall, stained_glass_mat, material_params=graphics.mat_params(metallic_mul=0), double_sided=true)
-    graphics.draw_scene(teapot)
-    //graphics.draw_directional_light(light, light_trans)
+    graphics.draw_scene(teapot, layers=1)
+    graphics.draw_directional_light(light, light_trans)
     graphics.draw_reflection_probe(ref)
 }
 
