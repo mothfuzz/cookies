@@ -726,6 +726,10 @@ bin_lights :: proc() {
             return (u32(x) * u32(g.y) * u32(g.z)) + (u32(y) * u32(g.z)) + u32(z)
         }
 
+        //sort probes by volume, lowest volume = highest influence
+        slice.sort_by(f.reflection_probes[:], proc(a, b: Reflection_Probe_Uniforms) -> bool {
+            return linalg.length(a.half_extents) < linalg.length(b.half_extents)
+        })
         probe_ranges := make([][2][3]u8, len(f.reflection_probes), context.temp_allocator)
         for &probe, i in f.reflection_probes {
             probe_ranges[i] = EMPTY_RANGE
