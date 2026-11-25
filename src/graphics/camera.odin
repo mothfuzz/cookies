@@ -32,7 +32,7 @@ Camera_Uniforms :: struct #align(256) {
     color: [4]f32, //rgb + exposure
     fog_distance: [2]f32,
     layer_mask: Layer_Mask, //vec2<u32>
-    mirrored: b32, reserved: u32,
+    reserved: [2]u32,
     cascade_offset, cascade_count: u32,
     cascade_splits: [4]f32,
     //cluster info
@@ -61,7 +61,7 @@ Camera :: struct {
     range: [4]f32, //fov, near, far, fog onset
     relative: bool, //auto-resize based on window width/height
     fill: bool,
-    cubemap: bool, //flips view x
+    mirrored: bool, //flips view x
     layer_mask: Layer_Mask,
 }
 
@@ -119,6 +119,11 @@ set_layer_mask :: proc(cam: ^Camera, layer_mask: Layer_Mask) {
 set_background_image :: proc(cam: ^Camera, tex: Texture) {
     cam.bg_image = tex.view
     rebind_bg(cam)
+}
+
+Camera_Background :: union {
+    wgpu.TextureView, //skybox
+    uint, //probe slot
 }
 
 @(export)
@@ -224,14 +229,13 @@ FOV :: 60.0
 calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, target_resolution: [2]uint = 0) -> (draw: Camera_Uniforms, raster: Camera_Raster) {
     draw.world = trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1)
     draw.view = rigid_inverse(draw.world)
-    if cam.cubemap {
+    if cam.mirrored {
         xflip: matrix[4,4]f32
         xflip[0,0] = -1
         xflip[1,1] = 1
         xflip[2,2] = 1
         xflip[3,3] = 1
         draw.view = xflip * draw.view
-        draw.mirrored = true
     }
     fov := cam.range[0]
     if fov == 0 {

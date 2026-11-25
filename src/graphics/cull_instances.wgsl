@@ -18,7 +18,7 @@ struct Camera {
     color: vec4<f32>, //rgb + exposure
     fog_distance: vec2<f32>, //fog onset + render distance
     layer_mask: vec2<u32>,
-    mirrored: u32, reserved: u32,
+    reserved: vec2<u32>,
     cascade_offset: u32, cascade_count: u32,
     cascade_splits: vec4<f32>,
     xy_scale: vec2<f32>, xy_bias: vec2<f32>,

@@ -944,8 +944,10 @@ draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blen
             primitive := batch.key.primitive
             if raster.flip {
                 #partial switch primitive {
-                    case .Triangles_Back: primitive = .Triangles_Front
-                    case .Triangles_Front: primitive = .Triangles_Back
+                    case .Triangles_CCW: primitive = .Triangles_CW
+                    case .Triangles_CW: primitive = .Triangles_CCW
+                    case .Triangles_CCW_Double_Sided: primitive = .Triangles_CW_Double_Sided
+                    case .Triangles_CW_Double_Sided: primitive = .Triangles_CCW_Double_Sided
                 }
             }
             pipeline := pipelines[stage][blend][primitive]

@@ -421,12 +421,6 @@ make_mesh :: proc{/*make_mesh_from_array,*/ make_mesh_from_slice, make_mesh_from
 
 //instance data
 
-Cull_Mode :: enum {
-    Back_CCW, //normal
-    Front_CCW, //inverted
-    None, //double-sided
-}
-
 Instance_Flags :: enum u32 {
     Unlit,
     Billboard

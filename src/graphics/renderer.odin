@@ -46,7 +46,7 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
 uniform_alignment: int
 storage_alignment: int
 
-create_pipeline :: proc(cull_mode: Cull_Mode, topology: Mesh_Topology) -> (solid, trans: wgpu.RenderPipeline) {
+create_pipeline :: proc(topology: wgpu.PrimitiveTopology, front_face: wgpu.FrontFace, cull_mode: wgpu.CullMode) -> (solid, trans: wgpu.RenderPipeline) {
     constants := []wgpu.ConstantEntry{
         {key = "TOPOLOGY", value = topology_constant[topology]}
     }
@@ -71,9 +71,9 @@ create_pipeline :: proc(cull_mode: Cull_Mode, topology: Mesh_Topology) -> (solid
             constants = raw_data(constants),
         },
         primitive = {
-            topology = wgpu_topology[topology],
-            cullMode = wgpu_cull_mode[cull_mode],
-            frontFace = .CCW,
+            topology = topology,
+            cullMode = cull_mode,
+            frontFace = front_face,
         },
         depthStencil = &{
             format = .Depth24PlusStencil8,
@@ -140,9 +140,9 @@ create_pipeline :: proc(cull_mode: Cull_Mode, topology: Mesh_Topology) -> (solid
             constants = raw_data(constants),
         },
         primitive = {
-            topology = wgpu_topology[topology],
-            cullMode = wgpu_cull_mode[cull_mode],
-            frontFace = .CCW,
+            topology = topology,
+            cullMode = cull_mode,
+            frontFace = front_face,
         },
         depthStencil = &{
             format = .Depth24PlusStencil8,

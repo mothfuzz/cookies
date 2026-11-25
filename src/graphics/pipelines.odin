@@ -28,38 +28,27 @@ alpha_blends :: [Alpha_Class]bit_set[Blend_Key]{
         .Trans = {.Blended},
 }
 
-//will replace the Cull_Mode split in a lot of places.
 Primitive_Key :: enum u8 {
-    Triangles_Back,
-    Triangles_Front,
-    Triangles_None,
+    Triangles_CCW,
+    Triangles_CW,
+    Triangles_CCW_Double_Sided,
+    Triangles_CW_Double_Sided,
     Lines,
     Points,
 }
-topology_cull := [Primitive_Key]struct{Cull_Mode, Mesh_Topology} {
-        .Triangles_Back = {.Back_CCW, .Triangles},
-        .Triangles_Front = {.Front_CCW, .Triangles},
-        .Triangles_None = {.None, .Triangles},
-        .Lines = {.None, .Lines},
-        .Points = {.None, .Points},
+primitive_state := [Primitive_Key]struct{wgpu.PrimitiveTopology, wgpu.FrontFace, wgpu.CullMode} {
+        .Triangles_CCW = {.TriangleList, .CCW, .Back},
+        .Triangles_CW = {.TriangleList, .CW, .Back},
+        .Triangles_CCW_Double_Sided = {.TriangleList, .CCW, .None},
+        .Triangles_CW_Double_Sided = {.TriangleList, .CW, .None},
+        .Lines = {.LineList, .Undefined, .None},
+        .Points = {.PointList, .Undefined, .None},
 }
 
-wgpu_cull_mode := [Cull_Mode]wgpu.CullMode {
-        .Back_CCW = .Back,
-        .Front_CCW = .Front,
-        .None = .None,
-}
-
-wgpu_topology := [Mesh_Topology]wgpu.PrimitiveTopology {
-        .Triangles = .TriangleList,
-        .Lines = .LineList,
-        .Points = .PointList,
-}
-
-topology_constant := [Mesh_Topology]f64 {
-        .Triangles = 0,
-        .Lines = 1,
-        .Points = 2,
+topology_constant := #partial [wgpu.PrimitiveTopology]f64 {
+        .TriangleList = 0,
+        .LineList = 1,
+        .PointList = 2,
 }
 
 pipelines: [Stage_Key][Blend_Key][Primitive_Key]wgpu.RenderPipeline
@@ -68,7 +57,7 @@ pipelines: [Stage_Key][Blend_Key][Primitive_Key]wgpu.RenderPipeline
 
 create_pipeline_table :: proc() {
     for key in Primitive_Key {
-        solid, trans := create_pipeline(**topology_cull[key])
+        solid, trans := create_pipeline(**primitive_state[key])
         pipelines[.Main][.Opaque][key] = solid
         pipelines[.Main][.Blended][key] = trans
     }

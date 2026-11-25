@@ -93,11 +93,18 @@ draw_mesh_internal :: proc(mesh: Mesh, material: Material, trans: matrix[4,4]f32
     key.alpha = alpha
     switch mesh.topology {
     case .Triangles:
-        key.primitive = .Triangles_Back
-        if double_sided {
-            key.primitive = .Triangles_None
-        } else if linalg.determinant(cast(matrix[3,3]f32)(inst.model)) < 0 {
-            key.primitive = .Triangles_Front
+        if linalg.determinant(cast(matrix[3,3]f32)(inst.model)) >= 0 {
+            if double_sided {
+                key.primitive = .Triangles_CCW_Double_Sided
+            } else {
+                key.primitive = .Triangles_CCW
+            }
+        } else {
+            if double_sided {
+                key.primitive = .Triangles_CW_Double_Sided
+            } else {
+                key.primitive = .Triangles_CW
+            }
         }
     case .Lines: key.primitive = .Lines
     case .Points: key.primitive = .Points

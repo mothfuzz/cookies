@@ -8,7 +8,7 @@ struct Camera {
     color: vec4<f32>, //rgb + exposure
     fog_distance: vec2<f32>, //fog onset + render distance
     layer_mask: vec2<u32>,
-    mirrored: u32, reserved: u32,
+    reserved: vec2<u32>,
     cascade_offset: u32, cascade_count: u32,
     cascade_splits: vec4<f32>,
     xy_scale: vec2<f32>, xy_bias: vec2<f32>,
@@ -179,8 +179,9 @@ fn vs_main(vertex: Vertex, @builtin(vertex_index) vertex_index: u32, @builtin(in
     }
     let tangent = bones3 * vertex.tangent.xyz;
     if(dot(tangent, tangent) > 0.0) {
+        let model3 = mat3x3<f32>(model[0].xyz, model[1].xyz, model[2].xyz) * bones3;
         let v_tangent = normalize((model * vec4<f32>(normalize(tangent), 0.0)).xyz);
-        v.tangent = vec4<f32>(v_tangent, vertex.tangent.w);
+        v.tangent = vec4<f32>(v_tangent, vertex.tangent.w * sign(determinant(model3)));
     }
 
     let tex_offset = instance.clip_rect.xy;
@@ -529,7 +530,7 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
                 //let view_to_tangent = transpose(mat3x3<f32>(v.tangent, normalize(cross(v.normal, v.tangent)), v.normal));
                 n = normalize(tangent_to_world * (textureSample(normal, smp, in.texcoord).rgb * 2.0 - 1.0));
             }
-            n = select(-n, n, front_facing || camera.mirrored != 0u);
+            n = select(-n, n, front_facing);
             light_input = LightInput(in.position, in.normal, true, n, t, v, final_color, roughness, metallic);
         }
 
