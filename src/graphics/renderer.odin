@@ -403,15 +403,13 @@ quit :: proc() {
     wgpu.BindGroupLayoutRelease(ren.oit_composite_bind_group_layout)
     wgpu.RenderPipelineRelease(ren.camera_fill_pipeline)
     wgpu.PipelineLayoutRelease(ren.camera_fill_layout)
-    wgpu.BindGroupLayoutRelease(camera_layout)
-    wgpu.BindGroupLayoutRelease(material_layout)
-    wgpu.BindGroupLayoutRelease(instances_layout)
-    wgpu.BindGroupLayoutRelease(lights_layout)
     wgpu.ShaderModuleRelease(ren.shader)
     wgpu.ShaderModuleRelease(ren.oit_composite_shader)
     wgpu.ShaderModuleRelease(ren.camera_fill_shader)
     delete_main_textures(ren.main_textures)
     delete_mipmapping()
+    delete_cull_bindings()
+    delete_renderer_bindings()
 
     //safely clean up resources prior to releasing
     wgpu.SurfaceUnconfigure(ren.surface)

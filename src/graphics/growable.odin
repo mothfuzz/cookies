@@ -44,6 +44,12 @@ write_buffer2 :: proc(g: ^Growable_Buffer, data1: []$T, data2: []$U) -> (rebind:
     return
 }
 
+delete_buffer :: proc(g: Growable_Buffer) {
+    if g.buffer != nil {
+        wgpu.BufferRelease(g.buffer)
+    }
+}
+
 Growable_Texture_Array :: struct {
     texture: wgpu.Texture,
     texture_view: wgpu.TextureView,

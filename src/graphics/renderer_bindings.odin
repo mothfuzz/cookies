@@ -63,10 +63,14 @@ write_camera_buffer :: proc() {
         })
     }
 }
-
 bind_camera_data :: proc(render_pass: wgpu.RenderPassEncoder, camera_index: u32) {
     offset := camera_index * size_of(Camera_Uniforms)
     wgpu.RenderPassEncoderSetBindGroup(render_pass, u32(Bind_Groups.Camera), camera_bind_group, {offset})
+}
+delete_camera_bindings :: proc() {
+    wgpu.BindGroupLayoutRelease(camera_layout)
+    wgpu.BindGroupRelease(camera_bind_group)
+    delete_buffer(camera_buffer)
 }
 
 material_layout_entries := []wgpu.BindGroupLayoutEntry{
@@ -124,6 +128,9 @@ delete_material_bind_group :: proc(bind_group: wgpu.BindGroup) {
 bind_material :: proc(render_pass: wgpu.RenderPassEncoder, bind_group: wgpu.BindGroup) {
     wgpu.RenderPassEncoderSetBindGroup(render_pass, u32(Bind_Groups.Material), bind_group)
 }
+delete_material_bindings :: proc() {
+    wgpu.BindGroupLayoutRelease(material_layout)
+}
 
 instances_layout_entries := []wgpu.BindGroupLayoutEntry{
     //instance data
@@ -166,12 +173,15 @@ write_instance_buffers :: proc() {
         })
     }
 }
-
 bind_instance_data :: proc(render_pass: wgpu.RenderPassEncoder) {
     wgpu.RenderPassEncoderSetBindGroup(render_pass, u32(Bind_Groups.Instance), instances_bind_group)
 }
-
-// TODO: lighting
+delete_instance_bindings :: proc() {
+    wgpu.BindGroupLayoutRelease(instances_layout)
+    wgpu.BindGroupRelease(instances_bind_group)
+    delete_buffer(instance_buffer)
+    delete_buffer(skeletons_buffer)
+}
 
 lights_layout_entries := []wgpu.BindGroupLayoutEntry{
     //point lights
@@ -390,7 +400,32 @@ write_light_buffers :: proc(command_encoder: wgpu.CommandEncoder) {
         })
     }
 }
-
 bind_light_data :: proc(render_pass: wgpu.RenderPassEncoder) {
     wgpu.RenderPassEncoderSetBindGroup(render_pass, u32(Bind_Groups.Lighting), lights_bind_group)
+}
+delete_light_bindings :: proc() {
+    wgpu.BindGroupLayoutRelease(lights_layout)
+    wgpu.BindGroupRelease(lights_bind_group)
+    delete_buffer(point_lights_buffer)
+    delete_buffer(directional_lights_buffer)
+    delete_buffer(spot_lights_buffer)
+    wgpu.BufferRelease(light_counts_buffer)
+    wgpu.SamplerRelease(shadow_depth_sampler)
+    wgpu.SamplerRelease(shadow_color_sampler)
+    delete_texture_array(point_light_depth_shadows)
+    delete_texture_array(point_light_color_shadows)
+    delete_texture_array(directional_light_depth_shadows)
+    delete_texture_array(directional_light_color_shadows)
+    delete_texture_array(spot_light_depth_shadows)
+    delete_texture_array(spot_light_color_shadows)
+    delete_buffer(probes_buffer)
+    delete_buffer(clusters_buffer)
+    delete_buffer(shadow_transforms_buffer)
+}
+
+delete_renderer_bindings :: proc() {
+    delete_camera_bindings()
+    delete_material_bindings()
+    delete_instance_bindings()
+    delete_light_bindings()
 }
