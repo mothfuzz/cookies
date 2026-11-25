@@ -530,6 +530,7 @@ user_pass :: proc(rt: Render_Target) -> int {
         pass.copy_info.size = {u32(rt.output.width), u32(rt.output.height), 1}
         pass.mips = rt.mipmapper
         id = push_pass(.Capture, pass)
+        f.pass_ids[rt.hash] = id
     }
     f.last_target = rt.hash
     f.last_target_id = id
@@ -555,6 +556,7 @@ screen_pass :: proc() -> int {
             oit_composite_bind_group = ren.main_textures.oit_composite_bind_group,
         }
         id = push_pass(.Screen, pass, Screen_Source{})
+        f.pass_ids[0] = id
     }
     return id
 }
@@ -691,6 +693,15 @@ sphere_clusters :: proc(camera: Camera_Uniforms, near, far: f32, center: [3]f32,
 
 //bins lights *and* reflection probes.
 bin_lights :: proc() {
+
+    //sort probes by volume, lowest volume = highest influence
+    slice.sort_by(f.reflection_probes[:], proc(a, b: Reflection_Probe_Uniforms) -> bool {
+        vol_a := a.half_extents.x * a.half_extents.y * a.half_extents.z
+        vol_b := b.half_extents.x * b.half_extents.y * b.half_extents.z
+        return vol_a < vol_b
+    })
+    
+    //assign clusters
     for cam in 0..<len(f.cameras) {
         camera := &f.cameras[cam]
         raster := &f.rasters[cam]
@@ -726,12 +737,6 @@ bin_lights :: proc() {
             return (u32(x) * u32(g.y) * u32(g.z)) + (u32(y) * u32(g.z)) + u32(z)
         }
 
-        //sort probes by volume, lowest volume = highest influence
-        slice.sort_by(f.reflection_probes[:], proc(a, b: Reflection_Probe_Uniforms) -> bool {
-            vol_a := a.half_extents.x * a.half_extents.y * a.half_extents.z
-            vol_b := b.half_extents.x * b.half_extents.y * b.half_extents.z
-            return vol_a < vol_b
-        })
         probe_ranges := make([][2][3]u8, len(f.reflection_probes), context.temp_allocator)
         for &probe, i in f.reflection_probes {
             probe_ranges[i] = EMPTY_RANGE
