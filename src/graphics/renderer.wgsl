@@ -645,7 +645,7 @@ fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut 
     var out: TransOut;
     let instance = instances[in.instance];
     let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
-    if !(base_color.a > 0 && base_color.a < 1) {
+    if !(base_color.a > 0 && base_color.a < 0.9) {
         discard;
     }
     var final_color = base_color;
