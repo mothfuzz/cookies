@@ -728,7 +728,9 @@ bin_lights :: proc() {
 
         //sort probes by volume, lowest volume = highest influence
         slice.sort_by(f.reflection_probes[:], proc(a, b: Reflection_Probe_Uniforms) -> bool {
-            return linalg.length(a.half_extents) < linalg.length(b.half_extents)
+            vol_a := a.half_extents.x * a.half_extents.y * a.half_extents.z
+            vol_b := b.half_extents.x * b.half_extents.y * b.half_extents.z
+            return vol_a < vol_b
         })
         probe_ranges := make([][2][3]u8, len(f.reflection_probes), context.temp_allocator)
         for &probe, i in f.reflection_probes {
