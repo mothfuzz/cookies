@@ -287,7 +287,7 @@ cubemap_directions :: proc() -> (directions: [6][2][3]f32) {
     }
 }
 
-make_cubemap_from_images :: proc(px, nx, py, ny, pz, nz: []byte, generate_mips: bool = true) -> (tex: Texture) {
+make_cubemap_from_images :: proc(px, nx, py, ny, pz, nz: []byte, generate_mips: bool = false) -> (tex: Texture) {
     imgs := [6][]byte{px, nx, py, ny, pz, nz}
     return make_texture_array_from_images(imgs[:], true, generate_mips)
 }

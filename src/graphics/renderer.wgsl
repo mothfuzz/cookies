@@ -555,11 +555,10 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
             var radiance = vec3<f32>(0.0);
             var ambient = vec3<f32>(0.0);
             var weight_accum = 0.0;
+            let r = reflect(-v, n);
             for(var i = 0u; i < probe_count && weight_accum < 0.999; i++) {
-                let r = reflect(-v, n);
                 let probe = reflection_probes[clusters[probe_offset+i]];
                 let r_env = box_project(r, in.position.xyz, probe);
-                let n_env = n;
 
                 let d = probe.half_extents - abs(in.position.xyz - probe.position);
                 let edge = min(d.x, min(d.y, d.z));
@@ -574,13 +573,17 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
                     weight_accum += k;
                     let max_mip = f32(textureNumLevels(cubemaps) - 1);
                     radiance += textureSampleLevel(cubemaps, cubemaps_sampler, r_env, probe.slot, roughness * max_mip).rgb * k;
-                    ambient += textureSampleLevel(cubemaps, cubemaps_sampler, n_env, probe.slot, max_mip).rgb * k;
+                    ambient += textureSampleLevel(cubemaps, cubemaps_sampler, n, probe.slot, max_mip).rgb * k;
                 }
             }
             let remaining_weight = 1.0 - weight_accum;
             if(remaining_weight > 0) {
-                //do global probe/background here
-                ambient += remaining_weight * vec3<f32>(0.03);
+                //fallback to the environment map
+                let max_mip = f32(textureNumLevels(environment) - 1);
+                let env_radiance = textureSampleLevel(environment, cubemaps_sampler, r, roughness * max_mip);
+                let env_ambient = textureSampleLevel(environment, cubemaps_sampler, n, max_mip);
+                radiance += mix(camera.color.rgb, env_radiance.rgb, env_radiance.a) * remaining_weight;
+                ambient  += mix(camera.color.rgb, env_ambient.rgb, env_ambient.a) * remaining_weight;
             }
             radiance *= ambient_occlusion;
             ambient *= ambient_occlusion;
