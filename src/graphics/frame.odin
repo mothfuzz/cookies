@@ -42,7 +42,7 @@ Alpha_Class :: enum u8 {
 alpha_class :: proc(a: Alpha_Set, mul, add: f32) -> (alpha: Alpha_Class, ok: bool) {
     solid, trans: bool
     test :: proc(lo, hi: f32) -> (solid, trans: bool) {
-        return hi >= 1, lo < 1 && hi > 0
+        return hi >= 0.9, lo < 0.9 && hi > 0
     }
     if a.zero {
         a, b := test(add, add) //mul * 0 == 0
@@ -499,6 +499,8 @@ push_camera :: proc(pass: int, camera: Camera_Uniforms, raster: Camera_Raster) {
 
     if k, v, just_inserted, err := map_entry(&f.camera_bind_groups, raster.background); err == nil {
         v.frames = 0
+    } else {
+        log.panic("Could not allocate memory for camera bind groups:", err)
     }
     // TODO: size these dynamically using viewport + a tile size (small for Screen, large for Capture)
     switch f.passes[pass].kind {
