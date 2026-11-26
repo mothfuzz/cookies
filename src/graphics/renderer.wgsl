@@ -17,6 +17,9 @@ struct Camera {
     header_offset: u32,
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var environment_sampler: sampler;
+@group(0) @binding(2) var environment: texture_cube<f32>;
+@group(0) @binding(3) var background: texture_2d<f32>;
 
 @group(1) @binding(0) var smp: sampler;
 @group(1) @binding(1) var base_color: texture_2d<f32>;

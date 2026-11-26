@@ -274,7 +274,20 @@ make_texture_array_from_images :: proc(imgs: [][]byte, cubemap: bool = false, ge
     return
 }
 
-make_cubemap_from_images :: proc(px, nx, py, ny, pz, nz: []byte, generate_mips: bool = false) -> (tex: Texture) {
+//sampling directions for cubemap faces
+cubemap_directions :: proc() -> (directions: [6][2][3]f32) {
+    // +X, -X, +Y, -Y, +Z, -Z - forward, up
+    return {
+        {{+1, 0, 0}, {0, +1, 0}},
+        {{-1, 0, 0}, {0, +1, 0}},
+        {{0, +1, 0}, {0, 0, -1}},
+        {{0, -1, 0}, {0, 0, +1}},
+        {{0, 0, +1}, {0, +1, 0}},
+        {{0, 0, -1}, {0, +1, 0}},
+    }
+}
+
+make_cubemap_from_images :: proc(px, nx, py, ny, pz, nz: []byte, generate_mips: bool = true) -> (tex: Texture) {
     imgs := [6][]byte{px, nx, py, ny, pz, nz}
     return make_texture_array_from_images(imgs[:], true, generate_mips)
 }
@@ -341,59 +354,6 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
 
     tex = make_texture_2D(final_texture, {uint(x), uint(y)}, true)
 
-    return
-}
-
-Axis :: enum u8 { X, Y, Z }
-Cubemap_Direction :: struct {
-    forward: [3]f32,
-    up: [3]f32,
-    major_axis: Axis,
-    sign: f32,
-}
-
-cubemap_directions :: proc() -> (directions: [6]Cubemap_Direction) {
-    // +X, -X, +Y, -Y, +Z, -Z - forward, up
-    return {
-        {{+1, 0, 0}, {0, +1, 0}, .X, +1},
-        {{-1, 0, 0}, {0, +1, 0}, .X, -1},
-        {{0, +1, 0}, {0, 0, -1}, .Y, +1},
-        {{0, -1, 0}, {0, 0, +1}, .Y, -1},
-        {{0, 0, +1}, {0, +1, 0}, .Z, +1},
-        {{0, 0, -1}, {0, +1, 0}, .Z, -1},
-    }
-}
-
-// NOTE: if you want multisampled render texture arrays, you'd need to render to a single multisampled render texture, then *resolve* it to one of the array layers.
-make_render_texture_array :: proc(size: [2]uint, format: wgpu.TextureFormat, layers: uint, cubemap: bool = false, copy_dst: bool = true, copy_src: bool = false, mip_count: int = 1) -> (tex: Texture) {
-    log.debug("creating render target array:", size.x, "x", size.y, "x", layers)
-    usage := bit_set[wgpu.TextureUsage; u64]{.RenderAttachment, .TextureBinding}
-    if copy_dst {
-        usage += {.CopyDst}
-    }
-    if copy_src {
-        usage += {.CopySrc}
-    }
-    tex.image = wgpu.DeviceCreateTexture(ren.device, &{
-        usage = usage,
-        dimension = ._2D,
-        size = {
-            width = u32(size.x),
-            height = u32(size.y),
-            depthOrArrayLayers = cubemap?u32(6*layers):u32(layers),
-        },
-        format = format,
-        mipLevelCount = u32(mip_count),
-        sampleCount = 1
-    })
-    tex.view = wgpu.TextureCreateView(tex.image, &{
-        dimension = cubemap?.CubeArray:._2DArray,
-        mipLevelCount = u32(mip_count),
-        arrayLayerCount = cubemap?u32(6*layers):u32(layers),
-    })
-    tex.alpha = {one = true, lo = 1, hi = 0} //I guess
-    tex.width = f32(size.x)
-    tex.height = f32(size.y)
     return
 }
 

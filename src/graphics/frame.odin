@@ -95,6 +95,11 @@ batch_key_less :: proc(a, b: Batch_Key) -> bool {
     return a.material < b.material
 }
 
+Camera_Bind_Group :: struct {
+    bind_group: wgpu.BindGroup,
+    frames: int, //evict if frames > 1
+}
+
 Light_List :: struct($T: typeid) {
     entries: [dynamic]T,
     num_shadowed: int,
@@ -230,6 +235,7 @@ Frame :: struct {
     //cameras
     cameras: [dynamic]Camera_Uniforms, //buffer
     rasters: [dynamic]Camera_Raster,
+    camera_bind_groups: map[Camera_Raster_Background]Camera_Bind_Group,
 
     passes: [dynamic]Pass,
     pass_order: [dynamic]int,
@@ -306,6 +312,9 @@ delete_frame :: proc() {
     delete(f.cluster_items)
     delete(f.cameras)
     delete(f.rasters)
+    for _, entry in f.camera_bind_groups {
+        wgpu.BindGroupRelease(entry.bind_group)
+    }
     delete(f.passes)
     delete(f.pass_order)
     delete(f.cam_order)
@@ -487,6 +496,10 @@ push_camera :: proc(pass: int, camera: Camera_Uniforms, raster: Camera_Raster) {
     raster := raster
     raster.pass = pass
     camera := camera
+
+    if k, v, just_inserted, err := map_entry(&f.camera_bind_groups, raster.background); err == nil {
+        v.frames = 0
+    }
     // TODO: size these dynamically using viewport + a tile size (small for Screen, large for Capture)
     switch f.passes[pass].kind {
     case .Shadow: camera.grid_size.xyz = {0, 0, 0}
@@ -920,12 +933,13 @@ draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blen
         cam := f.cam_order[c]
         raster := f.rasters[cam]
         wgpu.RenderPassEncoderSetViewport(render_pass, **raster.viewport, 0, 1)
-        bind_camera_data(render_pass, u32(cam))
+        bind_camera_data(render_pass, cam)
 
         //execute fill once for main/solid before other cameras
-        if stage == .Main && blend == .Opaque && raster.bg_bind_group != nil {
+        if stage == .Main && blend == .Opaque && raster.fill {
             wgpu.RenderPassEncoderSetPipeline(render_pass, ren.camera_fill_pipeline)
-            wgpu.RenderPassEncoderSetBindGroup(render_pass, 1, raster.bg_bind_group)
+            //camera bind group already set, right?
+            //wgpu.RenderPassEncoderSetBindGroup(render_pass, 1, camera_bind_group, )
             wgpu.RenderPassEncoderDraw(render_pass, 3, 1, 0, 0)
         }
 

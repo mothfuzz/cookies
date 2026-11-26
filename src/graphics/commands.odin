@@ -38,13 +38,12 @@ draw_reflection_probe :: proc(probe: Reflection_Probe, trans: transform.Transfor
     append(&f.reflection_probes, uniforms)
 
     cam := probe.camera
-    far := linalg.length(probe.size) //max distance to corner * 2
-    set_draw_distance(&cam, far)
-    set_fog_onset(&cam, far/2) //fog starts roughly at face edge
+    cam.far = linalg.length(probe.size) //max distance to corner * 2
+    cam.fog_onset = cam.far/2 //fog starts roughly at face edge
     dirs := cubemap_directions()
     for face in schedule_faces(probe) {
         capture_position := uniforms.position + probe.capture_offset
-        look_at(&cam, capture_position, capture_position + dirs[face].forward, dirs[face].up)
+        look_at(&cam, capture_position, capture_position + dirs[face][0], dirs[face][1])
         push_camera(probe_pass(probe.cubemap_slot, face), calculate_camera(cam, 1, REFLECTION_CUBEMAP_RES))
     }
 }

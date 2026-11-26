@@ -209,10 +209,6 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         entryCount = len(camera_layout_entries),
         entries = raw_data(camera_layout_entries),
     })
-    camera_bg_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
-        entryCount = len(camera_bg_layout_entries),
-        entries = raw_data(camera_bg_layout_entries),
-    })
     material_layout = wgpu.DeviceCreateBindGroupLayout(ren.device, &{
         entryCount = len(material_layout_entries),
         entries = raw_data(material_layout_entries),
@@ -305,7 +301,7 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
     })
 
     log.debug("creating camera fill pipeline...")
-    camera_fill_layouts := []wgpu.BindGroupLayout{camera_layout, camera_bg_layout}
+    camera_fill_layouts := []wgpu.BindGroupLayout{camera_layout}
     ren.camera_fill_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
         bindGroupLayoutCount = len(camera_fill_layouts),
         bindGroupLayouts = raw_data(camera_fill_layouts),

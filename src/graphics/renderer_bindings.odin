@@ -39,38 +39,88 @@ camera_layout_entries := []wgpu.BindGroupLayoutEntry{
         visibility = {.Vertex, .Fragment},
         buffer = {type = .Uniform, hasDynamicOffset = true},
     },
+    //sampler
+    {
+        binding = 1,
+        visibility = {.Fragment},
+        sampler = {type = .Filtering},
+    },
+    //environment cubemap
+    {
+        binding = 2,
+        visibility = {.Fragment},
+        texture = {sampleType = .Float, viewDimension = .Cube},
+    },
+    //2d background
+    {
+        binding = 3,
+        visibility = {.Fragment},
+        texture = {sampleType = .Float, viewDimension = ._2D},
+    },
 }
 camera_layout: wgpu.BindGroupLayout
-camera_bind_group: wgpu.BindGroup
+//camera bind groups cached because per-view textures need unique bind groups anyway
+environment_sampler: [2]wgpu.Sampler
 
 camera_buffer := Growable_Buffer{usage={.Uniform, .Storage, .CopyDst}}
 
+import "core:log"
 write_camera_buffer :: proc() {
-    rebind := camera_bind_group == nil
-    rebind |= write_buffer(&camera_buffer, f.cameras[:])
-    if rebind {
-        if camera_bind_group != nil {
-            wgpu.BindGroupRelease(camera_bind_group)
-        }
-        bindings := []wgpu.BindGroupEntry{
-            {binding = 0, buffer = camera_buffer.buffer, size = size_of(Camera_Uniforms)}
-        }
-        camera_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
-            label = "camera",
-            layout = camera_layout,
-            entryCount = len(bindings),
-            entries = raw_data(bindings)
+    if environment_sampler[int(true)] == nil {
+        environment_sampler[int(true)] = wgpu.DeviceCreateSampler(ren.device, &{
+            minFilter = .Linear,
+            magFilter = .Linear,
+            mipmapFilter = .Nearest,
+            maxAnisotropy = 1,
         })
     }
+    if environment_sampler[int(false)] == nil {
+        environment_sampler[int(false)] = wgpu.DeviceCreateSampler(ren.device, &{
+            minFilter = .Nearest,
+            magFilter = .Nearest,
+            mipmapFilter = .Nearest,
+            maxAnisotropy = 1,
+        })
+    }
+
+    rebind := write_buffer(&camera_buffer, f.cameras[:])
+    
+    counter := 0
+    for background, &entry in f.camera_bind_groups {
+        counter += 1
+        entry.frames += 1
+        if entry.frames > 1 {
+            log.debug("evicting bind group", counter)
+            wgpu.BindGroupRelease(entry.bind_group)
+            delete_key(&f.camera_bind_groups, background)
+            continue
+        }
+        if rebind || entry.bind_group == nil {
+            bindings := []wgpu.BindGroupEntry{
+                {binding = 0, buffer = camera_buffer.buffer, size = size_of(Camera_Uniforms)},
+                {binding = 1, sampler = environment_sampler[int(background.filtering)]},
+                {binding = 2, textureView = background.environment},
+                {binding = 3, textureView = background.image},
+            }
+            entry.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
+                label = "camera",
+                layout = camera_layout,
+                entryCount = len(bindings),
+                entries = raw_data(bindings)
+            })
+        }
+    }
 }
-bind_camera_data :: proc(render_pass: wgpu.RenderPassEncoder, camera_index: u32) {
+bind_camera_data :: proc(render_pass: wgpu.RenderPassEncoder, camera_index: int) {
     offset := camera_index * size_of(Camera_Uniforms)
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, u32(Bind_Groups.Camera), camera_bind_group, {offset})
+    bind_group := f.camera_bind_groups[f.rasters[camera_index].background].bind_group
+    wgpu.RenderPassEncoderSetBindGroup(render_pass, u32(Bind_Groups.Camera), bind_group, {u32(offset)})
 }
 delete_camera_bindings :: proc() {
     wgpu.BindGroupLayoutRelease(camera_layout)
-    wgpu.BindGroupRelease(camera_bind_group)
     delete_buffer(camera_buffer)
+    wgpu.SamplerRelease(environment_sampler[int(true)])
+    wgpu.SamplerRelease(environment_sampler[int(false)])
 }
 
 material_layout_entries := []wgpu.BindGroupLayoutEntry{

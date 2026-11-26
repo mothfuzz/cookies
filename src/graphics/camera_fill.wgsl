@@ -38,9 +38,9 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> CameraFillOut {
     return out;
 }
 
-@group(1) @binding(0) var smp: sampler;
-@group(1) @binding(1) var skybox: texture_cube<f32>;
-@group(1) @binding(2) var background: texture_2d<f32>;
+@group(0) @binding(1) var smp: sampler;
+@group(0) @binding(2) var environment: texture_cube<f32>;
+@group(0) @binding(3) var background: texture_2d<f32>;
 @fragment
 fn fs_main(in: CameraFillOut) -> @location(0) vec4<f32> {
     var color = camera.color.rgb * camera.color.a;
@@ -49,8 +49,8 @@ fn fs_main(in: CameraFillOut) -> @location(0) vec4<f32> {
     let world_pos = camera.inv_viewproj * vec4<f32>(in.ndc, 1.0, 1.0);
     let camera_pos = camera.world[3].xyz;
     let sample_ray = normalize(world_pos.xyz - camera_pos * world_pos.w);
-    let skybox_color = textureSample(skybox, smp, sample_ray);
-    color = mix(color, skybox_color.rgb, skybox_color.a);
+    let environment_color = textureSample(environment, smp, sample_ray);
+    color = mix(color, environment_color.rgb, environment_color.a);
 
     let background_color = textureSample(background, smp, in.ndc * vec2<f32>(0.5, -0.5) + 0.5);
     color = mix(color, background_color.rgb, background_color.a);

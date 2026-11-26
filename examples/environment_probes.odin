@@ -42,7 +42,7 @@ init :: proc() {
     )
 
     cam = graphics.make_camera()
-    graphics.set_skybox(&cam, skybox)
+    cam.background.environment = skybox
     cam_trans = transform.make({translation={0, 0.5, 1}})
 
     quad = graphics.make_mesh([]graphics.Vertex{
@@ -52,7 +52,7 @@ init :: proc() {
         {position={-0.5, 0.0, +0.5}, texcoord={0.0, 1.0}, color={1, 1, 1, 1}},
     }, {2, 1, 0, 3, 2, 0})
     img := []u32{
-        0xffffffff, 0xffff0000, 0xffffffff, 0xff000000,
+        0xffffffff, 0xff000000, 0xffffffff, 0xff000000,
         0xff000000, 0xffffffff, 0xff000000, 0xffffffff,
         0xffffffff, 0xff000000, 0xffffffff, 0xff000000,
         0xff000000, 0xffffffff, 0xff000000, 0xffffffff,
@@ -86,8 +86,9 @@ init :: proc() {
     light = graphics.make_directional_light({0, -0.6, 0.4}, {0.4, 0.5, 1.0, 4})
     light_trans = transform.make()
 
+    //room-sized reflection at roughly the height of the teapot
     ref = graphics.make_reflection_probe({0, 0.5, 0}, 1, capture_offset = {0, -0.3, 0}, layers = graphics.Layer_Mask(~u64(1)))
-    graphics.set_skybox(&ref.camera, skybox)
+    ref.camera.background.environment = skybox
 }
 
 tick :: proc() {
@@ -117,6 +118,8 @@ tick :: proc() {
     sin := linalg.sin(counter)*linalg.to_radians(light_angle_range)
     trans := transform.local(&light_trans)
     trans.rotation = transform.rotation_from_angles({0, 0, sin})
+
+    transform.rotatey(teapot.root, 0.01)
 
 }
 
