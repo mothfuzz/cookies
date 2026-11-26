@@ -626,7 +626,7 @@ fn solid_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> @location
     let instance = instances[in.instance];
     let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
     var final_color = base_color;
-    if final_color.a < 0.9 {
+    if final_color.a < 0.99 {
         discard;
     }
     if((instance.flags & INSTANCE_UNLIT) == 0) {
@@ -649,7 +649,7 @@ fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut 
     var out: TransOut;
     let instance = instances[in.instance];
     let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
-    if !(base_color.a > 0 && base_color.a < 0.9) {
+    if !(base_color.a > 0 && base_color.a < 0.99) {
         discard;
     }
     var final_color = base_color;
@@ -677,7 +677,7 @@ fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut 
 fn solid_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
     let instance = instances[in.instance];
     let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
-    if base_color.a < 0.9 {
+    if base_color.a < 0.99 {
         discard;
     }
     return vec4<f32>(1, 1, 1, 1);
@@ -687,7 +687,7 @@ fn solid_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
 fn trans_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
     let instance = instances[in.instance];
     let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
-    if !(base_color.a > 0 && base_color.a < 1) {
+    if !(base_color.a > 0 && base_color.a < 0.99) {
         discard;
     }
     //let t = pow(base_color.a, 0.5);

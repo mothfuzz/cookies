@@ -42,7 +42,7 @@ Alpha_Class :: enum u8 {
 alpha_class :: proc(a: Alpha_Set, mul, add: f32) -> (alpha: Alpha_Class, ok: bool) {
     solid, trans: bool
     test :: proc(lo, hi: f32) -> (solid, trans: bool) {
-        return hi >= 0.9, lo < 0.9 && hi > 0
+        return hi >= 0.99, lo < 0.99 && hi > 0
     }
     if a.zero {
         a, b := test(add, add) //mul * 0 == 0

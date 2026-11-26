@@ -83,6 +83,7 @@ create_pipeline :: proc(topology: wgpu.PrimitiveTopology, front_face: wgpu.Front
         multisample = {
             count = 4,
             mask = 0xffffffff,
+            alphaToCoverageEnabled = true,
         },
     })
 
