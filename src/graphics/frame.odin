@@ -162,6 +162,7 @@ Probe_Source :: struct {
     slot, face: int,
 }
 Shadow_Source :: struct {
+    kind: Light_Kind,
     layer: int,
 }
 Screen_Source :: struct{/*it's the swapchain...*/}
@@ -518,7 +519,30 @@ push_camera :: proc(pass: int, camera: Camera_Uniforms, raster: Camera_Raster) {
     f.passes[pass].cam_count += 1
 }
 
-//shadow_pass
+@(private)
+build_shadow_passes :: proc() {
+    //needs to happen after submission bc cascades depend on main camera count + per-camera cascade_count
+    for i in 0..<f.spot_lights.num_shadowed {
+        sl := f.spot_lights.entries[i]
+        world_up := [3]f32{0, 1, 0}
+        if linalg.abs(linalg.dot(sl.direction, world_up)) >= 0.9 {
+            world_up = {0, 0, 1}
+        }
+        camera, raster := calculate_shadow_camera_positional(sl.position, sl.direction, world_up, linalg.acos(sl.outer_angle) * 2, 0.1, sl.range, SPOT_SHADOW_RES, sl.layer_mask)
+        pass := push_pass(.Shadow, Shadow_Pass{}, Shadow_Source{.Spot, i})
+        push_camera(pass, camera, raster)
+        append(&f.spot_shadow_transforms, camera.viewproj)
+    }
+    for i in 0..<f.point_lights.num_shadowed {
+        pl := f.point_lights.entries[i]
+        dirs := cubemap_directions()
+        for face in 0..<6 {
+            camera, raster := calculate_shadow_camera_positional(pl.position, dirs[face][0], dirs[face][1], linalg.PI / 2, 0.1, pl.range, POINT_SHADOW_RES, pl.layer_mask)
+            pass := push_pass(.Shadow, Shadow_Pass{}, Shadow_Source{.Point, i*6+face})
+            push_camera(pass, camera, raster)
+        }
+    }
+}
 
 @(private)
 user_pass :: proc(rt: Render_Target) -> int {
@@ -644,6 +668,18 @@ resolve_passes :: proc(swapchain: wgpu.TextureView) {
             stage.mips = cubemaps_mipmappers[src.slot][src.face]
             case Shadow_Source:
             //get resolve from layer
+            stage := &pass.stage.(Shadow_Pass)
+            switch src.kind {
+            case .Point:
+                stage.attachments.color = point_light_color_shadows.layers[src.layer]
+                stage.attachments.depth = point_light_depth_shadows.layers[src.layer]
+            case .Directional:
+                stage.attachments.color = directional_light_color_shadows.layers[src.layer]
+                stage.attachments.depth = directional_light_depth_shadows.layers[src.layer]
+            case .Spot:
+                stage.attachments.color = spot_light_color_shadows.layers[src.layer]
+                stage.attachments.depth = spot_light_depth_shadows.layers[src.layer]
+            }
             case Screen_Source:
             stage := &pass.stage.(Screen_Pass)
             stage.resolve = swapchain
@@ -924,12 +960,63 @@ draw_main_pass :: proc(command_encoder: wgpu.CommandEncoder, pass: Main_Pass, fi
     wgpu.RenderPassEncoderRelease(composite)
 }
 
+draw_shadow_pass :: proc(command_encoder: wgpu.CommandEncoder, pass: Shadow_Pass, first_cam, cam_count: int) {
+    a := pass.attachments
+    has_trans := f.trans_begin < len(f.batch_order)
+
+    //solid batches (and mixed)
+    solid := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+        label = "shadow solid",
+        colorAttachmentCount = 1,
+        colorAttachments = &wgpu.RenderPassColorAttachment{
+            view = a.color,
+            loadOp = .Clear,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+            clearValue = {1, 1, 1, 1},
+        },
+        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+            view = a.depth,
+            depthLoadOp = .Clear,
+            depthStoreOp = .Store,
+            depthClearValue = 0,
+        },
+    })
+    draw_cameras(solid, .Shadow, .Opaque, first_cam, cam_count, 0, f.solid_end)
+    wgpu.RenderPassEncoderEnd(solid)
+    wgpu.RenderPassEncoderRelease(solid)
+
+    if !has_trans do return
+
+    //trans batches (and mixed), depth test only
+    trans := wgpu.CommandEncoderBeginRenderPass(command_encoder, &{
+        label = "shadow trans",
+        colorAttachmentCount = 1,
+        colorAttachments = &wgpu.RenderPassColorAttachment{
+            view = a.color,
+            loadOp = .Load,
+            storeOp = .Store,
+            depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+        },
+        depthStencilAttachment = &wgpu.RenderPassDepthStencilAttachment{
+            view = a.depth,
+            depthLoadOp = .Load,
+            depthStoreOp = .Store,
+        },
+    })
+    draw_cameras(trans, .Shadow, .Blended, first_cam, cam_count, f.trans_begin, len(f.batch_order))
+    wgpu.RenderPassEncoderEnd(trans)
+    wgpu.RenderPassEncoderRelease(trans)
+}
+
 @(private)
 draw_cameras :: proc(render_pass: wgpu.RenderPassEncoder, stage: Stage_Key, blend: Blend_Key, first_cam, cam_count, begin, end: int) {
     n := len(f.batches)
     //instance data survives fill pipeline switches, so can be bound once
     bind_instance_data(render_pass)
-    bind_light_data(render_pass)
+    if stage == .Main {
+        bind_light_data(render_pass)
+    }
 
     for c in first_cam ..< first_cam + cam_count {
         cam := f.cam_order[c]

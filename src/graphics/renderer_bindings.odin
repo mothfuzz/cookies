@@ -369,10 +369,10 @@ write_light_buffers :: proc(command_encoder: wgpu.CommandEncoder) {
             len(f.directional_lights.entries) +
             len(f.spot_lights.entries)
         ),
-        directional_lights = u32(len(f.directional_lights.entries)),
-        point_shadows = 0,//u32(f.point_lights.num_shadowed),
-        directional_shadows = 0,//u32(f.directional_lights.num_shadowed)),
-        spot_shadows = 0,//u32(f.spot_lights.num_shadowed),
+        directional_lights = u32(len(f.directional_lights.entries)), //count needed since directionals aren't clustered
+        point_shadows = u32(f.point_lights.num_shadowed),
+        directional_shadows = 0,//u32(f.directional_lights.num_shadowed),
+        spot_shadows = u32(f.spot_lights.num_shadowed),
         visualize_clusters = 1 if visualize_clusters else 0,
     }
     if light_counts_buffer == nil {
@@ -415,7 +415,7 @@ write_light_buffers :: proc(command_encoder: wgpu.CommandEncoder) {
     rebind |= realloc_cubemaps(command_encoder)
     rebind |= write_buffer(&probes_buffer, f.reflection_probes[:])
     rebind |= write_buffer2(&clusters_buffer, f.cluster_headers[:], f.cluster_items[:])
-    rebind |= write_buffer(&shadow_transforms_buffer, []matrix[4,4]f32{})
+    rebind |= write_buffer2(&shadow_transforms_buffer, f.spot_shadow_transforms[:], f.cascade_shadow_transforms[:])
     
     if rebind {
         if lights_bind_group != nil {

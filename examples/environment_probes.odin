@@ -43,6 +43,8 @@ init :: proc() {
 
     cam = graphics.make_camera()
     cam.background.environment = skybox
+    //cam.background.color = {0.6, 0.8, 1.0} //actual sky color
+    //cam.background.color = {0.0, 0.1, 0.2} //actual sky radiance
     cam_trans = transform.make({translation={0, 0.5, 1}})
 
     quad = graphics.make_mesh([]graphics.Vertex{

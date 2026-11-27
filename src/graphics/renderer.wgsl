@@ -677,7 +677,7 @@ fn trans_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> TransOut 
 }
 
 @fragment
-fn solid_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
+fn solid_shadow(in: VSOut) -> @location(0) vec4<f32> {
     let instance = instances[in.instance];
     let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
     if base_color.a < 0.99 {
@@ -687,7 +687,7 @@ fn solid_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
 }
 
 @fragment
-fn trans_shadow_main(in: VSOut) -> @location(0) vec4<f32> {
+fn trans_shadow(in: VSOut) -> @location(0) vec4<f32> {
     let instance = instances[in.instance];
     let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
     if !(base_color.a > 0 && base_color.a < 0.99) {

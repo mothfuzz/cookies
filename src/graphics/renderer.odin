@@ -23,7 +23,8 @@ Renderer :: struct {
     shader: wgpu.ShaderModule,
     oit_composite_shader: wgpu.ShaderModule,
     camera_fill_shader: wgpu.ShaderModule,
-    layout: wgpu.PipelineLayout,
+    main_layout: wgpu.PipelineLayout,
+    shadow_layout: wgpu.PipelineLayout,
     oit_composite_layout: wgpu.PipelineLayout,
     oit_composite_pipeline: wgpu.RenderPipeline,
     oit_composite_bind_group_layout: wgpu.BindGroupLayout,
@@ -45,118 +46,6 @@ request_adapter :: proc "c" (status: wgpu.RequestAdapterStatus, adapter: wgpu.Ad
 
 uniform_alignment: int
 storage_alignment: int
-
-create_pipeline :: proc(topology: wgpu.PrimitiveTopology, front_face: wgpu.FrontFace, cull_mode: wgpu.CullMode) -> (solid, trans: wgpu.RenderPipeline) {
-    constants := []wgpu.ConstantEntry{
-        {key = "TOPOLOGY", value = topology_constant[topology]}
-    }
-    solid = wgpu.DeviceCreateRenderPipeline(ren.device, &{
-        label = "solid",
-        layout = ren.layout,
-        vertex = {
-            module = ren.shader,
-            entryPoint = "vs_main",
-            bufferCount = len(vertex_buffer_layouts),
-            buffers = raw_data(vertex_buffer_layouts),
-        },
-        fragment = &{
-            module = ren.shader,
-            entryPoint = "solid_main",
-            targetCount = 1,
-            targets = &wgpu.ColorTargetState{
-                format = with_srgb(ren.config.format),
-                writeMask = wgpu.ColorWriteMaskFlags_All,
-            },
-            constantCount = len(constants),
-            constants = raw_data(constants),
-        },
-        primitive = {
-            topology = topology,
-            cullMode = cull_mode,
-            frontFace = front_face,
-        },
-        depthStencil = &{
-            format = .Depth24PlusStencil8,
-            depthWriteEnabled = .True,
-            depthCompare = .LessEqual,
-        },
-        multisample = {
-            count = 4,
-            mask = 0xffffffff,
-            alphaToCoverageEnabled = true,
-        },
-    })
-
-    trans_targets := []wgpu.ColorTargetState{
-        //accum
-        {
-            format = .RGBA16Float,
-            writeMask = wgpu.ColorWriteMaskFlags_All,
-            blend = &{
-                color = wgpu.BlendComponent{
-                    operation = .Add,
-                    srcFactor = .One,
-                    dstFactor = .One,
-                },
-                alpha = wgpu.BlendComponent{
-                    operation = .Add,
-                    srcFactor = .One,
-                    dstFactor = .One,
-                },
-            },
-        },
-        //revealage
-        {
-            format = .R8Unorm,
-            writeMask = wgpu.ColorWriteMaskFlags_All,
-            blend = &{
-                color = wgpu.BlendComponent{
-                    operation = .Add,
-                    srcFactor = .Zero,
-                    dstFactor = .OneMinusSrc,
-                },
-                alpha = wgpu.BlendComponent{
-                    operation = .Add,
-                    srcFactor = .Zero,
-                    dstFactor = .OneMinusSrc,
-                },
-            },
-        },
-    }
-    trans = wgpu.DeviceCreateRenderPipeline(ren.device, &{
-        label = "trans",
-        layout = ren.layout,
-        vertex = {
-            module = ren.shader,
-            entryPoint = "vs_main",
-            bufferCount = len(vertex_buffer_layouts),
-            buffers = raw_data(vertex_buffer_layouts),
-        },
-        fragment = &{
-            module = ren.shader,
-            entryPoint = "trans_main",
-            targetCount = len(trans_targets),
-            targets = raw_data(trans_targets),
-            constantCount = len(constants),
-            constants = raw_data(constants),
-        },
-        primitive = {
-            topology = topology,
-            cullMode = cull_mode,
-            frontFace = front_face,
-        },
-        depthStencil = &{
-            format = .Depth24PlusStencil8,
-            depthWriteEnabled = .False, //false for transparent materials
-            depthCompare = .LessEqual,
-        },
-        multisample = {
-            count = 4,
-            mask = 0xffffffff,
-        },
-    })
-    return
-}
 
 @(private)
 request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Device, message: string, userdata1, userdata2: rawptr) {
@@ -223,10 +112,15 @@ request_device :: proc "c" (status: wgpu.RequestDeviceStatus, device: wgpu.Devic
         entries = raw_data(lights_layout_entries),
     })
 
-    bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, instances_layout, lights_layout}
-    ren.layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
-        bindGroupLayoutCount = len(bind_group_layouts),
-        bindGroupLayouts = raw_data(bind_group_layouts),
+    main_bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, instances_layout, lights_layout}
+    ren.main_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
+        bindGroupLayoutCount = len(main_bind_group_layouts),
+        bindGroupLayouts = raw_data(main_bind_group_layouts),
+    })
+    shadow_bind_group_layouts := []wgpu.BindGroupLayout{camera_layout, material_layout, instances_layout}
+    ren.shadow_layout = wgpu.DeviceCreatePipelineLayout(ren.device, &{
+        bindGroupLayoutCount = len(shadow_bind_group_layouts),
+        bindGroupLayouts = raw_data(shadow_bind_group_layouts),
     })
 
     log.debug("creating pipelines table...")
@@ -394,7 +288,8 @@ quit :: proc() {
     delete_defaults()
     delete_probe_capture()
     destroy_pipeline_table()
-    wgpu.PipelineLayoutRelease(ren.layout)
+    wgpu.PipelineLayoutRelease(ren.main_layout)
+    wgpu.PipelineLayoutRelease(ren.shadow_layout)
     wgpu.RenderPipelineRelease(ren.oit_composite_pipeline)
     wgpu.PipelineLayoutRelease(ren.oit_composite_layout)
     wgpu.BindGroupLayoutRelease(ren.oit_composite_bind_group_layout)
@@ -468,6 +363,7 @@ render_frame :: proc() {
     }
 
     sort_batches()
+    build_shadow_passes()
     bin_lights()
     write_instance_buffers()
     write_camera_buffer()
@@ -479,9 +375,8 @@ render_frame :: proc() {
     resolve_passes(screen)
 
     for p in pass_range(.Shadow) {
-        //pass := f.passes[p]
-        //draw_shadow_pass(command_encoder, pass.stage.(Shadow_Pass), pass.first_cam, pass.cam_count)
-        //or just pass.first_cam
+        pass := f.passes[p]
+        draw_shadow_pass(command_encoder, pass.stage.(Shadow_Pass), pass.first_cam, pass.cam_count)
     }
     CAPTURE_BOUNCE :: 1
     for _ in 0..<CAPTURE_BOUNCE {

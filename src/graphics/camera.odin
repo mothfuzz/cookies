@@ -168,9 +168,24 @@ calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, target_resoluti
     return
 }
 
-@(export)
-set_viewport :: proc(cam: ^Camera, viewport: [4]f32) {
-    cam.viewport = viewport
+@(private)
+calculate_shadow_camera_positional :: proc(position, direction, up: [3]f32, fov, near, far: f32, res: uint, layer_mask: Layer_Mask) -> (camera: Camera_Uniforms, raster: Camera_Raster) {
+    camera.view = linalg.matrix4_look_at(position, position+direction, up)
+    t1 := 1/(linalg.tan(fov/2))
+    t2 := near/(far - near) //reverse-z for greater depth precision
+    camera.projection[0, 0] = t1
+    camera.projection[1, 1] = t1
+    camera.projection[2, 2] = t2
+    camera.projection[3, 2] = -1
+    camera.projection[2, 3] = far * t2
+    camera.layer_mask = layer_mask
+    raster.near = near
+    raster.far = far
+    raster.viewport = {0, 0, f32(res), f32(res)}
+    raster.flip = calculate_frustum(&camera)
+    raster.background.environment = trans_cubemap.view
+    raster.background.image = trans_tex.view
+    return
 }
 
 get_viewport_rect :: proc(cam: Camera, target_resolution: [2]uint = 0) -> [4]f32 {

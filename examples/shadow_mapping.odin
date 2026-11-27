@@ -50,15 +50,18 @@ init :: proc() {
 
     teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
     //teapot.models[0].materials[0].base_color_tint = {1, 0, 0, 0.5}
-    transform.init(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
+    transform.set_translation(teapot.root, {0, 0.2, 0})
+    transform.set_scale(teapot.root, 0.01)
 
     teapot2 = graphics.copy_scene(&teapot)
     //teapot2.models[0].materials[0].base_color_tint = {0, 1, 0, 0.5}
-    transform.init(teapot2.root, {translation={0.1, 0.4, 0}, scale=0.01})
+    transform.set_translation(teapot2.root, {0.1, 0.4, 0})
+    transform.set_scale(teapot2.root, 0.01)
 
     teapot3 = graphics.copy_scene(&teapot)
     //teapot3.models[0].materials[0].base_color_tint = {0, 0, 1, 0.5}
-    transform.init(teapot3.root, {translation={-0.1, 0.4, 0}, scale=0.01})
+    transform.set_translation(teapot3.root, {-0.1, 0.4, 0})
+    transform.set_scale(teapot3.root, 0.01)
 
     spot_light = graphics.make_spot_light({0, 0, 0}, {0, -1, 0}, 0.1, 0.2, {0, 1, 0, 5})
     spot_light_trans = transform.make({translation={0, 2, 0}})
@@ -73,40 +76,37 @@ tick :: proc() {
         window.close()
     }
 
-    cam_trans := transform.write(cam_trans)
     if input.key_down(.Key_W) {
-        cam_trans.translation.z -= 0.01
+        transform.translate(&cam_trans, {0, 0, -0.01})
     }
     if input.key_down(.Key_S) {
-        cam_trans.translation.z += 0.01
+        transform.translate(&cam_trans, {0, 0, +0.01})
     }
     if input.key_down(.Key_A) {
-        cam_trans.translation.x -= 0.01
+        transform.translate(&cam_trans, {-0.01, 0, 0})
     }
     if input.key_down(.Key_D) {
-        cam_trans.translation.x += 0.01
+        transform.translate(&cam_trans, {+0.01, 0, 0})
     }
     //graphics.look_at(&cam, cam_pos, {0, 0.2, 0})
-    transform.look_at(cam_trans, {0, 0.2, 0})
+    transform.look_at(&cam_trans, {0, 0.2, 0})
 
     @static counter: f32 = 0.0
     counter += 0.01
     light_angle_range: f32 = 10
     sin := linalg.sin(counter)*linalg.to_radians(light_angle_range)
-    trans := transform.write(spot_light_trans)
-    trans.rotation = transform.rotation_from_angles({sin, 0, sin})
-
+    transform.local(&spot_light_trans).rotation = transform.rotation_from_angles({sin, 0, sin})
 }
 
 draw :: proc(alpha, delta: f64) {
-    graphics.draw_camera(cam, transform.get_world_smooth(cam_trans, alpha))
-    graphics.draw_mesh(quad, quad_mat, base_color_tint={1, 1, 1, 1})
-    graphics.draw_scene(teapot, alpha)
-    graphics.draw_scene(teapot2, alpha)
-    graphics.draw_scene(teapot3, alpha)
+    graphics.draw_camera(cam, cam_trans)
+    graphics.draw_mesh(quad, quad_mat)
+    graphics.draw_scene(teapot)
+    graphics.draw_scene(teapot2)
+    graphics.draw_scene(teapot3)
     graphics.draw_point_light(point_light)
     graphics.draw_directional_light(directional_light)
-    graphics.draw_spot_light(spot_light, transform.get_world_smooth(spot_light_trans, alpha))
+    graphics.draw_spot_light(spot_light, spot_light_trans)
 }
 
 quit :: proc() {

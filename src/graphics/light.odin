@@ -81,6 +81,12 @@ Light_Counts_Uniforms :: struct {
     visualize_clusters: u32, //0 = off, 1 = on
 }
 
+Light_Kind :: enum u8 {
+    Point,
+    Directional,
+    Spot,
+}
+
 make_point_light :: proc(position: [3]f32 = 0, color: [4]f32 = 1, range: f32 = 0, render_shadows: bool = true) -> (pl: Point_Light) {
     pl.position = position
     pl.color = color

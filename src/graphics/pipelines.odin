@@ -53,13 +53,231 @@ topology_constant := #partial [wgpu.PrimitiveTopology]f64 {
 
 pipelines: [Stage_Key][Blend_Key][Primitive_Key]wgpu.RenderPipeline
 
-// TODO: actually uh. build the pipelines
+create_main_pipeline :: proc(topology: wgpu.PrimitiveTopology, front_face: wgpu.FrontFace, cull_mode: wgpu.CullMode) -> (solid, trans: wgpu.RenderPipeline) {
+    constants := []wgpu.ConstantEntry{
+        {key = "TOPOLOGY", value = topology_constant[topology]}
+    }
+    solid = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+        label = "solid main",
+        layout = ren.main_layout,
+        vertex = {
+            module = ren.shader,
+            entryPoint = "vs_main",
+            bufferCount = len(vertex_buffer_layouts),
+            buffers = raw_data(vertex_buffer_layouts),
+        },
+        fragment = &{
+            module = ren.shader,
+            entryPoint = "solid_main",
+            targetCount = 1,
+            targets = &wgpu.ColorTargetState{
+                format = with_srgb(ren.config.format),
+                writeMask = wgpu.ColorWriteMaskFlags_All,
+            },
+            constantCount = len(constants),
+            constants = raw_data(constants),
+        },
+        primitive = {
+            topology = topology,
+            cullMode = cull_mode,
+            frontFace = front_face,
+        },
+        depthStencil = &{
+            format = .Depth24PlusStencil8,
+            depthWriteEnabled = .True,
+            depthCompare = .LessEqual,
+        },
+        multisample = {
+            count = 4,
+            mask = 0xffffffff,
+            alphaToCoverageEnabled = true,
+        },
+    })
+
+    trans_targets := []wgpu.ColorTargetState{
+        //accum
+        {
+            format = .RGBA16Float,
+            writeMask = wgpu.ColorWriteMaskFlags_All,
+            blend = &{
+                color = wgpu.BlendComponent{
+                    operation = .Add,
+                    srcFactor = .One,
+                    dstFactor = .One,
+                },
+                alpha = wgpu.BlendComponent{
+                    operation = .Add,
+                    srcFactor = .One,
+                    dstFactor = .One,
+                },
+            },
+        },
+        //revealage
+        {
+            format = .R8Unorm,
+            writeMask = wgpu.ColorWriteMaskFlags_All,
+            blend = &{
+                color = wgpu.BlendComponent{
+                    operation = .Add,
+                    srcFactor = .Zero,
+                    dstFactor = .OneMinusSrc,
+                },
+                alpha = wgpu.BlendComponent{
+                    operation = .Add,
+                    srcFactor = .Zero,
+                    dstFactor = .OneMinusSrc,
+                },
+            },
+        },
+    }
+    trans = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+        label = "trans main",
+        layout = ren.main_layout,
+        vertex = {
+            module = ren.shader,
+            entryPoint = "vs_main",
+            bufferCount = len(vertex_buffer_layouts),
+            buffers = raw_data(vertex_buffer_layouts),
+        },
+        fragment = &{
+            module = ren.shader,
+            entryPoint = "trans_main",
+            targetCount = len(trans_targets),
+            targets = raw_data(trans_targets),
+            constantCount = len(constants),
+            constants = raw_data(constants),
+        },
+        primitive = {
+            topology = topology,
+            cullMode = cull_mode,
+            frontFace = front_face,
+        },
+        depthStencil = &{
+            format = .Depth24PlusStencil8,
+            depthWriteEnabled = .False, //false for transparent materials
+            depthCompare = .LessEqual,
+        },
+        multisample = {
+            count = 4,
+            mask = 0xffffffff,
+        },
+    })
+    return
+}
+
+create_shadow_pipeline :: proc(topology: wgpu.PrimitiveTopology, front_face: wgpu.FrontFace, cull_mode: wgpu.CullMode) -> (solid, trans: wgpu.RenderPipeline) {
+    constants := []wgpu.ConstantEntry{
+        {key = "TOPOLOGY", value = topology_constant[topology]}
+    }
+    solid = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+        label = "solid shadows",
+        layout = ren.shadow_layout,
+        vertex = {
+            module = ren.shader,
+            entryPoint = "vs_main",
+            bufferCount = len(vertex_buffer_layouts),
+            buffers = raw_data(vertex_buffer_layouts),
+        },
+        fragment = &{
+            module = ren.shader,
+            entryPoint = "solid_shadow",
+            targetCount = 1,
+            targets = &wgpu.ColorTargetState{
+                format = .RGBA8Unorm,
+                writeMask = wgpu.ColorWriteMaskFlags_All,
+                blend = &{
+                    color = {
+                        operation = .Add,
+                        srcFactor = .Zero,
+                        dstFactor = .Src,
+                    },
+                    alpha = {
+                        operation = .Add,
+                        srcFactor = .One,
+                        dstFactor = .Zero,
+                    }
+                }
+            },
+            constantCount = len(constants),
+            constants = raw_data(constants),
+        },
+        primitive = {
+            topology = topology,
+            cullMode = cull_mode,
+            frontFace = front_face,
+        },
+        depthStencil = &{
+            format = .Depth32Float,
+            depthWriteEnabled = .True,
+            depthCompare = .GreaterEqual,
+        },
+        multisample = {
+            count = 1,
+            mask = 0xffffffff,
+        },
+    })
+
+    trans = wgpu.DeviceCreateRenderPipeline(ren.device, &{
+        label = "trans shadows",
+        layout = ren.shadow_layout,
+        vertex = {
+            module = ren.shader,
+            entryPoint = "vs_main",
+            bufferCount = len(vertex_buffer_layouts),
+            buffers = raw_data(vertex_buffer_layouts),
+        },
+        fragment = &{
+            module = ren.shader,
+            entryPoint = "trans_shadow",
+            targetCount = 1,
+            targets = &wgpu.ColorTargetState{
+                format = .RGBA8Unorm,
+                writeMask = wgpu.ColorWriteMaskFlags_All,
+                blend = &{
+                    color = {
+                        operation = .Add,
+                        srcFactor = .Zero,
+                        dstFactor = .Src,
+                    },
+                    alpha = {
+                        operation = .Add,
+                        srcFactor = .One,
+                        dstFactor = .Zero,
+                    },
+                },
+            },
+            constantCount = len(constants),
+            constants = raw_data(constants),
+        },
+        primitive = {
+            topology = topology,
+            cullMode = cull_mode,
+            frontFace = front_face,
+        },
+        depthStencil = &{
+            format = .Depth32Float,
+            depthWriteEnabled = .False, //false for transparent materials
+            depthCompare = .Greater,
+        },
+        multisample = {
+            count = 1,
+            mask = 0xffffffff,
+        },
+    })
+    return
+}
 
 create_pipeline_table :: proc() {
     for key in Primitive_Key {
-        solid, trans := create_pipeline(**primitive_state[key])
+        solid, trans := create_main_pipeline(**primitive_state[key])
         pipelines[.Main][.Opaque][key] = solid
         pipelines[.Main][.Blended][key] = trans
+    }
+    for key in Primitive_Key {
+        if key == .Lines || key == .Points do continue //shadow maps skip lines and points
+        solid, trans := create_shadow_pipeline(**primitive_state[key])
+        pipelines[.Shadow][.Opaque][key] = solid
+        pipelines[.Shadow][.Blended][key] = trans
     }
 }
 
