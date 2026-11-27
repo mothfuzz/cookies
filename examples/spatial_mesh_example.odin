@@ -32,12 +32,12 @@ init :: proc() {
     engine.set_tick_rate(30)
 
     cam = graphics.make_camera()
+    cam.background.color = {0.5, 0.25, 0.5}
+    cam.far = 10
+    cam.fog_onset = 5
     cam_trans = transform.make({translation={0, 1, 1}})
-    transform.look_at(cam_trans, {0, 0, -1})
+    transform.look_at(&cam_trans, {0, 0, -1})
     //graphics.look_at(&cam, {0, 1, 1}, {0, 0, -1})
-    graphics.set_background_color(&cam, {0.5, 0.25, 0.5})
-    graphics.set_draw_distance(&cam, 10.0)
-    graphics.set_fog_onset(&cam, 5.0)
 
     font = graphics.make_font_from_file(#load("../resources/unifont.otf"), 16)
 
@@ -45,10 +45,10 @@ init :: proc() {
     ball = graphics.make_scene_from_file("ball.gltf", #load("ball.gltf"))
     ball_trans = transform.make({translation={0, 0.75, 0}, scale=Radius*2.0})
 
-    dir_light = graphics.make_directional_light({-0.1, -0.7, -0.2}, {1, 1, 1, 5})
-    spot_light = graphics.make_spot_light({0, 2, 0}, {0, -1, 0}, 0.1, 0.15, {1, 1, 1, 5})
+    dir_light = graphics.make_directional_light({-0.1, -0.7, -0.2}, {1, 1, 1, 3})
+    spot_light = graphics.make_spot_light({0, 2, 0}, {0, -1, 0}, 0.1, 0.15, {1, 1, 1, 2})
     reflection_probe = graphics.make_reflection_probe({0, 0.75, 0}, faces_per_frame=0)
-    graphics.set_background_color(&reflection_probe.camera, cam.color.rgb)
+    reflection_probe.camera.background.color = cam.background.color
 
 }
 
@@ -112,7 +112,7 @@ tick :: proc() {
     ball_velocity.y = clamp(ball_velocity.y, -Ball_Max_Speed, +Ball_Max_Speed)
     ball_velocity.z = clamp(ball_velocity.z, -Ball_Max_Speed, +Ball_Max_Speed)
     
-    ball_trans := transform.write(ball_trans)
+    ball_trans := transform.local(&ball_trans)
 
     ball_velocity = spatial.move(ball_trans.translation, Radius, ball_velocity, testmap.colliders)
     transform.translate(ball_trans, ball_velocity)
@@ -125,19 +125,24 @@ tick :: proc() {
         ball_trans.translation = {0, 0.75, 0}
     }
 
-    cam_trans := transform.write(cam_trans)
-    cam_trans.translation = ball_trans.translation + {c, camera_height, s}
-    transform.look_at(cam_trans, ball_trans.translation)
+    transform.set_translation(&cam_trans, ball_trans.translation + {c, camera_height, s})
+    transform.look_at(&cam_trans, ball_trans.translation)
 }
 
 draw :: proc(alpha, delta: f64) {
-    graphics.draw_camera(cam, transform.world(cam_trans, alpha))
+    graphics.draw_camera(cam, cam_trans)
     graphics.draw_directional_light(dir_light)
     graphics.draw_spot_light(spot_light)
-    graphics.draw_reflection_probe(reflection_probe)
-    //graphics.draw_model(ball.models[0], transform.world(ball_trans, alpha))
-    graphics.draw_mesh(ball.meshes[0], ball.materials[0], transform.world(ball_trans, alpha))
-    graphics.draw_scene(testmap, alpha)
+    graphics.draw_reflection_probe(reflection_probe, ball_trans)
+
+    material_params := graphics.Default_Material_Params
+    material_params.pbr_mul = {0, 0, 0}
+    material_params.pbr_add = {1, 0.1, 0}
+    material_params.base_color_mul = {0, 0, 0, 1}
+    material_params.base_color_add = {1, 1, 1, 0}
+    material_params.emissive_mul = 0
+    graphics.draw_mesh(ball.meshes[0], ball.materials[0], ball_trans, material_params)
+    graphics.draw_scene(testmap)
     graphics.ui_draw_text("WASD to move ball", font, {-Screen_Width/2+2, Screen_Height/2}, 1)
     graphics.ui_draw_text("Arrow keys to move camera", font, {-Screen_Width/2+2, Screen_Height/2-18}, 1)
 }

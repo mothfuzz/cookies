@@ -748,7 +748,13 @@ bin_lights :: proc() {
     //sort probes by volume, lowest volume = highest influence
     slice.sort_by(f.reflection_probes[:], proc(a, b: Reflection_Probe_Uniforms) -> bool {
         vol_a := a.half_extents.x * a.half_extents.y * a.half_extents.z
+        if vol_a == 0 {
+            vol_a = math.INF_F32
+        }
         vol_b := b.half_extents.x * b.half_extents.y * b.half_extents.z
+        if vol_b == 0 {
+            vol_b = math.INF_F32
+        }
         return vol_a < vol_b
     })
     
@@ -791,11 +797,15 @@ bin_lights :: proc() {
         probe_ranges := make([][2][3]u8, len(f.reflection_probes), context.temp_allocator)
         for &probe, i in f.reflection_probes {
             probe_ranges[i] = EMPTY_RANGE
-            //use loose sphere test for MVP
-            radius := linalg.length(probe.half_extents) + probe.edge_blend
-            if !sphere_in_frustum(camera^, probe.position, radius) do continue
-            r := sphere_clusters(camera^, near, far, probe.position, radius)
-            probe_ranges[i] = r
+            if probe.half_extents.x == 0 || probe.half_extents.y == 0 || probe.half_extents.z == 0 {
+                probe_ranges[i] = {0, camera.grid_size.xyz - 1}
+            } else {
+                //use loose sphere test for MVP
+                radius := linalg.length(probe.half_extents) + probe.edge_blend
+                if !sphere_in_frustum(camera^, probe.position, radius) do continue
+                probe_ranges[i] = sphere_clusters(camera^, near, far, probe.position, radius)
+            }
+            r := probe_ranges[i]
             for x in r[0].x..=r[1].x do for y in r[0].y..=r[1].y do for z in r[0].z..=r[1].z {
                 item_sizes[cluster_index(camera.grid_size, x, y, z)] += 1
             }

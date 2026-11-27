@@ -4,12 +4,6 @@ import "core:log"
 import "base:runtime"
 
 import "vendor:wgpu"
-import "core:math"
-import "core:math/linalg"
-import "core:slice"
-
-//whoa we did it we imported another cookies package in a cookies package
-import "cookies:transform"
 
 Renderer :: struct {
     ctx: runtime.Context,

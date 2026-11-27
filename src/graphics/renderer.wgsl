@@ -476,7 +476,7 @@ fn calculate_reflection_pbr(in: LightInput, radiance: vec3<f32>, ambient: vec3<f
 }
 
 fn box_project(r: vec3<f32>, position: vec3<f32>, probe: ReflectionProbe) -> vec3<f32> {
-    if (probe.flags == 0) {
+    if (probe.flags == 0 || any(probe.half_extents == vec3<f32>(0))) {
         return r;
     }
     let local = clamp(position - probe.position, -probe.half_extents, probe.half_extents);
@@ -560,13 +560,15 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
                 let probe = reflection_probes[clusters[probe_offset+i]];
                 let r_env = box_project(r, in.position.xyz, probe);
 
-                let d = probe.half_extents - abs(in.position.xyz - probe.position);
-                let edge = min(d.x, min(d.y, d.z));
-                if(edge <= -probe.edge_blend) {
-                    continue;
+                var weight = 1.0;
+                if(any(probe.half_extents != vec3<f32>(0))) {
+                    let d = probe.half_extents - abs(in.position.xyz - probe.position);
+                    let edge = min(d.x, min(d.y, d.z));
+                    if(edge <= -probe.edge_blend) {
+                        continue;
+                    }
+                    var weight = saturate(1.0 + edge / probe.edge_blend);
                 }
-                //1 inside the box to the box edge, 0 at edge_blend units outside
-                let weight = saturate(1.0 + edge / probe.edge_blend);
 
                 if(weight > 0) {
                     let k = (1.0 - weight_accum) * weight; //prefer higher priority probes
