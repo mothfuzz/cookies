@@ -102,7 +102,7 @@ make_mips :: proc(input: []u32, size: [2]uint, include_original: bool = false) -
     return
 }
 
-make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (tex: Texture) {
+make_texture :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (tex: Texture) {
     tex.alpha.lo = 1
     tex.alpha.hi = 0
     for pixel in input {
@@ -164,6 +164,7 @@ make_texture_2D :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (t
 }
 
 make_texture_array :: proc(input: [][]u32, size: [2]uint, cubemap: bool = false, generate_mips: bool = false) -> (tex: Texture) {
+    assert(cubemap == false || len(input) % 6 == 0, "cubemap arrays must have length a multiple of 6")
     tex.image = wgpu.DeviceCreateTexture(ren.device, &{
         usage = {.TextureBinding, .CopyDst},
         dimension = ._2D,
@@ -226,7 +227,7 @@ pixels_byte_to_word :: proc(in_pixels: []byte, x, y: uint) -> (out_pixels: []u32
 }
 
 @(private)
-load_data_2d :: proc(img: []byte) -> (img_u32: []u32, x, y: uint) {
+decode_image :: proc(img: []byte) -> (img_u32: []u32, x, y: uint) {
     imgx, imgy, imgc: i32
     img := stbi.load_from_memory(raw_data(img), i32(len(img)), &imgx, &imgy, &imgc, 4)
     if img == nil {
@@ -241,10 +242,9 @@ load_data_2d :: proc(img: []byte) -> (img_u32: []u32, x, y: uint) {
     return
 }
 
-//inherently 2D
 make_texture_from_image :: proc(img: []byte, linear: bool = false) -> (tex: Texture) {
-    img_u32, x, y := load_data_2d(img)
-    tex = make_texture_2D(img_u32, {x, y}, linear)
+    img_u32, x, y := decode_image(img)
+    tex = make_texture(img_u32, {x, y}, linear)
     delete(img_u32)
     return
 }
@@ -259,7 +259,7 @@ make_texture_array_from_images :: proc(imgs: [][]byte, cubemap: bool = false, ge
     }
     res: [2]uint
     for img, i in imgs {
-        img_u32, x, y := load_data_2d(img)
+        img_u32, x, y := decode_image(img)
         if res == 0 {
             res.x = x
             res.y = y
@@ -287,6 +287,11 @@ cubemap_directions :: proc() -> (directions: [6][2][3]f32) {
     }
 }
 
+make_cubemap :: proc(px, nx, py, ny, pz, nz: []u32, size: [2]uint, generate_mips: bool = false) -> (tex: Texture) {
+    imgs := [6][]u32{px, nx, py, ny, pz, nz}
+    return make_texture_array(imgs[:], size, true, generate_mips)
+}
+
 make_cubemap_from_images :: proc(px, nx, py, ny, pz, nz: []byte, generate_mips: bool = false) -> (tex: Texture) {
     imgs := [6][]byte{px, nx, py, ny, pz, nz}
     return make_texture_array_from_images(imgs[:], true, generate_mips)
@@ -298,7 +303,7 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
     ambient_u32: []u32
     defer delete(ambient_u32)
     if ambient != nil {
-        ambient_u32, ax, ay = load_data_2d(ambient)
+        ambient_u32, ax, ay = decode_image(ambient)
     } else {
         ambient_u32 = make([]u32, 1)
         ambient_u32[0] = 0xffffffff
@@ -309,7 +314,7 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
     roughness_u32: []u32
     defer delete(roughness_u32)
     if roughness != nil {
-        roughness_u32, rx, ry = load_data_2d(roughness)
+        roughness_u32, rx, ry = decode_image(roughness)
     } else {
         roughness_u32 = make([]u32, 1)
         roughness_u32[0] = 0xff808080
@@ -320,7 +325,7 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
     metallic_u32: []u32
     defer delete(metallic_u32)
     if metallic != nil {
-        metallic_u32, mx, my = load_data_2d(metallic)
+        metallic_u32, mx, my = decode_image(metallic)
     } else {
         metallic_u32 = make([]u32, 1)
         metallic_u32[0] = 0xff000000
@@ -352,7 +357,7 @@ make_pbr_texture_from_images :: proc(ambient: []byte = nil, roughness: []byte = 
         final_texture[i] |= (ambient_final[i] & 0xff) << (0*8)
     }
 
-    tex = make_texture_2D(final_texture, {uint(x), uint(y)}, true)
+    tex = make_texture(final_texture, {uint(x), uint(y)}, true)
 
     return
 }

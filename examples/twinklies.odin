@@ -59,7 +59,7 @@ init :: proc(t: ^Twinklies) {
         0xffffffff, 0xff000000,
         0xff000000, 0xffffffff,
     }
-    t.quad_tex = graphics.make_texture_2D(img, {2, 2})
+    t.quad_tex = graphics.make_texture(img, {2, 2})
     t.quad_mat = graphics.make_material(t.quad_tex, filtering=false, tiling=true)
 
     t.teapot_base = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))

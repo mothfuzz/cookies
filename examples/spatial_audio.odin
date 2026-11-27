@@ -44,7 +44,7 @@ init :: proc() {
         0xffffffff, 0xff000000, 0xffffffff, 0xff000000,
         0xff000000, 0xffffffff, 0xff000000, 0xffffffff,
     }
-    quad_tex = graphics.make_texture_2D(img, {4, 4})
+    quad_tex = graphics.make_texture(img, {4, 4})
     quad_mat = graphics.make_material(quad_tex, filtering=false)
 
     spot_light = graphics.make_spot_light({0, 2, 0}, {0, -1, 0}, 0.1, 0.2, {1, 1, 1, 5})
