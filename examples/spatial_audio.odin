@@ -28,6 +28,8 @@ init :: proc() {
     window.set_size(800, 800)
 
     cam = graphics.make_camera()
+    cam.background.color = 0.03
+    cam.background.image = graphics.black_tex
     cam_trans = transform.make({translation={0, 0.25, 1}})
 
     quad = graphics.make_mesh([]graphics.Vertex{
