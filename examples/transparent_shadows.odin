@@ -42,7 +42,7 @@ init :: proc() {
         0xffffffff, 0xff000000, 0xffffffff, 0xff000000,
         0xff000000, 0xffffffff, 0xff000000, 0xffffffff,
     }
-    quad_tex = graphics.make_texture_2D(img, {4, 4})
+    quad_tex = graphics.make_texture(img, {4, 4})
     quad_mat = graphics.make_material(quad_tex, filtering=false)
 
     wall = graphics.make_mesh([]graphics.Vertex{
@@ -63,7 +63,8 @@ init :: proc() {
     stained_glass_mat = graphics.make_material(base_color=stained_glass_tex)
 
     teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
-    transform.init(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
+    transform.set_translation(teapot.root, {0, 0.2, 0})
+    transform.set_scale(teapot.root, 0.01)
 
     light = graphics.make_directional_light({0, -0.6, 0.4}, {0.4, 0.5, 1.0, 4})
     light_trans = transform.make()
@@ -74,7 +75,7 @@ tick :: proc() {
         window.close()
     }
 
-    cam_trans := transform.write(cam_trans)
+    cam_trans := transform.local(&cam_trans)
     if input.key_down(.Key_W) {
         cam_trans.translation.z -= 0.01
     }
@@ -94,17 +95,16 @@ tick :: proc() {
     counter += 0.01
     light_angle_range: f32 = 10
     sin := linalg.sin(counter)*linalg.to_radians(light_angle_range)
-    trans := transform.write(light_trans)
-    trans.rotation = transform.rotation_from_angles({0, 0, sin})
+    transform.local(&light_trans).rotation = transform.rotation_from_angles({0, 0, sin})
 
 }
 
 draw :: proc(alpha, delta: f64) {
-    graphics.draw_camera(cam, transform.world(cam_trans, alpha))
-    graphics.draw_mesh(quad, quad_mat, base_color_tint={1, 1, 1, 1})
-    graphics.draw_mesh(wall, stained_glass_mat, base_color_tint={1, 1, 1, 1})
-    graphics.draw_scene(teapot, alpha)
-    graphics.draw_directional_light(light, transform.world(light_trans, alpha))
+    graphics.draw_camera(cam, cam_trans)
+    graphics.draw_mesh(quad, quad_mat, material_params=graphics.mat_params(alpha_mul = 1))
+    graphics.draw_mesh(wall, stained_glass_mat, material_params=graphics.mat_params(alpha_mul = 1))
+    graphics.draw_scene(teapot)
+    graphics.draw_directional_light(light, light_trans)
 }
 
 quit :: proc() {

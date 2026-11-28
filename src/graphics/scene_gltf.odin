@@ -50,7 +50,7 @@ Node :: struct {
 
 Combined_Material :: struct {
     using base: Material,
-    using dyn: Dynamic_Material,
+    using params: Material_Params,
     double_sided: bool,
     unlit: bool,
 }
@@ -58,7 +58,7 @@ Combined_Material :: struct {
 Primitive :: struct {
     mesh: uint, //'primitive'
     material: uint,
-    dyn: Dynamic_Material, //per-instance override, copied by default
+    params: Material_Params, //per-instance override, copied by default
 }
 
 Model :: struct {
@@ -199,8 +199,8 @@ load_material :: proc(gltf_path: cstring, opts: cgltf.options, material: cgltf.m
     tiling := [2]bool{false, false}
     base_color_tex: Texture = white_tex
     base_color_tint: [4]f32 = 1
-    pbr_tint: [4]f32 = 1
-    emissive_tint: [4]f32 = {0, 0, 0, 1}
+    pbr_tint: [3]f32 = 1
+    emissive_tint: [3]f32 = 0
     if material.pbr_metallic_roughness.base_color_texture.texture != nil {
         base_color_tex = load_image(gltf_path, opts, material.pbr_metallic_roughness.base_color_texture.texture.image_)
 
@@ -235,7 +235,7 @@ load_material :: proc(gltf_path: cstring, opts: cgltf.options, material: cgltf.m
     }
 
     ret_material := make_material(base_color_tex, normal_tex, pbr_tex, emissive_tex, filtering, tiling)
-    return {ret_material, {base_color_tint=base_color_tint, pbr_tint=pbr_tint, emissive_tint=emissive_tint}, bool(material.double_sided), bool(material.unlit)}
+    return {ret_material, {base_color_mul=base_color_tint, pbr_mul=pbr_tint, emissive_mul=emissive_tint}, bool(material.double_sided), bool(material.unlit)}
 }
 
 @(private)
@@ -433,7 +433,7 @@ make_scene_from_file :: proc(filename: cstring, filedata: []u8, make_tri_mesh: b
 
             material_index := cgltf.material_index(data, primitive.material)
             p.material = material_index
-            p.dyn = scene.materials[material_index].dyn
+            p.params = scene.materials[material_index].params
 
             mesh, collider := load_mesh(primitive, make_tri_mesh)
             scene.meshes[current_mesh] = mesh
@@ -553,12 +553,10 @@ draw_model :: proc(scene: Scene, model: Model, trans: transform.Transform, bones
     for primitive in model.primitives {
         mesh := scene.meshes[primitive.mesh]
         material := scene.materials[primitive.material]
-        dyn := primitive.dyn
+        params := primitive.params
         double_sided := material.double_sided
         unlit := material.unlit
-        draw_mesh(mesh, material, trans, dyn.clip_rect,
-                  dyn.base_color_tint, dyn.pbr_tint.r, dyn.pbr_tint.g, dyn.pbr_tint.b, dyn.emissive_tint.rgb,
-                  false, false, double_sided, unlit, bones, layers)
+        draw_mesh(mesh, material, trans, params, false, false, double_sided, unlit, bones, layers)
     }
 }
 

@@ -1,10 +1,20 @@
 struct Camera {
     view: mat4x4<f32>,
-    inv_view: mat4x4<f32>,
+    world: mat4x4<f32>,
     projection: mat4x4<f32>,
+    viewproj: mat4x4<f32>,
     inv_viewproj: mat4x4<f32>,
+    frustum_planes: array<vec4<f32>, 6>,
     color: vec4<f32>, //rgb + exposure
     fog_distance: vec2<f32>, //fog onset + render distance
+    layer_mask: vec2<u32>,
+    reserved: vec2<u32>,
+    cascade_offset: u32, cascade_count: u32,
+    cascade_splits: vec4<f32>,
+    xy_scale: vec2<f32>, xy_bias: vec2<f32>,
+    z_scale: f32, z_bias: f32,
+    grid_size: u32, //4xu8s
+    header_offset: u32,
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
 
@@ -23,26 +33,26 @@ const fullscreen_vertices = array<vec2<f32>, 3>(
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> CameraFillOut {
     var out: CameraFillOut;
     let xy = fullscreen_vertices[vertex_index];
-    out.position = vec4<f32>(xy, 0, 1);
+    out.position = vec4<f32>(xy, 1, 1);
     out.ndc = xy;
     return out;
 }
 
-@group(1) @binding(0) var smp: sampler;
-@group(1) @binding(1) var skybox: texture_cube<f32>;
-@group(1) @binding(2) var background: texture_2d<f32>;
+@group(0) @binding(1) var smp: sampler;
+@group(0) @binding(2) var environment: texture_cube<f32>;
+@group(0) @binding(3) var background: texture_2d<f32>;
 @fragment
 fn fs_main(in: CameraFillOut) -> @location(0) vec4<f32> {
     var color = camera.color.rgb * camera.color.a;
 
     //need to use an arbitrary point bc camera might be infinite
     let world_pos = camera.inv_viewproj * vec4<f32>(in.ndc, 1.0, 1.0);
-    let camera_pos = camera.inv_view[3].xyz;
+    let camera_pos = camera.world[3].xyz;
     let sample_ray = normalize(world_pos.xyz - camera_pos * world_pos.w);
-    let skybox_color = textureSample(skybox, smp, sample_ray);
-    color = mix(color, skybox_color.rgb, skybox_color.a);
+    let environment_color = textureSample(environment, smp, sample_ray);
+    color = mix(color, environment_color.rgb, environment_color.a);
 
-    let background_color = textureSample(background, smp, in.ndc * 0.5 + 0.5);
+    let background_color = textureSample(background, smp, in.ndc * vec2<f32>(0.5, -0.5) + 0.5);
     color = mix(color, background_color.rgb, background_color.a);
 
     return vec4<f32>(color, 1.0);

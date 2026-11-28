@@ -19,14 +19,14 @@ quad_mesh: Mesh
 cube_mesh: Mesh
 
 init_defaults :: proc() {
-    white_tex = make_texture_2D({0xffffffff}, {1, 1})
-    black_tex = make_texture_2D({0xff000000}, {1, 1})
-    trans_tex = make_texture_2D({0x00000000}, {1, 1})
-    normal_tex = make_texture_2D({0xffff8080}, {1, 1}, true)
-    pbr_tex = make_texture_2D({0xff00ffff}, {1, 1}, true)
-    white_cubemap = make_texture_array({{0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}}, 1, true)
-    black_cubemap = make_texture_array({{0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}}, 1, true)
-    trans_cubemap = make_texture_array({{0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}}, 1, true)
+    white_tex = make_texture({0xffffffff}, 1)
+    black_tex = make_texture({0xff000000}, 1)
+    trans_tex = make_texture({0x00000000}, 1)
+    normal_tex = make_texture({0xffff8080}, 1, true)
+    pbr_tex = make_texture({0xff00ffff}, 1, true)
+    white_cubemap = make_cubemap({0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}, {0xffffffff}, 1)
+    black_cubemap = make_cubemap({0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}, {0xff000000}, 1)
+    trans_cubemap = make_cubemap({0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}, {0x00000000}, 1)
 
     white_material = make_material(white_tex)
 

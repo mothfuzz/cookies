@@ -2,154 +2,59 @@ package graphics
 
 import "vendor:wgpu"
 import "core:math/linalg"
-import "base:runtime"
 
-camera_layout_entries :: []wgpu.BindGroupLayoutEntry{
-    {
-        binding = 0,
-        visibility = {.Vertex, .Fragment},
-        buffer = {type = .Uniform, hasDynamicOffset = true}
-    },
-}
-camera_layout: wgpu.BindGroupLayout
-camera_bg_layout_entries :: []wgpu.BindGroupLayoutEntry{
-    {
-        binding = 0,
-        visibility = {.Fragment},
-        sampler = {type = .Filtering},
-    },
-    {
-        binding = 1,
-        visibility = {.Fragment},
-        texture = {sampleType = .Float, viewDimension = .Cube},
-    },
-    {
-        binding = 2,
-        visibility = {.Fragment},
-        texture = {sampleType = .Float, viewDimension = ._2D},
-    },
-}
-camera_bg_layout: wgpu.BindGroupLayout
-bg_sampler: wgpu.Sampler
-
-Camera_Uniforms :: struct {
-    view: matrix[4,4]f32,
-    inv_view: matrix[4,4]f32,
-    projection: matrix[4,4]f32,
-    inv_viewproj: matrix[4,4]f32,
-    color: [4]f32,
-    fog_distance: [2]f32,
-}
-
-Camera_View :: struct {
-    using uniforms: Camera_Uniforms,
-    buffer_index: u32,
-    viewproj: matrix[4,4]f32, //optimization
+//align to 256 so we can get 512 bytes and not have to do any math
+Camera_Uniforms :: struct #align(256) {
+    view, world, projection, viewproj, inv_viewproj: matrix[4,4]f32, //5x64
     frustum_planes: [6][4]f32, //left, right, bottom, top, near, far
-    planes_to_check: int, //for infinite far, don't check it
-    layer_mask: Layer_Mask,
+    color: [4]f32, //rgb + exposure
+    fog_distance: [2]f32,
+    layer_mask: Layer_Mask, //vec2<u32>
+    reserved: [2]u32,
+    cascade_offset, cascade_count: u32,
+    cascade_splits: [4]f32,
+    //cluster info
+    xy_scale: [2]f32, xy_bias: [2]f32, //derived from viewport
+    z_scale: f32, z_bias: f32,
+    grid_size: [4]u8, header_offset: u32,
 }
 
-//everythang needed to render (to) a camera...
-Camera_Draw :: struct {
-    using camera_view: Camera_View,
-    bg_bind_group: wgpu.BindGroup,
+Camera_Background :: struct {
+    color: [3]f32, //srgb
+    environment: Texture, //skybox or probe
+    image: Texture, //2d image
+    filtering: bool, //false for pixels
+}
+
+Camera_Raster_Background :: struct {
+    environment: wgpu.TextureView,
+    image: wgpu.TextureView,
+    filtering: bool,
+}
+
+Camera_Raster :: struct {
+    pass: int,
     viewport: [4]f32,
+    near, far: f32,
+    background: Camera_Raster_Background,
     fill: bool,
+    flip: bool, //swap triangle cull mode back/front
 }
 
 Camera :: struct {
-    buffer: wgpu.Buffer,
-    bg_bind_group: wgpu.BindGroup,
-    bg_image: wgpu.TextureView,
-    bg_skybox: wgpu.TextureView,
     translation: [3]f32,
     rotation: quaternion128,
     viewport: [4]f32, //xywh
-    color: [4]f32, //background rgb+exposure
-    range: [4]f32, //fov, near, far, fog onset
+    background: Camera_Background,
+    exposure: f32, //evs
+    fov: f32, //vertical, radians
+    near, far: f32,
+    fog_onset: f32,
     relative: bool, //auto-resize based on window width/height
     fill: bool,
+    mirrored: bool, //flips view x
     layer_mask: Layer_Mask,
-}
-
-@(export)
-set_background_color :: proc(cam: ^Camera, color: [3]f32) {
-    cam.color.rgb = linalg.vector4_srgb_to_linear([4]f32{color.r, color.g, color.b, 1.0}).rgb
-}
-
-@(export)
-set_exposure :: proc(cam: ^Camera, exp: f32) {
-    cam.color.a = exp
-}
-
-@(export)
-set_exposure_ev :: proc(cam: ^Camera, exp: f32) {
-    cam.color.a = linalg.exp2(exp)
-}
-
-@(export)
-set_fov_degrees :: proc(cam: ^Camera, fov: f32) {
-    cam.range[0] = linalg.to_radians(fov)
-}
-
-@(export)
-set_fov :: proc(cam: ^Camera, fov: f32) {
-    cam.range[0] = fov
-}
-
-@(export)
-set_near_clip :: proc(cam: ^Camera, near: f32) {
-    cam.range[1] = near
-}
-
-@(export)
-set_far_clip :: proc(cam: ^Camera, far: f32) {
-    cam.range[2] = far
-}
-
-@(export)
-set_fog_onset :: proc(cam: ^Camera, fog_onset: f32) {
-    cam.range[3] = fog_onset
-}
-
-@(export)
-set_draw_distance :: proc(cam: ^Camera, distance: f32) {
-    set_far_clip(cam, distance)
-}
-
-@(export)
-set_layer_mask :: proc(cam: ^Camera, layer_mask: Layer_Mask) {
-    cam.layer_mask = layer_mask
-}
-
-@(export)
-set_background_image :: proc(cam: ^Camera, tex: Texture) {
-    cam.bg_image = tex.view
-    rebind_bg(cam)
-}
-
-@(export)
-set_skybox :: proc(cam: ^Camera, tex: Texture) {
-    cam.bg_skybox = tex.view
-    rebind_bg(cam)
-}
-
-@(private)
-rebind_bg :: proc(cam: ^Camera) {
-    if cam.bg_bind_group != nil {
-        wgpu.BindGroupRelease(cam.bg_bind_group)
-    }
-    entries := []wgpu.BindGroupEntry{
-        {binding = 0, sampler = bg_sampler},
-        {binding = 1, textureView = cam.bg_skybox},
-        {binding = 2, textureView = cam.bg_image},
-    }
-    cam.bg_bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
-        layout = camera_bg_layout,
-        entries = raw_data(entries),
-        entryCount = len(entries),
-    }) 
+    cascades: Directional_Cascades,
 }
 
 /* TODO:
@@ -158,26 +63,16 @@ render to HDR (i.e. floating point) target so you can do post-processing
 */
 
 @(export)
-make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0, far: f32 = 0, fov: f32 = 0, fill: bool = true, layers: Layer_Mask = All_Layers) -> (cam: Camera) {
+make_camera :: proc(viewport: [4]f32 = {0, 0, 0, 0}, near: f32 = 0.1, far: f32 = 0, fov: f32 = linalg.RAD_PER_DEG*60, relative: bool = false, fill: bool = true, cascades: Directional_Cascades = .Default, layers: Layer_Mask = All_Layers) -> (cam: Camera) {
     cam.viewport = viewport
-    cam.range = {fov, near, far, (far - near) / 2}
+    cam.near = near
+    cam.far = far
+    cam.fov = fov
     cam.rotation = 1
+    cam.relative = relative
     cam.fill = fill
-    cam.color.a = 1.0
+    cam.cascades = cascades
     cam.layer_mask = layers
-    if bg_sampler == nil {
-        bg_sampler = wgpu.DeviceCreateSampler(ren.device, &{minFilter = .Linear, magFilter = .Linear, mipmapFilter=.Nearest, maxAnisotropy=1})
-    }
-    cam.bg_skybox = trans_cubemap.view
-    cam.bg_image = trans_tex.view
-    rebind_bg(&cam)
-    return
-}
-
-@(export)
-make_camera_relative :: proc(viewport: [4]f32, near: f32 = 0, far: f32 = 0, fov: f32 = 0, fill: bool = true) -> (cam: Camera) {
-    cam = make_camera(viewport, near, far, fov, fill)
-    cam.relative = true
     return
 }
 
@@ -187,19 +82,19 @@ look_at :: proc(cam: ^Camera, eye, center: [3]f32, up: [3]f32 = {0, 1, 0}) {
     cam.rotation = linalg.quaternion_from_forward_and_up(center - eye, up)
 }
 
-inverse_view :: proc(trans: matrix[4,4]f32) -> (inv_view: matrix[4,4]f32) {
+rigid_inverse :: proc(trans: matrix[4,4]f32) -> (inv: matrix[4,4]f32) {
     translation := trans[3].xyz
     rotation := cast(matrix[3,3]f32)(trans)
     inv_r := linalg.transpose(rotation) //can use transpose instead of inverse as it's orthonormal
     inv_t := -(inv_r * translation)
-    inv_view[0] = {expand_values(inv_r[0]), 0}
-    inv_view[1] = {expand_values(inv_r[1]), 0}
-    inv_view[2] = {expand_values(inv_r[2]), 0}
-    inv_view[3] = {expand_values(inv_t), 1}
+    inv[0] = {expand_values(inv_r[0]), 0}
+    inv[1] = {expand_values(inv_r[1]), 0}
+    inv[2] = {expand_values(inv_r[2]), 0}
+    inv[3] = {expand_values(inv_t), 1}
     return
 }
 
-calculate_frustum :: proc(cam: ^Camera_View) {
+calculate_frustum :: proc(cam: ^Camera_Uniforms) -> (flipped: bool) {
     cam.viewproj = cam.projection * cam.view
     cam.inv_viewproj = linalg.inverse(cam.viewproj)
     //calculate frustum planes... Gribb-Hartmann
@@ -211,179 +106,189 @@ calculate_frustum :: proc(cam: ^Camera_View) {
     cam.frustum_planes[4] = rows[2]
     cam.frustum_planes[5] = rows[3] - rows[2]
     //normalize planes
-    cam.planes_to_check = 0
-    for p in cam.frustum_planes {
+    for &p in cam.frustum_planes {
         l := linalg.length(p.xyz)
-        if l < 1e-6 do continue //don't divide by zero
-        cam.frustum_planes[cam.planes_to_check] = p/l
-        cam.planes_to_check += 1
+        if l < 1e-6 {
+            //don't divide by zero, always pass this plane
+            p = {0, 0, 0, 1}
+        } else {
+            p = p/l
+        }
     }
-}
-
-FOV :: 60.0
-calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, rt: ^Render_Target = nil) -> (draw: Camera_Draw) {
-    draw.inv_view = trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1)
-    draw.view = inverse_view(draw.inv_view)
-    fov := cam.range[0]
-    if fov == 0 {
-        fov = linalg.to_radians(f32(FOV))
-    } 
-    draw.viewport = get_viewport_rect(cam, rt)
-    width, height := draw.viewport[2], draw.viewport[3]
-    near := cam.range[1]
-    far := cam.range[2]
-    if near == 0 {
-        near = 0.01
-    }
-    if far == 0 {
-        draw.projection = linalg.matrix4_infinite_perspective(fov, width/height, near)
-    } else {
-        draw.projection = linalg.matrix4_perspective(fov, width/height, near, far)
-    }
-    calculate_frustum(&draw)
-    fog_onset := cam.range[3] if cam.range[3] != 0 else (far - near)/2.0
-    draw.color = cam.color
-    draw.fill = cam.fill
-    draw.layer_mask = cam.layer_mask
-    draw.fog_distance = {fog_onset, far}
-    //wgpu.QueueWriteBuffer(ren.queue, cam.buffer, 0, &draw.uniforms, size_of(Camera_Uniforms))
-    draw.bg_bind_group = cam.bg_bind_group
+    flipped = linalg.determinant(cast(matrix[4,4]f32)cam.view) < 0
     return
 }
 
-Camera_Buffer :: struct {
-    capacity: int,
-    buffer: wgpu.Buffer,
-    bind_group: wgpu.BindGroup,
-    stride: int,
-    count: int,
-}
-
-cam_buffer: Camera_Buffer
-
-realloc_camera_buffer :: proc() {
-    cam_buffer.stride = max(uniform_alignment, int(runtime.align_forward(size_of(Camera_Uniforms), uniform_alignment)))
-    new_cap := cam_buffer.count * cam_buffer.stride
-    if new_cap <= cam_buffer.capacity do return
-    cam_buffer.capacity = new_cap
-    if cam_buffer.buffer != nil do wgpu.BufferRelease(cam_buffer.buffer)
-    cam_buffer.buffer = wgpu.DeviceCreateBuffer(ren.device, &{
-        usage = {.Uniform, .CopyDst},
-        size = u64(cam_buffer.capacity)
-    })
-
-    if cam_buffer.bind_group != nil do wgpu.BindGroupRelease(cam_buffer.bind_group)
-    bindings := []wgpu.BindGroupEntry{
-        {binding = 0, buffer = cam_buffer.buffer, size = u64(cam_buffer.stride)},
-        //{binding = 1, textureView = skyboxes.view},
-        //{binding = 2, sampler = skyboxes_sampler},
+calculate_camera :: proc(cam: Camera, trans: matrix[4,4]f32 = 1, target_resolution: [2]uint = 0) -> (draw: Camera_Uniforms, raster: Camera_Raster) {
+    assert(cam.fov > 0, "Camera must have a non-zero FOV")
+    assert(cam.near > 0, "Camera must have a non-zero near plane")
+    draw.world = trans * linalg.matrix4_from_trs(cam.translation, cam.rotation, 1)
+    draw.view = rigid_inverse(draw.world)
+    if cam.mirrored {
+        xflip: matrix[4,4]f32
+        xflip[0,0] = -1
+        xflip[1,1] = 1
+        xflip[2,2] = 1
+        xflip[3,3] = 1
+        draw.view = xflip * draw.view
     }
-    cam_buffer.bind_group = wgpu.DeviceCreateBindGroup(ren.device, &{
-        layout = camera_layout,
-        entryCount = 1,
-        entries = raw_data(bindings)
-    })
+    raster.viewport = get_viewport_rect(cam, target_resolution)
+    width, height := raster.viewport[2], raster.viewport[3]
+    if cam.far == 0 {
+        draw.projection = linalg.matrix4_infinite_perspective(cam.fov, width/height, cam.near)
+        draw.fog_distance = 0
+    } else {
+        draw.projection = linalg.matrix4_perspective(cam.fov, width/height, cam.near, cam.far)
+        draw.fog_distance[1] = cam.far
+        if cam.fog_onset == 0 {
+            draw.fog_distance[0] = cam.near + 0.75 * (cam.far - cam.near)
+        } else {
+            draw.fog_distance[0] = cam.fog_onset
+        }
+    }
+    raster.near = cam.near
+    raster.far = cam.far
+    raster.flip = calculate_frustum(&draw)
+    raster.fill = cam.fill
+    if cam.background.environment.view != nil {
+        raster.background.environment = cam.background.environment.view
+    } else {
+        raster.background.environment = trans_cubemap.view
+    }
+    if cam.background.image.view != nil {
+        raster.background.image = cam.background.image.view
+    } else {
+        raster.background.image = trans_tex.view
+    }
+    raster.background.filtering = cam.background.filtering
+    draw.color.rgb = linalg.vector3_srgb_to_linear(cam.background.color)
+    draw.color.a = linalg.exp2(cam.exposure)
+    draw.cascade_count = num_directional_cascades(cam.cascades)
+    draw.layer_mask = cam.layer_mask
+    return
 }
 
-write_camera_buffer :: proc(shadow_cams: []Shadow_Camera_Draw, cameras: []Camera_Draw) {
-    cam_buffer.count = len(shadow_cams) + len(cameras)
-    realloc_camera_buffer()
+@(private)
+calculate_shadow_camera_positional :: proc(position, direction, up: [3]f32, fov, near, far: f32, res: uint, layer_mask: Layer_Mask) -> (camera: Camera_Uniforms, raster: Camera_Raster) {
+    camera.view = linalg.matrix4_look_at(position, position+direction, up)
+    t1 := 1/(linalg.tan(fov/2))
+    t2 := near/(far - near) //reverse-z for greater depth precision
+    camera.projection[0, 0] = t1
+    camera.projection[1, 1] = t1
+    camera.projection[2, 2] = t2
+    camera.projection[3, 2] = -1
+    camera.projection[2, 3] = far * t2
+    camera.layer_mask = layer_mask
+    raster.near = near
+    raster.far = far
+    raster.viewport = {0, 0, f32(res), f32(res)}
+    raster.flip = calculate_frustum(&camera)
+    raster.background.environment = trans_cubemap.view
+    raster.background.image = trans_tex.view
+    return
+}
+
+@(private)
+fit_cascades :: proc(camera: ^Camera_Uniforms, near, far: f32) -> (spheres: [4]Cascade_Sphere) {
+    //sx & sy are horizontal & vertical distances to frustum corners
+    sx := 1 / camera.projection[0, 0] //1/tan(fovx/2)
+    sy := 1 / camera.projection[1, 1] //1/tan(fovy/2)
+    //hence k2 is the squared distance (pythagorean) to the frustum corner, per unit of depth
+    k2 := sx*sx + sy*sy //dist = depth*sqrt(k2)
     
-    //stage so we can have one QueueWriteBuffer
-    staging := make([]u8, cam_buffer.count * cam_buffer.stride)
-    defer delete(staging)
+    l := f32(DIRECTIONAL_CASCADE_SPLIT_WEIGHT)
+    n := camera.cascade_count
+    split_near := near
+    for i in 0..<camera.cascade_count {
+        //basic parallel-split cascades
+        t := f32(i + 1) / f32(n)
+        lin_term := near + (far - near) * t
+        log_term := near * linalg.pow(far/near, t)
+        split_far := l * log_term + (1 - l) * lin_term
 
-    for &cam, i in shadow_cams {
-        cam.buffer_index = u32(i)
-        byte_offset := cam.buffer_index * u32(cam_buffer.stride)
-        ptr := cast(^Camera_Uniforms)(raw_data(staging[byte_offset:]))
-        ptr^ = cam.uniforms
+        //radius_far^2 = (split_far - depth)^2 + split_far^2 * k2
+        //radius_near^2 = (depth - split_near)^2 + split_near^2 * k2
+        //near & far radius should be equal, we want sphere center to be equidistant to each axis
+        
+        depth := min((split_far+split_near)*(1 + k2)/2, split_far) //clamp to far plane
+        spheres[i].center = (camera.world * [4]f32{0, 0, -depth, 1}).xyz //depth along camera forward
+        disp_z := split_far - depth
+        d2_xy := split_far * split_far * k2 //(x2-x1)^2 + (y2-y1)^2
+        spheres[i].radius = linalg.sqrt(d2_xy + disp_z * disp_z)
+        camera.cascade_splits[i] = split_far
+        split_near = split_far
     }
-    offset := len(shadow_cams)
-    for &cam, i in cameras {
-        cam.buffer_index = u32(i + offset)
-        byte_offset := cam.buffer_index * u32(cam_buffer.stride)
-        ptr := cast(^Camera_Uniforms)(raw_data(staging[byte_offset:]))
-        ptr^ = cam.uniforms
+    return
+}
+
+@(private)
+calculate_shadow_camera_cascade :: proc(s: Cascade_Sphere, direction: [3]f32, res: uint, layer_mask: Layer_Mask) -> (camera: Camera_Uniforms, raster: Camera_Raster) {
+    dir := linalg.normalize(direction)
+    up := [3]f32{0, 1, 0}
+    if abs(linalg.dot(dir, up)) > 0.99 {
+        up = {0, 0, 1}
     }
 
-    wgpu.QueueWriteBuffer(ren.queue, cam_buffer.buffer, 0, raw_data(staging), uint(len(staging)))
+    texel := 2 * s.radius / DIRECTIONAL_SHADOW_RES
+    world_to_light := linalg.matrix4_look_at(0, dir, up)
+    center_light := (world_to_light * [4]f32{**s.center, 1}).xyz
+    center_light.xy = linalg.floor(center_light.xy / texel) * texel //snap to texels to reduce shimmer
+    center := (rigid_inverse(world_to_light) * [4]f32{**center_light, 1}).xyz
+
+    camera.view = linalg.matrix4_look_at(center, center+dir, up)
+
+    //get near & far bounds
+    d, e := scene_depth(center, dir)
+    near := min(d - e, -s.radius)
+    far := s.radius
+
+    //reverse z ortho
+    camera.projection[0, 0] = 1/s.radius
+    camera.projection[1, 1] = 1/s.radius
+    camera.projection[2, 2] = 1/(far - near)
+    camera.projection[2, 3] = far/(far-near)
+    camera.projection[3, 3] = 1
+    camera.layer_mask = layer_mask
+
+    raster.near = near
+    raster.far = far
+    raster.viewport = {0, 0, f32(res), f32(res)}
+    raster.flip = calculate_frustum(&camera)
+    raster.background.environment = trans_cubemap.view
+    raster.background.image = trans_tex.view
+
+    return
 }
 
-bind_camera_uniforms :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, buffer_index: u32) {
-    offset := buffer_index * u32(cam_buffer.stride)
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, cam_buffer.bind_group, {offset})
-}
-
-bind_camera :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera_Draw) {
-    x, y, w, h := expand_values(cam.viewport)
-    wgpu.RenderPassEncoderSetViewport(render_pass, x, y, w, h, 0, 1)
-    wgpu.RenderPassEncoderSetScissorRect(render_pass, u32(x), u32(y), u32(w), u32(h))
-    bind_camera_uniforms(render_pass, slot, cam.buffer_index)
-}
-
-bind_camera_bg :: proc(render_pass: wgpu.RenderPassEncoder, slot: u32, cam: Camera_Draw) {
-    wgpu.RenderPassEncoderSetBindGroup(render_pass, slot, cam.bg_bind_group)
-}
-
-/*
-@(export)
-delete_camera :: proc(cam: Camera) {
-    wgpu.BufferRelease(cam.buffer)
-    wgpu.BindGroupRelease(cam.bind_group)
-}
-*/
-
-@(export)
-set_viewport :: proc(cam: ^Camera, viewport: [4]f32) {
-    cam.viewport = viewport
-}
-
-get_viewport_rect :: proc(cam: Camera, render_target: ^Render_Target = nil) -> [4]f32 {
+get_viewport_rect :: proc(cam: Camera, target_resolution: [2]uint = 0) -> [4]f32 {
     screen_resolution := screen_resolution
-    if render_target != nil {
-        screen_resolution.x = uint(render_target.output.width)
-        screen_resolution.y = uint(render_target.output.height)
+    if target_resolution != 0 {
+        screen_resolution = target_resolution
     }
-    x, y := cam.viewport.x, cam.viewport.y
-    width, height := get_viewport_size(cam, render_target)
+    x, y, w, h := **cam.viewport
+    if cam.relative {
+    }
     if cam.relative {
         x *= f32(screen_resolution.x)
         y *= f32(screen_resolution.y)
-    }
-    return {max(x, 0), max(y, 0), width, height}
-}
-get_viewport_size :: proc(cam: Camera, render_target: ^Render_Target = nil) -> (width, height: f32) {
-    screen_resolution := screen_resolution
-    if render_target != nil {
-        screen_resolution.x = uint(render_target.output.width)
-        screen_resolution.y = uint(render_target.output.height)
-    }
-    width = cam.viewport[2]
-    height = cam.viewport[3]
-    if cam.relative {
-        width = f32(screen_resolution.x) * width
-        height = f32(screen_resolution.y) * height
+        w *= f32(screen_resolution.x)
+        h *= f32(screen_resolution.y)
     } else {
-        if width == 0 {
-            width = f32(screen_resolution.x)
+        if w == 0 {
+            w = f32(screen_resolution.x)
         }
-        if height == 0 {
-            height = f32(screen_resolution.y)
+        if h == 0 {
+            h = f32(screen_resolution.y)
         }
     }
-    return
+    return {max(x, 0), max(y, 0), w, h}
 }
 
 //returns the z coordinate which the camera should be at to have sprites rendered at z=0 be pixel-perfect
 @(export)
 z_2d :: proc(cam: Camera) -> f32 {
-    width, height := get_viewport_size(cam)
-    fov := cam.range[0]
-    if fov == 0 {
-        fov = linalg.to_radians(f32(FOV))
-    }
-    return height / (2 * linalg.tan(fov * 0.5))
+    height := get_viewport_rect(cam)[3]
+    return height / (2 * linalg.tan(cam.fov * 0.5))
 }
 
 //returns the minimum z-value you can offset sprites so that they will be depth-sorted but not visibly scaled by perspective (within tolerance)
@@ -393,17 +298,14 @@ DEPTH_PADDING :: 2.0 //padding to avoid z-fighting
 @(export)
 z_min_step :: proc(cam: Camera, num_layers: int = MAX_Z_LAYERS) -> f32 {
     d := z_2d(cam)
-    near := 0.01 if cam.range[1] == 0 else cam.range[1]
-    far := 1024 if cam.range[2] == 0 else cam.range[2]
-
     depth_precision :: f32(1 << 24) //number of distinct values in depth buffer
     depth_quant: f32 //minimum epsilon given precision & perspective matrix
-    if far == 0 {
+    if cam.far == 0 {
         //infinite perspective
-        depth_quant = (d*d)/(near*depth_precision)
+        depth_quant = (d*d)/(cam.near*depth_precision)
     } else {
         //finite
-        depth_quant = (d*d*(far - near))/(near*far*depth_precision)
+        depth_quant = (d*d*(cam.far - cam.near))/(cam.near*cam.far*depth_precision)
     }
     depth_epsilon := depth_quant * DEPTH_PADDING
     scale_epsilon := (d * PERSPECTIVE_SCALE_TOLERANCE) / f32(num_layers)
@@ -418,9 +320,8 @@ z_layer :: proc(cam: Camera, layer: int, num_layers: int = MAX_Z_LAYERS) -> f32 
     return f32(layer) * z_min_step(cam, num_layers) 
 }
 
-sphere_in_frustum :: proc(cam: Camera_View, bounding_center: [3]f32, bounding_radius: f32) -> bool {
-    for i in 0..<cam.planes_to_check {
-        p := cam.frustum_planes[i]
+sphere_in_frustum :: proc(cam: Camera_Uniforms, bounding_center: [3]f32, bounding_radius: f32) -> bool {
+    for p in cam.frustum_planes {
         if linalg.dot(p.xyz, bounding_center) + p.w < -bounding_radius {
             return false
         }
@@ -428,9 +329,8 @@ sphere_in_frustum :: proc(cam: Camera_View, bounding_center: [3]f32, bounding_ra
     return true 
 }
 
-bounds_in_frustum :: proc(cam: Camera_View, bounding_center: [3]f32, bounding_axes: [3][3]f32) -> bool {
-    for i in 0..<cam.planes_to_check {
-        p := cam.frustum_planes[i]
+bounds_in_frustum :: proc(cam: Camera_Uniforms, bounding_center: [3]f32, bounding_axes: [3][3]f32) -> bool {
+    for p in cam.frustum_planes {
         n := p.xyz
         //project OBB axes onto plane's normal, then it becomes roughly the same as sphere check
         r := abs(linalg.dot(n, bounding_axes[0])) +

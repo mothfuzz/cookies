@@ -37,7 +37,7 @@ make_font_from_file :: proc(filedata: []byte, font_size: uint, num_chars: uint =
             image[i] = (u32(bitmap[i]) << 24) | 0xffffff
         }
     }
-    font.texture = make_texture_2D(image, {FONT_RES, FONT_RES})
+    font.texture = make_texture(image, FONT_RES)
     font.material = make_material(base_color=font.texture, filtering=false)
     font.height = f32(font_size)
     return
@@ -58,35 +58,46 @@ get_char :: proc(font: Font, c: rune) -> (clip_rect: [4]f32) {
     return
 }
 
+import "core:strings"
+import "core:fmt"
+
 //no accurate way to get width and height, really
 //origin is center of the window, positive y is up, that's all I can say...
 ui_draw_text :: proc(text: string, font: Font, pos: [2]f32 = 0, color: [4]f32 = 1) {
-    x: f32
-    y: f32
-    //render a quad for every rune in txt...
-    for c, i in text {
-        quad: stbtt.aligned_quad
-        stbtt.GetBakedQuad(raw_data(font.baked_chars), FONT_RES, FONT_RES, i32(c), &x, &y, &quad, true)
-        w := quad.x1 - quad.x0
-        h := quad.y1 - quad.y0
-        sx := f32(screen_resolution.x)/2
-        sy := f32(screen_resolution.y)/2
-        fill_rect := [4]f32{
-            (pos.x+quad.x0+w/2)/sx, (pos.y-font.height-quad.y0-h/2)/sy,
-            w/sx, h/sy,
+
+    lines := strings.split_lines(text, context.temp_allocator)
+    y_off: f32
+    for line in lines {
+        //render a quad for every rune in txt...
+        x: f32
+        y: f32
+        for c, i in line {
+            quad: stbtt.aligned_quad
+            stbtt.GetBakedQuad(raw_data(font.baked_chars), FONT_RES, FONT_RES, i32(c), &x, &y, &quad, true)
+            w := quad.x1 - quad.x0
+            h := quad.y1 - quad.y0
+            sx := f32(screen_resolution.x)/2
+            sy := f32(screen_resolution.y)/2
+            fill_rect := [4]f32{
+                (pos.x+quad.x0+w/2)/sx,
+                (pos.y-font.height-quad.y0-h/2 - y_off*font.height)/sy,
+                w/sx,
+                h/sy,
+            }
+            clip_rect := [4]f32{
+                quad.s0,
+                quad.t0,
+                quad.s1 - quad.s0,
+                quad.t1 - quad.t0,
+            }
+            draw_ui(fill_rect, color, font.texture, clip_rect)
         }
-        clip_rect := [4]f32{
-            quad.s0,
-            quad.t0,
-            quad.s1 - quad.s0,
-            quad.t1 - quad.t0,
-        }
-        draw_ui(fill_rect, color, font.texture, clip_rect)
+        y_off += 1
     }
 }
 
 /*lord*/ char_quad: Mesh
-draw_text :: proc(text: string, font: Font, trans: transform.Transform = nil, color: [4]f32 = 1, sprite: bool=true, billboard: bool=false, double_sided: bool=false, unlit: bool=false, layers: Layer_Mask = All_Layers) {
+draw_text :: proc(text: string, font: Font, trans: transform.Transform = nil, color: [4]f32 = 1, pixel_scale: bool=true, billboard: bool=false, double_sided: bool=false, unlit: bool=false, layers: Layer_Mask = All_Layers) {
 
     trans := transform.world(trans)
 
@@ -99,27 +110,34 @@ draw_text :: proc(text: string, font: Font, trans: transform.Transform = nil, co
         }, []u32{2, 1, 0, 3, 2, 0})
     }
 
-    x: f32
-    y: f32
-    for c, i in text {
-        quad: stbtt.aligned_quad
-        stbtt.GetBakedQuad(raw_data(font.baked_chars), FONT_RES, FONT_RES, i32(c), &x, &y, &quad, true)
-        w := quad.x1 - quad.x0
-        h := quad.y1 - quad.y0
-        offset: matrix[4,4]f32 = {
-            1, 0, 0, quad.x0 + w/2,
-            0, 1, 0, -(quad.y0 + h/2),
-            0, 0, 1, 0,
-            0, 0, 0, 1,
+    lines := strings.split_lines(text, context.temp_allocator)
+    y_off: f32
+    for line in lines {
+        x: f32
+        y: f32
+        for c, i in line {
+            quad: stbtt.aligned_quad
+            stbtt.GetBakedQuad(raw_data(font.baked_chars), FONT_RES, FONT_RES, i32(c), &x, &y, &quad, true)
+            w := quad.x1 - quad.x0
+            h := quad.y1 - quad.y0
+            offset: matrix[4,4]f32 = {
+                1, 0, 0, quad.x0 + w/2,
+                0, 1, 0, -(quad.y0 + h/2 + y_off*font.height),
+                0, 0, 1, 0,
+                0, 0, 0, 1,
+            }
+            clip_rect := [4]f32{
+                quad.s0*FONT_RES,
+                quad.t0*FONT_RES,
+                (quad.s1 - quad.s0)*FONT_RES,
+                (quad.t1 - quad.t0)*FONT_RES,
+            }
+            params := Default_Material_Params
+            params.base_color_mul = color
+            params.clip_rect = clip_rect
+            draw_mesh_internal(char_quad, font.material, trans * offset, params, pixel_scale, billboard, double_sided, unlit, nil, layers)
         }
-        clip_rect := [4]f32{
-            quad.s0*FONT_RES,
-            quad.t0*FONT_RES,
-            (quad.s1 - quad.s0)*FONT_RES,
-            (quad.t1 - quad.t0)*FONT_RES,
-        }
-        dynamic_material := Dynamic_Material{base_color_tint = color, pbr_tint=1, emissive_tint=1, clip_rect=clip_rect}
-        draw_mesh_internal(char_quad, font.material, trans * offset, dynamic_material, sprite, billboard, double_sided, unlit, nil, layers)
+        y_off += 1
     }
 
 }
