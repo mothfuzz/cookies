@@ -107,11 +107,11 @@ const INSTANCE_UNLIT: u32 = 2;
 
 struct VSOut {
     @builtin(position) out_position: vec4<f32>,
-    @location(0) position: vec4<f32>, //xyz in world space, w = view space z
-    @location(1)  normal: vec3<f32>,
-    @location(2) tangent: vec4<f32>,
-    @location(3) @interpolate(perspective) texcoord: vec2<f32>,
-    @location(4) color: vec4<f32>,
+    @location(0) @interpolate(perspective, centroid) position: vec4<f32>, //xyz in world space, w = view space z
+    @location(1) @interpolate(perspective, centroid) normal: vec3<f32>,
+    @location(2) @interpolate(perspective, centroid) tangent: vec4<f32>,
+    @location(3) @interpolate(perspective, center) texcoord: vec2<f32>,
+    @location(4) @interpolate(perspective, centroid) color: vec4<f32>,
     @location(5) @interpolate(flat) instance: u32,
 }
 
@@ -330,8 +330,8 @@ fn apply_point_light(in: LightInput, light_index: u32) -> vec3<f32> {
                     let offset_x = right * f32(x) * texelSize;
                     let offset_y = up * f32(y) * texelSize;
                     let offset_dir = normalize(dir_world + offset_x + offset_y);
-                    let visibility = textureSampleCompare(point_light_shadow_depth, shadow_depth_sampler, offset_dir, light_index, depth_ref + bias);
-                    let transmittance = textureSample(point_light_shadow_color, shadow_color_sampler, offset_dir, light_index).rgb;
+                    let visibility = textureSampleCompareLevel(point_light_shadow_depth, shadow_depth_sampler, offset_dir, light_index, depth_ref + bias);
+                    let transmittance = textureSampleLevel(point_light_shadow_color, shadow_color_sampler, offset_dir, light_index, 0).rgb;
                     light_factor += visibility * transmittance;
                 }
             }
@@ -391,8 +391,8 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
             for(var x = -1; x <= 1; x++) {
                 for(var y = -1; y <= 1; y++) {
                     let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                    let visibility = textureSampleCompare(directional_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref);
-                    let transmittance = textureSample(directional_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
+                    let visibility = textureSampleCompareLevel(directional_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref);
+                    let transmittance = textureSampleLevel(directional_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer, 0).rgb;
                     light_factor += visibility * transmittance;
                 }
             }
@@ -447,8 +447,8 @@ fn apply_spot_light(in: LightInput, light_index: u32) -> vec3<f32> {
         for(var x = -1; x <= 1; x++) {
             for(var y = -1; y <= 1; y++) {
                 let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                let visibility = textureSampleCompare(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, light_index, depth_ref);
-                let transmittance = textureSample(spot_light_shadow_color, shadow_color_sampler, shadow_uv + offset, light_index).rgb;
+                let visibility = textureSampleCompareLevel(spot_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, light_index, depth_ref);
+                let transmittance = textureSampleLevel(spot_light_shadow_color, shadow_color_sampler, shadow_uv + offset, light_index, 0).rgb;
                 light_factor += visibility * transmittance;
             }
         }
