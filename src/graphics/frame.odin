@@ -316,6 +316,7 @@ delete_frame :: proc() {
     for _, entry in f.camera_bind_groups {
         wgpu.BindGroupRelease(entry.bind_group)
     }
+    delete(f.camera_bind_groups)
     delete(f.passes)
     delete(f.pass_order)
     delete(f.cam_order)
