@@ -188,6 +188,78 @@ calculate_shadow_camera_positional :: proc(position, direction, up: [3]f32, fov,
     return
 }
 
+@(private)
+fit_cascades :: proc(camera: ^Camera_Uniforms, near, far: f32) -> (spheres: [4]Cascade_Sphere) {
+    //sx & sy are horizontal & vertical distances to frustum corners
+    sx := 1 / camera.projection[0, 0] //1/tan(fovx/2)
+    sy := 1 / camera.projection[1, 1] //1/tan(fovy/2)
+    //hence k2 is the squared distance (pythagorean) to the frustum corner, per unit of depth
+    k2 := sx*sx + sy*sy //dist = depth*sqrt(k2)
+    
+    l := f32(DIRECTIONAL_CASCADE_SPLIT_WEIGHT)
+    n := camera.cascade_count
+    split_near := near
+    for i in 0..<camera.cascade_count {
+        //basic parallel-split cascades
+        t := f32(i + 1) / f32(n)
+        lin_term := near + (far - near) * t
+        log_term := near * linalg.pow(far/near, t)
+        split_far := l * log_term + (1 - l) * lin_term
+
+        //radius_far^2 = (split_far - depth)^2 + split_far^2 * k2
+        //radius_near^2 = (depth - split_near)^2 + split_near^2 * k2
+        //near & far radius should be equal, we want sphere center to be equidistant to each axis
+        
+        depth := min((split_far+split_near)*(1 + k2)/2, split_far) //clamp to far plane
+        spheres[i].center = (camera.world * [4]f32{0, 0, -depth, 1}).xyz //depth along camera forward
+        disp_z := split_far - depth
+        d2_xy := split_far * split_far * k2 //(x2-x1)^2 + (y2-y1)^2
+        spheres[i].radius = linalg.sqrt(d2_xy + disp_z * disp_z)
+        camera.cascade_splits[i] = split_far
+        split_near = split_far
+    }
+    return
+}
+
+@(private)
+calculate_shadow_camera_cascade :: proc(s: Cascade_Sphere, direction: [3]f32, res: uint, layer_mask: Layer_Mask) -> (camera: Camera_Uniforms, raster: Camera_Raster) {
+    dir := linalg.normalize(direction)
+    up := [3]f32{0, 1, 0}
+    if abs(linalg.dot(dir, up)) > 0.99 {
+        up = {0, 0, 1}
+    }
+
+    texel := 2 * s.radius / DIRECTIONAL_SHADOW_RES
+    world_to_light := linalg.matrix4_look_at(0, dir, up)
+    center_light := (world_to_light * [4]f32{**s.center, 1}).xyz
+    center_light.xy = linalg.floor(center_light.xy / texel) * texel //snap to texels to reduce shimmer
+    center := (rigid_inverse(world_to_light) * [4]f32{**center_light, 1}).xyz
+
+    camera.view = linalg.matrix4_look_at(center, center+dir, up)
+
+    //get near & far bounds
+    d, e := scene_depth(center, dir)
+    near := min(d - e, -s.radius)
+    far := s.radius
+
+    //reverse z ortho
+    camera.projection[0, 0] = 1/s.radius
+    camera.projection[1, 1] = 1/s.radius
+    camera.projection[2, 2] = 1/(far - near)
+    camera.projection[2, 3] = far/(far-near)
+    camera.projection[3, 3] = 1
+    camera.layer_mask = layer_mask
+
+    raster.near = near
+    raster.far = far
+    raster.viewport = {0, 0, f32(res), f32(res)}
+    raster.flip = calculate_frustum(&camera)
+    raster.background.environment = trans_cubemap.view
+    raster.background.image = trans_tex.view
+
+    return
+}
+
 get_viewport_rect :: proc(cam: Camera, target_resolution: [2]uint = 0) -> [4]f32 {
     screen_resolution := screen_resolution
     if target_resolution != 0 {

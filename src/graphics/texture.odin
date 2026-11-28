@@ -165,6 +165,7 @@ make_texture :: proc(input: []u32, size: [2]uint, linear: bool = false) -> (tex:
 
 make_texture_array :: proc(input: [][]u32, size: [2]uint, cubemap: bool = false, generate_mips: bool = false) -> (tex: Texture) {
     assert(cubemap == false || len(input) % 6 == 0, "cubemap arrays must have length a multiple of 6")
+    mip_count := mip_count(size) if generate_mips else 1
     tex.image = wgpu.DeviceCreateTexture(ren.device, &{
         usage = {.TextureBinding, .CopyDst},
         dimension = ._2D,
@@ -174,23 +175,38 @@ make_texture_array :: proc(input: [][]u32, size: [2]uint, cubemap: bool = false,
             depthOrArrayLayers = u32(len(input)),
         },
         format = .RGBA8UnormSrgb,
-        mipLevelCount = 1, //for now
+        mipLevelCount = u32(mip_count),
         sampleCount = 1,
     })
     for layer, i in input {
-        wgpu.QueueWriteTexture(ren.queue, &{texture = tex.image, mipLevel = 0, origin = {z = u32(i)}},
-                                raw_data(layer),
-                                len(layer)*size_of(u32),
-                                &{//layout
-                                    bytesPerRow = u32(size.x*size_of(u32)),
-                                    rowsPerImage = u32(size.y),
-                                },
-                                &{//writeSize
-                                    width = u32(size.x),
-                                    height = u32(size.y),
-                                    depthOrArrayLayers=1,
-                                },
-                            )
+        mips: [dynamic][]u32
+        defer delete(mips)
+        if generate_mips {
+            mips = make_mips(layer, size, true)
+            assert(len(mips) == mip_count, "Mip sizes must agree.")
+        } else {
+            append(&mips, layer)
+        }
+        mip_size := size
+        for mip, m in mips {
+            if mip_size.x == 0 || mip_size.y == 0 {
+                break
+            }
+            wgpu.QueueWriteTexture(ren.queue, &{texture = tex.image, mipLevel = u32(m), origin = {z = u32(i)}},
+                                    raw_data(mip),
+                                    len(mip)*size_of(u32),
+                                    &{//layout
+                                        bytesPerRow = u32(mip_size.x*size_of(u32)),
+                                        rowsPerImage = u32(mip_size.y),
+                                    },
+                                    &{//writeSize
+                                        width = u32(mip_size.x),
+                                        height = u32(mip_size.y),
+                                        depthOrArrayLayers=1,
+                                    },
+                                )
+            mip_size /= 2
+        }
         
     }
     dimension := wgpu.TextureViewDimension._2DArray
@@ -204,7 +220,7 @@ make_texture_array :: proc(input: [][]u32, size: [2]uint, cubemap: bool = false,
     tex.view = wgpu.TextureCreateView(tex.image, &{
         dimension = dimension,
         arrayLayerCount = u32(len(input)),
-        mipLevelCount = 1, //for now
+        mipLevelCount = u32(mip_count)
     })
     tex.width = f32(size.x)
     tex.height = f32(size.y)
@@ -287,12 +303,12 @@ cubemap_directions :: proc() -> (directions: [6][2][3]f32) {
     }
 }
 
-make_cubemap :: proc(px, nx, py, ny, pz, nz: []u32, size: [2]uint, generate_mips: bool = false) -> (tex: Texture) {
+make_cubemap :: proc(px, nx, py, ny, pz, nz: []u32, size: [2]uint, generate_mips: bool = true) -> (tex: Texture) {
     imgs := [6][]u32{px, nx, py, ny, pz, nz}
     return make_texture_array(imgs[:], size, true, generate_mips)
 }
 
-make_cubemap_from_images :: proc(px, nx, py, ny, pz, nz: []byte, generate_mips: bool = false) -> (tex: Texture) {
+make_cubemap_from_images :: proc(px, nx, py, ny, pz, nz: []byte, generate_mips: bool = true) -> (tex: Texture) {
     imgs := [6][]byte{px, nx, py, ny, pz, nz}
     return make_texture_array_from_images(imgs[:], true, generate_mips)
 }

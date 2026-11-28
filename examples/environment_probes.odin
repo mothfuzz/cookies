@@ -29,6 +29,16 @@ ref: graphics.Reflection_Probe
 
 skybox: graphics.Texture
 
+/* TODO
+switch background types when the user presses a key:
+P = use the probe
+E = use the environment
+C = use the background color
+
+in the color case, have a sky-blue 1x1 background image for the sky 
+and set background.color to actual radiance (much lower).
+ */
+
 init :: proc() {
     window.set_size(800, 800)
 
@@ -82,7 +92,7 @@ init :: proc() {
     teapot = graphics.make_scene_from_file("teapot.gltf", #load("../resources/teapot.gltf"))
     fmt.println(teapot.models[0].primitives)
     teapot.models[0].primitives[0].params.pbr_mul = {1, 0.2, 1}
-    teapot.models[0].primitives[0].params.pbr_add = {0, 0, 1}
+    teapot.models[0].primitives[0].params.pbr_add = {0, 0, 0}
     transform.init_node(teapot.root, {translation={0, 0.2, 0}, scale=0.01})
 
     light = graphics.make_directional_light({0, -0.6, 0.4}, {0.4, 0.5, 1.0, 4})

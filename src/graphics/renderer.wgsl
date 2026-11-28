@@ -362,39 +362,42 @@ fn apply_directional_light(in: LightInput, light_index: u32) -> vec3<f32> {
     var light_factor = vec3<f32>(1.0); //transmittance + opaque shadowing
     if(light_index < light_counts.directional_shadows) {
         let depth = -in.position.w;
-        var cascade: u32 = 0;
+        var cascade = camera.cascade_count;
         for(var i: u32 = 0; i < camera.cascade_count; i++) {
             if(depth < camera.cascade_splits[i]) {
                 cascade = i;
                 break;
             }
         }
-        let world_to_shadow = shadow_transforms[light_counts.spot_shadows + light_index + cascade];
-        //get rough estimate of world-space texel density
-        let ndc_per_world = length(vec3(world_to_shadow[0][0], world_to_shadow[1][0], world_to_shadow[2][0]));
-        let texel_ndc = 2.0 / f32(textureDimensions(directional_light_shadow_depth).x);
-        let texel_world = texel_ndc / ndc_per_world;
+        if(cascade < camera.cascade_count) {
+            let layer = camera.cascade_offset + light_index * camera.cascade_count + cascade;
+            let world_to_shadow = shadow_transforms[light_counts.spot_shadows + layer];
+            //get rough estimate of world-space texel density
+            let ndc_per_world = length(vec3(world_to_shadow[0][0], world_to_shadow[1][0], world_to_shadow[2][0]));
+            let texel_ndc = 2.0 / f32(textureDimensions(directional_light_shadow_depth).x);
+            let texel_world = texel_ndc / ndc_per_world;
 
-        //normal offset bias based on texel density
-        let normal_bias = 2.0 * texel_world;
-        let sample_position = vec4(in.position.xyz + in.surface_normal * normal_bias, 1.0);
+            //normal offset bias based on texel density
+            let normal_bias = 2.0 * texel_world;
+            let sample_position = vec4(in.position.xyz + in.surface_normal * normal_bias, 1.0);
 
-        light_factor = vec3<f32>(0.0);
-        let frag_in_light = world_to_shadow * sample_position;
-        let ndc = frag_in_light.xyz / frag_in_light.w;
-        var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
-        shadow_uv.y = 1.0 - shadow_uv.y;
-        let depth_ref = ndc.z;
-        let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(directional_light_shadow_depth));
-        for(var x = -1; x <= 1; x++) {
-            for(var y = -1; y <= 1; y++) {
-                let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
-                let visibility = textureSampleCompare(directional_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, light_index + cascade, depth_ref);
-                let transmittance = textureSample(directional_light_shadow_color, shadow_color_sampler, shadow_uv + offset, light_index + cascade).rgb;
-                light_factor += visibility * transmittance;
+            light_factor = vec3<f32>(0.0);
+            let frag_in_light = world_to_shadow * sample_position;
+            let ndc = frag_in_light.xyz / frag_in_light.w;
+            var shadow_uv = ndc.xy * 0.5 + vec2<f32>(0.5);
+            shadow_uv.y = 1.0 - shadow_uv.y;
+            let depth_ref = ndc.z;
+            let texel_size = vec2<f32>(1.0) / vec2<f32>(textureDimensions(directional_light_shadow_depth));
+            for(var x = -1; x <= 1; x++) {
+                for(var y = -1; y <= 1; y++) {
+                    let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
+                    let visibility = textureSampleCompare(directional_light_shadow_depth, shadow_depth_sampler, shadow_uv + offset, layer, depth_ref);
+                    let transmittance = textureSample(directional_light_shadow_color, shadow_color_sampler, shadow_uv + offset, layer).rgb;
+                    light_factor += visibility * transmittance;
+                }
             }
+            light_factor /= 9.0;
         }
-        light_factor /= 9.0;
     }
     if(all(light_factor > vec3<f32>(0))) {
         let radiance = d.color.rgb * d.color.a * light_factor;
@@ -567,7 +570,7 @@ fn apply_light_environment(in: VSOut, in_color: vec4<f32>, front_facing: bool) -
                     if(edge <= -probe.edge_blend) {
                         continue;
                     }
-                    var weight = saturate(1.0 + edge / probe.edge_blend);
+                    weight = saturate(1.0 + edge / probe.edge_blend);
                 }
 
                 if(weight > 0) {

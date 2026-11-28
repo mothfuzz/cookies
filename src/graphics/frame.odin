@@ -361,7 +361,24 @@ sort_batches :: proc() {
         batch.first_instance = running_total
         running_total += batch.instance_count
     }
+}
 
+@(private)
+scene_depth :: proc(position, forward: [3]f32) -> (d, e: f32) {
+    scene_center := (f.scene_extents[0] + f.scene_extents[1])/2
+    scene_half := (f.scene_extents[1] - f.scene_extents[0])/2
+    d = linalg.dot(scene_center - position, forward)
+    e = linalg.dot(linalg.abs(forward), scene_half)
+    return
+}
+
+@(private)
+clamp_near_far :: proc(position, forward: [3]f32, camera_near, camera_far: f32) -> (near, far: f32) {
+    d, e := scene_depth(position, forward)
+    near = max(d - e, camera_near)
+    far = max(d + e, camera_near+1e-6) //clamp far to near plane+offset
+    if camera_far != 0 do far = min(far, camera_far) //camera far or scene far, whichever is smaller
+    return
 }
 
 draws_buffer := Growable_Buffer{usage={.Storage, .Indirect, .CopyDst}}
@@ -522,16 +539,25 @@ push_camera :: proc(pass: int, camera: Camera_Uniforms, raster: Camera_Raster) {
 @(private)
 build_shadow_passes :: proc() {
     //needs to happen after submission bc cascades depend on main camera count + per-camera cascade_count
-    for i in 0..<f.spot_lights.num_shadowed {
-        sl := f.spot_lights.entries[i]
-        world_up := [3]f32{0, 1, 0}
-        if linalg.abs(linalg.dot(sl.direction, world_up)) >= 0.9 {
-            world_up = {0, 0, 1}
+    main_camera_count := len(f.cameras) //only main views get cascades
+    for cam in 0..<main_camera_count {
+        main_camera := &f.cameras[cam]
+        main_raster := &f.rasters[cam]
+        if main_camera.cascade_count == 0 do continue
+        cascade_count := main_camera.cascade_count //each iteration pushes a new camera
+        main_camera.cascade_offset = u32(len(f.cascade_shadow_transforms))
+        near, far := clamp_near_far(main_camera.world[3].xyz, linalg.normalize(-main_camera.world[2].xyz), main_raster.near, main_raster.far)
+        spheres := fit_cascades(main_camera, near, far)
+        for i in 0..<f.directional_lights.num_shadowed {
+            dl := f.directional_lights.entries[i]
+            for c in 0..<cascade_count {
+                layer := len(f.cascade_shadow_transforms)
+                camera, raster := calculate_shadow_camera_cascade(spheres[c], dl.direction.xyz, DIRECTIONAL_SHADOW_RES, dl.layer_mask)
+                pass := push_pass(.Shadow, Shadow_Pass{}, Shadow_Source{.Directional, layer})
+                push_camera(pass, camera, raster)
+                append(&f.cascade_shadow_transforms, camera.viewproj)
+            }
         }
-        camera, raster := calculate_shadow_camera_positional(sl.position, sl.direction, world_up, linalg.acos(sl.outer_angle) * 2, 0.1, sl.range, SPOT_SHADOW_RES, sl.layer_mask)
-        pass := push_pass(.Shadow, Shadow_Pass{}, Shadow_Source{.Spot, i})
-        push_camera(pass, camera, raster)
-        append(&f.spot_shadow_transforms, camera.viewproj)
     }
     for i in 0..<f.point_lights.num_shadowed {
         pl := f.point_lights.entries[i]
@@ -541,6 +567,17 @@ build_shadow_passes :: proc() {
             pass := push_pass(.Shadow, Shadow_Pass{}, Shadow_Source{.Point, i*6+face})
             push_camera(pass, camera, raster)
         }
+    }
+    for i in 0..<f.spot_lights.num_shadowed {
+        sl := f.spot_lights.entries[i]
+        world_up := [3]f32{0, 1, 0}
+        if linalg.abs(linalg.dot(sl.direction, world_up)) > 0.99 {
+            world_up = {0, 0, 1}
+        }
+        camera, raster := calculate_shadow_camera_positional(sl.position, sl.direction, world_up, linalg.acos(sl.outer_angle) * 2, 0.1, sl.range, SPOT_SHADOW_RES, sl.layer_mask)
+        pass := push_pass(.Shadow, Shadow_Pass{}, Shadow_Source{.Spot, i})
+        push_camera(pass, camera, raster)
+        append(&f.spot_shadow_transforms, camera.viewproj)
     }
 }
 
@@ -688,6 +725,11 @@ resolve_passes :: proc(swapchain: wgpu.TextureView) {
 }
 
 @(private)
+scene_depth_range :: proc(camera: Camera_Uniforms, raster: Camera_Raster) -> (near, far: f32) {
+    return
+}
+
+@(private)
 //bounds of c/d covered by a sphere
 //d - r must be >0
 tangent_bounds :: proc(c, d, r: f32) -> (lo, hi: f32) {
@@ -764,15 +806,9 @@ bin_lights :: proc() {
         raster := &f.rasters[cam]
         if camera.grid_size == 0 do continue
 
-        //near/far from scene_extents
-        scene_center := (f.scene_extents[0] + f.scene_extents[1])/2
-        scene_half := (f.scene_extents[1] - f.scene_extents[0])/2
-        fwd := linalg.normalize(-camera.world[2].xyz)
-        cam_pos := camera.world[3].xyz
-        far := linalg.dot(scene_center - cam_pos, fwd) + linalg.dot(linalg.abs(fwd), scene_half)
-        far = max(far, raster.near+1e-6) //clamp to near plane
-        if raster.far != 0 do far = min(far, raster.far) //camera far or scene far, whichever is smaller
-        near := raster.near
+        //get near & far bounds
+        near, far := clamp_near_far(camera.world[3].xyz, linalg.normalize(-camera.world[2].xyz), raster.near, raster.far)
+
         //screen-space xy-scaling
         camera.xy_scale = ([2]f32)(camera.grid_size.xy)/raster.viewport.zw
         camera.xy_bias = -raster.viewport.xy * camera.xy_scale

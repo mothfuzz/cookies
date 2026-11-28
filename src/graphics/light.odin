@@ -51,6 +51,11 @@ num_directional_cascades :: proc(d: Directional_Cascades) -> (cascade_count: u32
     return
 }
 
+Cascade_Sphere :: struct {
+    center: [3]f32,
+    radius: f32,
+}
+
 Spot_Light :: struct {
     position: [3]f32,
     direction: [3]f32,

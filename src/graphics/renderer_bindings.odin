@@ -371,7 +371,7 @@ write_light_buffers :: proc(command_encoder: wgpu.CommandEncoder) {
         ),
         directional_lights = u32(len(f.directional_lights.entries)), //count needed since directionals aren't clustered
         point_shadows = u32(f.point_lights.num_shadowed),
-        directional_shadows = 0,//u32(f.directional_lights.num_shadowed),
+        directional_shadows = u32(f.directional_lights.num_shadowed),
         spot_shadows = u32(f.spot_lights.num_shadowed),
         visualize_clusters = 1 if visualize_clusters else 0,
     }
