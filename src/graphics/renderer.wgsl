@@ -108,7 +108,7 @@ const INSTANCE_UNLIT: u32 = 2;
 struct VSOut {
     @builtin(position) out_position: vec4<f32>,
     @location(0) position: vec4<f32>, //xyz in world space, w = view space z
-    @location(1) normal: vec3<f32>,
+    @location(1)  normal: vec3<f32>,
     @location(2) tangent: vec4<f32>,
     @location(3) @interpolate(perspective) texcoord: vec2<f32>,
     @location(4) color: vec4<f32>,
@@ -633,10 +633,11 @@ fn apply_fog(in_position: vec4<f32>, in_color: vec4<f32>) -> vec4<f32> {
 fn solid_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     let instance = instances[in.instance];
     let base_color = textureSample(base_color, smp, in.texcoord) * instance.base_color_mul * in.color + instance.base_color_add;
-    var final_color = base_color;
-    if final_color.a < 0.99 {
+    if(base_color.a < 0.99) {
         discard;
     }
+    var final_color = base_color;
+    //final_color = vec4<f32>(1, 0, 0, 1);
     if((instance.flags & INSTANCE_UNLIT) == 0) {
         final_color = apply_light_environment(in, final_color, front_facing);
         let emissive_color = textureSample(emissive, smp, in.texcoord).rgb * instance.emissive_mul + instance.emissive_add;
@@ -644,7 +645,7 @@ fn solid_main(in: VSOut, @builtin(front_facing) front_facing: bool) -> @location
     }
     final_color = apply_fog(in.position, final_color);
 
-    return final_color * camera.color.a;
+    return vec4<f32>(final_color.rgb * camera.color.a, final_color.a);
 }
 
 struct TransOut {
